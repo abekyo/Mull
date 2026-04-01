@@ -16,16 +16,18 @@ struct OnboardingView: View {
     @State private var step: OnboardingStep = .welcome
     @State private var permissionCheckTimer: Timer?
     @State private var showHowTo = false
-    @State private var liveEventCount = 0
-    @State private var liveTimer: Timer?
     @State private var showCopiedConfirmation = false
 
     enum OnboardingStep: Int, CaseIterable {
         case welcome = 0
         case permissions = 1
-        case liveProof = 2
+        case coldRead = 2    // "Here's what I already know about you"
         case tryIt = 3
     }
+
+    @State private var coldReading: ColdReading?
+    @State private var revealedFactCount = 0
+    @State private var factRevealTimer: Timer?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,8 +47,8 @@ struct OnboardingView: View {
                 welcomeStep
             case .permissions:
                 permissionsStep
-            case .liveProof:
-                liveProofStep
+            case .coldRead:
+                coldReadStep
             case .tryIt:
                 tryItStep
             }
@@ -56,7 +58,7 @@ struct OnboardingView: View {
         .interactiveDismissDisabled()
         .onDisappear {
             permissionCheckTimer?.invalidate()
-            liveTimer?.invalidate()
+            factRevealTimer?.invalidate()
         }
     }
 
@@ -98,7 +100,7 @@ struct OnboardingView: View {
             Button {
                 appState.permissions.checkAll()
                 if appState.permissions.inputMonitoringGranted && appState.permissions.accessibilityGranted {
-                    withAnimation { step = .liveProof }
+                    withAnimation { step = .coldRead }
                     startRecordingAndProof()
                 } else {
                     withAnimation { step = .permissions }
@@ -178,7 +180,7 @@ struct OnboardingView: View {
             Spacer()
 
             Button("Skip — clipboard still works") {
-                withAnimation { step = .liveProof }
+                withAnimation { step = .coldRead }
                 startRecordingAndProof()
             }
             .font(DS.captionFont)
@@ -189,50 +191,50 @@ struct OnboardingView: View {
         .onAppear { startPermissionPolling() }
     }
 
-    // MARK: - Step 3: Live Proof (the magic moment)
+    // MARK: - Step 3: Cold Read ("how do you know that?")
 
-    private var liveProofStep: some View {
-        VStack(spacing: DS.xl) {
+    private var coldReadStep: some View {
+        VStack(spacing: DS.lg) {
             Spacer()
 
-            // Live counter — numbers going up
-            VStack(spacing: DS.sm) {
-                Text("\(liveEventCount)")
-                    .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.accentColor)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+            Text("Here's what I already know")
+                .font(.system(size: 18, weight: .semibold))
 
-                Text("moments captured")
-                    .font(DS.bodyFont)
-                    .foregroundStyle(.secondary)
+            // Facts revealed one by one, like a fortune teller
+            VStack(alignment: .leading, spacing: DS.md) {
+                if let reading = coldReading {
+                    ForEach(Array(reading.facts.prefix(revealedFactCount).enumerated()), id: \.offset) { _, fact in
+                        HStack(alignment: .top, spacing: DS.md) {
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.top, 3)
+                            Text(fact)
+                                .font(DS.bodyFont)
+                                .foregroundStyle(.primary)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
             }
+            .padding(.horizontal, 40)
+            .frame(minHeight: 200, alignment: .top)
 
-            // Pulse
-            ZStack {
-                Circle()
-                    .fill(DS.recording.opacity(0.1))
-                    .frame(width: 40, height: 40)
-                Circle()
-                    .fill(DS.recording.opacity(0.2))
-                    .frame(width: 24, height: 24)
-                Circle()
-                    .fill(DS.recording)
-                    .frame(width: 10, height: 10)
+            if revealedFactCount >= (coldReading?.facts.count ?? 0) {
+                Text("All of this without recording a single keystroke.\nImagine what Whatly knows after a full day.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .transition(.opacity)
             }
-
-            Text("Whatly is recording your activity right now.\nKeep working normally — switch apps, type, copy text.")
-                .font(DS.bodyFont)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
 
             Spacer()
 
             Button {
+                factRevealTimer?.invalidate()
                 withAnimation { step = .tryIt }
             } label: {
-                Text("Next: Try it out")
+                Text("Continue")
                     .font(.system(size: 14, weight: .medium))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -241,8 +243,28 @@ struct OnboardingView: View {
             .tint(Color.accentColor)
             .padding(.horizontal, 40)
             .padding(.bottom, DS.xl)
-            .disabled(liveEventCount < 3)
-            .opacity(liveEventCount >= 3 ? 1 : 0.5)
+            .opacity(revealedFactCount >= 2 ? 1 : 0.3)
+            .disabled(revealedFactCount < 2)
+        }
+        .onAppear { startColdRead() }
+    }
+
+    private func startColdRead() {
+        // Gather everything knowable right now
+        coldReading = ColdReadService.read()
+        revealedFactCount = 0
+
+        // Reveal facts one by one, 1.2 seconds apart — like a fortune teller
+        var index = 0
+        factRevealTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { _ in
+            guard let reading = coldReading, index < reading.facts.count else {
+                factRevealTimer?.invalidate()
+                return
+            }
+            withAnimation(.spring(duration: 0.4)) {
+                index += 1
+                revealedFactCount = index
+            }
         }
     }
 
@@ -393,7 +415,7 @@ struct OnboardingView: View {
                     permissionCheckTimer?.invalidate()
                     // Auto-advance after 1 second
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        withAnimation(.spring(duration: 0.3)) { step = .liveProof }
+                        withAnimation(.spring(duration: 0.3)) { step = .coldRead }
                         startRecordingAndProof()
                     }
                 }
@@ -420,7 +442,7 @@ struct OnboardingView: View {
     }
 
     private func finishOnboarding() {
-        liveTimer?.invalidate()
+        factRevealTimer?.invalidate()
         permissionCheckTimer?.invalidate()
         isPresented = false
         (NSApp.delegate as? AppDelegate)?.closeOnboarding()
