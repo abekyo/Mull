@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		079C654ADA7CA274C291FD6F /* FullWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9316E203B2E0226D3413E6A6 /* FullWindowView.swift */; };
 		08755C5C741316E76D077E52 /* RecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C2E27315622F5378BC1B90 /* RecordingService.swift */; };
+		0E0277418219B9890FECC504 /* TimeBlockEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A1A4A2C0B5BBCBB1826D6A /* TimeBlockEngine.swift */; };
 		1429FD2D64740CB7D2D05666 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9435B446CEA02AB71591F629 /* MCPServer.swift */; };
 		33C50DD5353C7CBD079CDB68 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9435B446CEA02AB71591F629 /* MCPServer.swift */; };
 		35FEFDC0378051A9549301EB /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F65E66C82AA9ADCD2BB9940 /* DesignTokens.swift */; };
@@ -75,6 +76,7 @@
 		CBBAAF1E805104C572763E27 /* MenuBarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanel.swift; sourceTree = "<group>"; };
 		DDA3EA25D7F1EE0A32F63F41 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DFF6098E4D8A8224B0260FB0 /* PastSummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastSummaryCard.swift; sourceTree = "<group>"; };
+		E7A1A4A2C0B5BBCBB1826D6A /* TimeBlockEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeBlockEngine.swift; sourceTree = "<group>"; };
 		EC44A43E57DE61F5A4DB68FB /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		EEACE77826C232B268C2E327 /* Dream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dream.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -177,6 +179,7 @@
 				9435B446CEA02AB71591F629 /* MCPServer.swift */,
 				24809B7EDC35B28FB825718E /* PermissionService.swift */,
 				99C2E27315622F5378BC1B90 /* RecordingService.swift */,
+				E7A1A4A2C0B5BBCBB1826D6A /* TimeBlockEngine.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -346,6 +349,7 @@
 				5204F932F1DC2F41251BE46B /* SearchBar.swift in Sources */,
 				F15E29DA34485230B47C1A13 /* SettingsView.swift in Sources */,
 				4A979E895E773C57F011ED9A /* SummaryContent.swift in Sources */,
+				0E0277418219B9890FECC504 /* TimeBlockEngine.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

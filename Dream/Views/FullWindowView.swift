@@ -860,6 +860,9 @@ struct TimelineTab: View {
         .frame(maxWidth: .infinity)
         .padding(.bottom, DS.sm)
 
+        // Calendar-style time blocks
+        timeBlocksView(for: selectedDate)
+
         if let summary = appState.todaySummary {
             // Dream summary
             VStack(alignment: .leading, spacing: DS.md) {
@@ -939,6 +942,9 @@ struct TimelineTab: View {
         .frame(maxWidth: .infinity)
         .padding(.bottom, DS.sm)
 
+        // Calendar-style time blocks
+        timeBlocksView(for: selectedDate)
+
         if let summary {
             VStack(alignment: .leading, spacing: DS.md) {
                 HStack {
@@ -972,6 +978,88 @@ struct TimelineTab: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 40)
         }
+    }
+
+    // MARK: - Time Blocks (Calendar-style)
+
+    @ViewBuilder
+    private func timeBlocksView(for date: Date) -> some View {
+        let engine = TimeBlockEngine(database: appState.database)
+        let blocks = engine.generateBlocks(for: date)
+
+        if !blocks.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("ACTIVITY TIMELINE")
+                        .sectionLabel()
+                    Spacer()
+                    Text("\(blocks.count) blocks · \(totalDuration(blocks))")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.bottom, DS.sm)
+
+                // Time blocks
+                ForEach(blocks) { block in
+                    HStack(alignment: .top, spacing: DS.md) {
+                        // Time column
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text(block.startFormatted)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Text(block.durationFormatted)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.quaternary)
+                        }
+                        .frame(width: 48, alignment: .trailing)
+
+                        // Color bar
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(block.color)
+                            .frame(width: 3)
+                            .frame(minHeight: 32)
+
+                        // Content
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: DS.sm) {
+                                Text(block.app)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.primary)
+
+                                if block.isMultiApp {
+                                    Text("+ others")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                }
+
+                                Spacer()
+
+                                Text("\(block.eventCount) events")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.quaternary)
+                            }
+
+                            if !block.label.isEmpty && block.label != block.app {
+                                Text(block.label)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                    .padding(.vertical, DS.xs)
+                }
+            }
+            .dreamCard()
+        }
+    }
+
+    private func totalDuration(_ blocks: [TimeBlock]) -> String {
+        let total = blocks.reduce(0.0) { $0 + $1.duration }
+        let hours = Int(total / 3600)
+        let minutes = Int(total.truncatingRemainder(dividingBy: 3600) / 60)
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
     }
 
     // MARK: - Recent Events Preview
