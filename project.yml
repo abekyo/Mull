@@ -1,0 +1,48 @@
+name: Dream
+options:
+  bundleIdPrefix: com.dream
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: "6.24.0"
+
+targets:
+  Dream:
+    type: application
+    platform: macOS
+    sources:
+      - Dream
+    resources:
+      - Dream/Resources
+    dependencies:
+      - package: GRDB
+    info:
+      path: Dream/Resources/Info.plist
+      properties:
+        LSUIElement: true
+        NSAccessibilityUsageDescription: "Dream uses Accessibility to read on-screen text and record your activity for daily summaries."
+        NSMicrophoneUsageDescription: "Dream can optionally record audio for meeting transcription."
+    entitlements:
+      path: Dream/Resources/Dream.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.automation.apple-events: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.bookmarks.app-scope: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dream.app
+        PRODUCT_NAME: Dream
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        ENABLE_HARDENED_RUNTIME: false
+        GENERATE_INFOPLIST_FILE: true
