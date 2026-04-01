@@ -267,8 +267,11 @@ struct AIExportSheet: View {
         if !keystrokeEvents.isEmpty {
             lines.append("Keyboard input (\(keystrokeEvents.count) entries, raw with IME intermediate):")
             for event in keystrokeEvents {
-                guard let text = event.textContent, !text.isEmpty else { continue }
-                let clean = String(text.prefix(500)).replacingOccurrences(of: "\n", with: "\\n")
+                guard let text = event.textContent else { continue }
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmed.count >= 3 else { continue }
+                guard !trimmed.allSatisfy({ $0.isPunctuation || $0.isWhitespace || $0.isSymbol }) else { continue }
+                let clean = String(trimmed.prefix(500)).replacingOccurrences(of: "\n", with: "\\n")
                 let time = formatTime(event.timestamp)
                 lines.append("- \(time) [\(event.appName ?? "")] \(clean)")
             }

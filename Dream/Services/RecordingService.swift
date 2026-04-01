@@ -381,9 +381,19 @@ final class RecordingService {
         return excludedBundleIDs.contains(bundleID)
     }
 
+    private static let trivialChars = CharacterSet.whitespacesAndNewlines
+        .union(CharacterSet.punctuationCharacters)
+        .union(CharacterSet(charactersIn: "/-_.~`"))
+
     private func recordEvent(type: RecordingEvent.EventType, text: String) {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
+
+        // Skip trivial content: only punctuation, whitespace, or single characters
+        if type == .keystroke {
+            let stripped = cleaned.unicodeScalars.filter { !Self.trivialChars.contains($0) }
+            guard stripped.count > 0 else { return }
+        }
 
         print("[Dream] Recording event: \(type.rawValue) — \(cleaned.prefix(60))")
 

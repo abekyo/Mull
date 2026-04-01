@@ -197,9 +197,12 @@ enum LiveContextGenerator {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
             for event in keystrokeEvents.suffix(50) {
-                guard let text = event.textContent, !text.isEmpty else { continue }
+                guard let text = event.textContent else { continue }
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmed.count >= 3 else { continue } // Skip 1-2 char fragments
+                guard !trimmed.allSatisfy({ $0.isPunctuation || $0.isWhitespace || $0.isSymbol }) else { continue }
                 let time = formatter.string(from: event.timestamp)
-                let clean = String(text.prefix(300)).replacingOccurrences(of: "\n", with: "\\n")
+                let clean = String(trimmed.prefix(300)).replacingOccurrences(of: "\n", with: "\\n")
                 parts.append("- \(time) [\(event.appName ?? "")] \(clean)")
             }
         }
@@ -261,24 +264,47 @@ enum LiveContextGenerator {
     }
 
     /// Remove incremental typing sequences, keep only final version.
-    /// Scans forward: if the next item starts with the current (or vice versa), skip current.
-    /// Also handles non-adjacent duplicates by checking all future items within a window.
+    ///
+    /// Handles both:
+    ///   - Prefix chains: "abc" → "abcd" → "abcde" → keep "abcde"
+    ///   - Similarity: "文字を売っても何も何も" vs "文字を売っても何も" → keep longer
+    ///
+    /// Uses a wide window and substring check (not just prefix).
     private static func compress(_ items: [String]) -> [String] {
         guard !items.isEmpty else { return [] }
         var result: [String] = []
-        let window = min(items.count, 10) // Look ahead up to 10 items
 
         outer: for i in 0..<items.count {
             let current = items[i]
-            // Check if any future item within window is an extension of current
-            for j in (i + 1)..<min(i + window, items.count) {
+            guard current.count > 3 else { continue } // Skip very short items
+
+            // Check all future items: if any is a longer/better version, skip current
+            for j in (i + 1)..<items.count {
                 let future = items[j]
+
+                // Future starts with current → current is typing-in-progress
                 if future.hasPrefix(current) && future.count > current.count {
-                    continue outer // Current is a prefix of a future item → skip
+                    continue outer
+                }
+
+                // Significant overlap (>60% of shorter string matches)
+                let shorter = min(current.count, future.count)
+                let shared = commonPrefixLength(current, future)
+                if shared > 0 && Double(shared) / Double(shorter) > 0.6 && future.count >= current.count {
+                    continue outer
                 }
             }
             result.append(current)
         }
         return result
+    }
+
+    /// Count how many characters two strings share from the start.
+    private static func commonPrefixLength(_ a: String, _ b: String) -> Int {
+        var count = 0
+        for (ca, cb) in zip(a, b) {
+            if ca == cb { count += 1 } else { break }
+        }
+        return count
     }
 }

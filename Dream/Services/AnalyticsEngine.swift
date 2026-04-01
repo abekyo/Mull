@@ -77,14 +77,23 @@ final class AnalyticsEngine {
             }
         }
 
-        // Filter noise phrases (dates, screenshots, file paths)
-        let noisePatterns = ["screenshot", "2024", "2025", "2026", "2027", "at am", "at pm",
-                             "png", "jpg", "jpeg", "dream is", "events captured"]
+        // Filter noise phrases
+        let noisePatterns = ["screenshot", "2024", "2025", "2026", "2027",
+                             "at am", "at pm", "png", "jpg", "jpeg",
+                             "dream is", "events captured",
+                             "cfbundle", "info.plist"]
 
         return phraseCounts
             .filter { $0.value >= 3 }
             .filter { phrase in
-                !noisePatterns.contains { phrase.key.contains($0) }
+                let words = phrase.key.components(separatedBy: " ")
+                // Skip if ANY word in the phrase is a pure number
+                if words.contains(where: { $0.allSatisfy(\.isNumber) }) { return false }
+                // Skip if phrase contains noise pattern
+                if noisePatterns.contains(where: { phrase.key.contains($0) }) { return false }
+                // Skip if all words are < 3 chars (e.g. "at am")
+                if words.allSatisfy({ $0.count < 3 }) { return false }
+                return true
             }
             .sorted { $0.value > $1.value }
             .prefix(limit)
@@ -320,6 +329,13 @@ final class AnalyticsEngine {
         "developer", "xcode", "deriveddata", "build", "products",
         "debug", "release", "contents", "macos", "resources",
         "about", "auto", "updated",
+        // Xcode noise
+        "cfbundleshortversionstring", "cfbundleversion", "cfbundlename",
+        "cfbundleidentifier", "infoplist", "plist",
+        "thread", "queue", "serial", "main",
+        "validation", "failed", "invalid", "error",
+        // URL noise
+        "https", "http", "www", "com", "app", "vercel",
     ]
 }
 

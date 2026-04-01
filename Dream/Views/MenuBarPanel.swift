@@ -134,7 +134,6 @@ struct MenuBarPanel: View {
 
     private var permissionBanner: some View {
         VStack(alignment: .leading, spacing: DS.sm) {
-            // Title
             HStack(spacing: DS.xs) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(DS.paused)
@@ -142,34 +141,29 @@ struct MenuBarPanel: View {
                     .font(DS.bodyMedium)
             }
 
-            // Status per permission
-            permissionRow(
-                name: "Accessibility",
-                granted: appState.permissions.accessibilityGranted,
-                detail: "Window titles",
-                action: { appState.permissions.openAccessibilitySettings() }
-            )
-            permissionRow(
-                name: "Input Monitoring",
-                granted: appState.permissions.inputMonitoringGranted,
-                detail: "Keyboard recording",
-                action: { appState.permissions.openInputMonitoringSettings() }
-            )
-            permissionRow(
-                name: "Clipboard",
-                granted: true,
-                detail: "Copy/paste",
-                action: nil
-            )
+            if !appState.permissions.accessibilityGranted {
+                permissionRow(
+                    name: "Accessibility",
+                    detail: "Window titles",
+                    action: { appState.permissions.openAccessibilitySettings() }
+                )
+            }
+            if !appState.permissions.inputMonitoringGranted {
+                permissionRow(
+                    name: "Input Monitoring",
+                    detail: "Keyboard recording",
+                    action: { appState.permissions.openInputMonitoringSettings() }
+                )
+            }
         }
         .dreamCard()
     }
 
-    private func permissionRow(name: String, granted: Bool, detail: String, action: (() -> Void)?) -> some View {
+    private func permissionRow(name: String, detail: String, action: @escaping () -> Void) -> some View {
         HStack(spacing: DS.sm) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
+            Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(granted ? DS.recording : DS.error)
+                .foregroundStyle(DS.error)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(name)
@@ -181,12 +175,10 @@ struct MenuBarPanel: View {
 
             Spacer()
 
-            if !granted, let action {
-                Button("Grant") { action() }
-                    .font(DS.captionFont)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
+            Button("Grant") { action() }
+                .font(DS.captionFont)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
         }
     }
 
