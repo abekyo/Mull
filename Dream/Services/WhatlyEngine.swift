@@ -243,70 +243,122 @@ final class WhatlyEngine {
 
     // MARK: - Phase 3 Fallback: Rule-based summary (no LLM)
 
-    /// Generate a summary using pure counting and grouping. No LLM call.
-    /// Not as polished as LLM output, but works from day one with zero config.
+    /// Generate a meaningful summary using TimeBlockEngine + clipboard + analytics.
+    /// Answers: "What did I do? What's in progress? What's notable?"
     private func phase3RuleBasedFallback(rawData: GatheredData) -> ConsolidatedSummary {
-        func summarizePeriod(_ events: [RecordingEvent]) -> String? {
-            let filtered = events.filter { e in
-                guard let app = e.appName else { return true }
-                return !AnalyticsEngine.noiseApps.contains(app)
-            }
-            guard !filtered.isEmpty else { return nil }
-
-            var lines: [String] = []
-
-            // Window titles → what you worked on
-            var titleSeen = Set<String>()
-            for event in filtered where (event.eventType == .screenText || event.eventType == .appSwitch) {
-                let title = event.windowTitle ?? event.textContent ?? ""
-                guard !title.isEmpty else { continue }
-                let key = String(title.prefix(50).lowercased())
-                guard !titleSeen.contains(key) else { continue }
-                titleSeen.insert(key)
-                lines.append("- \(title) (\(event.appName ?? ""))")
-                if lines.count >= 5 { break }
-            }
-
-            // Clipboard → what you copied
-            let clips = filtered.filter { $0.eventType == .clipboard }
-            for clip in clips.prefix(3) {
-                guard let text = clip.textContent, text.count > 5 else { continue }
-                let clean = String(text.prefix(100)).replacingOccurrences(of: "\n", with: " ")
-                lines.append("- Copied: \(clean)")
-            }
-
-            return lines.isEmpty ? nil : lines.joined(separator: "\n")
-        }
-
-        let morning = summarizePeriod(rawData.morning)
-        let afternoon = summarizePeriod(rawData.afternoon)
-        let evening = summarizePeriod(rawData.evening)
-
-        // App usage summary (filtered)
-        let topApps = rawData.appGroups
-            .filter { !AnalyticsEngine.noiseApps.contains($0.key) }
-            .sorted { $0.value.count > $1.value.count }
-            .prefix(5)
-            .map { "\($0.key): \($0.value.count) events" }
-            .joined(separator: ", ")
+        let engine = TimeBlockEngine(database: database)
+        let analysis = engine.analyzDay(for: Date())
 
         let dateStr = Date().formatted(.dateTime.year().month().day())
-        var md: [String] = ["# \(dateStr) (rule-based summary)", ""]
-        if let m = morning { md.append("## Morning"); md.append(m); md.append("") }
-        if let a = afternoon { md.append("## Afternoon"); md.append(a); md.append("") }
-        if let e = evening { md.append("## Evening"); md.append(e); md.append("") }
-        md.append("## App Usage")
-        md.append(topApps)
+        var md: [String] = []
+        var morningText: String?
+        var afternoonText: String?
+        var eveningText: String?
+        var learningsText: String?
+        var inProgressText: String?
+
+        // Main story: what you spent your time on
+        if !analysis.mainActivities.isEmpty {
+            md.append("# \(dateStr)")
+            md.append("")
+
+            // Group activities by time period
+            let morningActivities = activitiesInPeriod(analysis, hour: 0..<12)
+            let afternoonActivities = activitiesInPeriod(analysis, hour: 12..<18)
+            let eveningActivities = activitiesInPeriod(analysis, hour: 18..<24)
+
+            if !morningActivities.isEmpty {
+                let text = morningActivities.map { "- \($0.label) (\($0.durationFormatted) in \($0.app))" }.joined(separator: "\n")
+                morningText = text
+                md.append("## Morning")
+                md.append(text)
+                md.append("")
+            }
+
+            if !afternoonActivities.isEmpty {
+                let text = afternoonActivities.map { "- \($0.label) (\($0.durationFormatted) in \($0.app))" }.joined(separator: "\n")
+                afternoonText = text
+                md.append("## Afternoon")
+                md.append(text)
+                md.append("")
+            }
+
+            if !eveningActivities.isEmpty {
+                let text = eveningActivities.map { "- \($0.label) (\($0.durationFormatted) in \($0.app))" }.joined(separator: "\n")
+                eveningText = text
+                md.append("## Evening")
+                md.append(text)
+                md.append("")
+            }
+
+            // If no time-period split worked, just list main activities
+            if morningText == nil && afternoonText == nil && eveningText == nil {
+                let text = analysis.mainActivities.map { "- \($0.label) (\($0.durationFormatted) in \($0.app))" }.joined(separator: "\n")
+                morningText = text
+                md.append("## Today")
+                md.append(text)
+                md.append("")
+            }
+        } else {
+            md.append("# \(dateStr)")
+            md.append("")
+        }
+
+        // Clipboard highlights — what you were actively working with
+        let meaningfulClips = rawData.events
+            .filter { $0.eventType == .clipboard }
+            .filter { e in
+                guard let app = e.appName, !AnalyticsEngine.noiseApps.contains(app) else { return false }
+                guard let text = e.textContent, text.count > 10, text.count < 200 else { return false }
+                return true
+            }
+            .compactMap(\.textContent)
+
+        var clipSeen = Set<String>()
+        var uniqueClips: [String] = []
+        for clip in meaningfulClips {
+            let key = String(clip.prefix(50).lowercased())
+            guard !clipSeen.contains(key) else { continue }
+            clipSeen.insert(key)
+            uniqueClips.append(String(clip.prefix(100)).replacingOccurrences(of: "\n", with: " "))
+        }
+
+        if !uniqueClips.isEmpty {
+            let text = uniqueClips.prefix(5).map { "- \($0)" }.joined(separator: "\n")
+            inProgressText = text
+            md.append("## In Progress")
+            md.append(text)
+            md.append("")
+        }
+
+        // App breakdown as context
+        if !analysis.appBreakdown.isEmpty {
+            let appLine = analysis.appBreakdown.prefix(4)
+                .map { "\($0.app) \(String(format: "%.0f", $0.percentage))%" }
+                .joined(separator: " · ")
+            md.append("Tools: \(appLine)")
+        }
 
         return ConsolidatedSummary(
             fullMarkdown: md.joined(separator: "\n"),
-            morning: morning,
-            afternoon: afternoon,
-            evening: evening,
-            learnings: nil,
-            inProgress: nil,
+            morning: morningText,
+            afternoon: afternoonText,
+            evening: eveningText,
+            learnings: learningsText,
+            inProgress: inProgressText,
             memoryUpdatesJSON: nil
         )
+    }
+
+    /// Get activities whose blocks fall within a given hour range.
+    private func activitiesInPeriod(_ analysis: DailyActivity, hour range: Range<Int>) -> [ActivitySummary] {
+        let all = analysis.mainActivities + analysis.otherActivities
+        return all.filter { activity in
+            activity.blocks.contains { block in
+                let h = Calendar.current.component(.hour, from: block.start)
+                return range.contains(h)
+            }
+        }
     }
 
     // MARK: - Phase 3: Consolidate (LLM)
