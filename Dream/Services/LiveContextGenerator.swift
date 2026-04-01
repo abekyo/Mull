@@ -242,16 +242,22 @@ enum LiveContextGenerator {
 
     // MARK: - Helpers
 
-    /// Check if text is Dream's own output (should not be re-recorded).
+    /// Check if text is noise that shouldn't appear in AI context.
     private static func isDreamOutput(_ text: String) -> Bool {
-        let lower = text.lowercased()
-        return lower.contains("about the user (auto-updated") ||
-               lower.contains("what the user is currently working on") ||
-               lower.contains("dream is recording") ||
-               lower.contains("dream is still learning") ||
-               lower.contains("raw activity data for today") ||
-               lower.contains("context about the user today") ||
-               lower.contains("no activity recorded yet")
+        // Dream's own output
+        if text.contains("auto-updated") || text.contains("Dream is recording") ||
+           text.contains("Dream is still learning") || text.contains("Raw activity data for") ||
+           text.contains("Context about the user") || text.contains("No activity recorded") {
+            return true
+        }
+        // Xcode compiler errors / stack traces
+        if text.hasPrefix("/Users/") && text.contains(".swift:") { return true }
+        if text.hasPrefix("#") && text.contains("0x") { return true }
+        if text.hasPrefix("Thread ") && text.contains("Queue") { return true }
+        if text.hasPrefix("Validation failed") { return true }
+        // Screenshot filenames
+        if text.hasPrefix("Screenshot ") && text.contains(" at ") { return true }
+        return false
     }
 
     private static func pct(_ value: Double) -> String {
@@ -282,10 +288,9 @@ enum LiveContextGenerator {
                     continue outer
                 }
 
-                // Significant overlap (>60% of shorter string matches)
-                let shorter = min(current.count, future.count)
+                // Significant overlap — if >50% of current matches the start of future, skip current
                 let shared = commonPrefixLength(current, future)
-                if shared > 0 && Double(shared) / Double(shorter) > 0.6 && future.count >= current.count {
+                if shared > 5 && Double(shared) / Double(current.count) > 0.5 {
                     continue outer
                 }
             }

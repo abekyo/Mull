@@ -32,8 +32,11 @@ final class AnalyticsEngine {
 
         for event in textEvents {
             guard let text = event.textContent else { continue }
-            // Skip Dream's own output
+            // Skip noise sources
             if text.contains("auto-updated") || text.contains("Dream is recording") { continue }
+            if text.hasPrefix("/Users/") || text.hasPrefix("Screenshot ") { continue }
+            if text.contains("Conditional downcast") || text.contains("Validation failed") { continue }
+            if text.hasPrefix("#") && text.contains("0x") { continue } // Stack traces
             let words = tokenize(text)
             for word in words {
                 let lower = word.lowercased()
@@ -63,6 +66,9 @@ final class AnalyticsEngine {
 
         for event in events {
             guard let text = event.textContent else { continue }
+            // Skip noise
+            if text.contains("auto-updated") || text.hasPrefix("/Users/") { continue }
+            if text.hasPrefix("Screenshot ") || text.contains("Validation failed") { continue }
             let words = tokenize(text)
             // Bigrams
             for i in 0..<max(0, words.count - 1) {

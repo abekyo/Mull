@@ -109,36 +109,53 @@ struct FactExtractor {
         let events = database.fetchEvents(from: since, to: Date())
         var facts: [Fact] = []
 
-        // Extract project names from window titles (patterns: "ProjectName — file.swift")
+        // Extract project names from window titles
+        // Real projects: "PantryApp — ViewController.swift — Xcode"
+        // NOT projects: chat messages, UI placeholders, long sentences
         var projectMentions: [String: Int] = [:]
+
+        let skipPatterns = [
+            "Queue another", "Untitled", "Welcome to", "Getting Started",
+            "⌘", "？", "？", "！", "。", "、",  // Japanese punctuation = chat, not project
+        ]
+        let skipApps = Set(["Xcode", "Code", "Terminal", "Safari", "Firefox", "Chrome",
+                            "Finder", "Simulator", "System Settings", "Dream"])
 
         for event in events where event.eventType == .screenText {
             guard let text = event.textContent else { continue }
 
-            // Xcode: "ProjectName — file.swift — Xcode"
-            // VS Code: "file.swift — ProjectName"
+            // Skip if text looks like a sentence (>50 chars or contains question marks)
+            if text.count > 50 { continue }
+            if text.contains("？") || text.contains("?") || text.contains("！") { continue }
+
             let separators = [" — ", " - "]
             for sep in separators {
                 let parts = text.components(separatedBy: sep)
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty && $0.count > 2 && $0.count < 40 }
-                    .filter { !["Xcode", "Code", "Terminal", "Safari", "Firefox", "Chrome", "Finder"].contains($0) }
+                    .filter { part in
+                        guard part.count > 2 && part.count < 30 else { return false }
+                        guard !skipApps.contains(part) else { return false }
+                        // Skip if matches skip patterns
+                        guard !skipPatterns.contains(where: { part.contains($0) }) else { return false }
+                        // Skip if it looks like a filename
+                        if part.contains(".") && part.split(separator: ".").last?.count ?? 0 <= 5 { return false }
+                        // Must look like a project name: starts with uppercase or is a known pattern
+                        let first = part.first ?? Character(" ")
+                        return first.isUppercase || first.isNumber
+                    }
 
                 for part in parts {
-                    // Skip if it looks like a filename (has extension)
-                    if part.contains(".") && part.split(separator: ".").last?.count ?? 0 <= 5 { continue }
                     projectMentions[part, default: 0] += 1
                 }
             }
         }
 
-        // Top projects by mention count
         let topProjects = projectMentions
             .filter { $0.value >= 5 }
             .sorted { $0.value > $1.value }
             .prefix(3)
 
-        for (project, count) in topProjects {
+        for (project, _) in topProjects {
             facts.append(Fact(.projects, "Working on: \(project)"))
         }
 
