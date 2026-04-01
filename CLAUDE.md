@@ -2,9 +2,9 @@
 
 ## 1. Identity
 
-- **App Name**: Dream
-- **Subtitle**: Stop explaining yourself to AI.
-- **Tagline**: Remember everything. Explain nothing.
+- **App Name**: Whatly
+- **Subtitle**: Know what you did.
+- **Tagline**: Stop explaining yourself to AI.
 - **Category**: Productivity / Second Brain
 - **Platform**: macOS (Apple Silicon)
 
@@ -28,7 +28,7 @@ AIに仕事を頼むたびに、自分のことを一から説明している:
 
 **その120時間をゼロにする。**
 
-Dreamはバックグラウンドであなたの作業を記録し、AIが読める形に構造化する。AIはDreamを読んで、あなたのことを最初から知っている。
+Whatlyはバックグラウンドであなたの作業を記録し、AIが読める形に構造化する。AIはWhatlyを読んで、あなたのことを最初から知っている。
 
 ```
 Before Dream:
@@ -43,7 +43,7 @@ After Dream:
   あなた: 「......なんでそこまで知ってるの？」
 ```
 
-**この「なんで知ってるの？」の瞬間がDreamの価値。**
+**この「なんで知ってるの？」の瞬間がWhatlyの価値。**
 
 ### How Dream Changes Your Life
 
@@ -76,9 +76,9 @@ Dream = あなたが「やった」ことを知っている
   → 動的。60秒ごとに更新される今日の全行動記録。
 ```
 
-ChatGPTのメモリは「プロフィール」。Dreamは「今日の行動ログ + 蓄積された理解」。
+ChatGPTのメモリは「プロフィール」。Whatlyは「今日の行動ログ + 蓄積された理解」。
 
-ChatGPTは「あなたは誰か」を知っている。Dreamは「あなたは今、何をしているか」を知っている。両者は競合しない。共存する。DreamのデータをChatGPTやClaudeに渡すことで、「誰か」と「今何してるか」の両方をAIが持つ。
+ChatGPTは「あなたは誰か」を知っている。Whatlyは「あなたは今、何をしているか」を知っている。両者は競合しない。共存する。WhatlyのデータをChatGPTやClaudeに渡すことで、「誰か」と「今何してるか」の両方をAIが持つ。
 
 ### First Goal: AIがあなたを知っている状態を自動で作る
 
@@ -98,10 +98,10 @@ ChatGPTは「あなたは誰か」を知っている。Dreamは「あなたは�
 - **手動で入れるもの** — メモ、PDF、画像、ファイル、ブックマーク、何でも
 - **AIが書き込むもの** — 会話で学んだこと、判断の記録、生成したドキュメント
 
-この3つが全て **`~/Dream/`** フォルダに入る。
+この3つが全て **`~/Whatly/`** フォルダに入る。
 
 ```
-~/Dream/ = あなたのデジタル人格
+~/Whatly/ = あなたのデジタル人格
 
   ├── me.md          ← AIがあなたを理解するためのプロフィール
   ├── now.md         ← 今何をしているか
@@ -149,9 +149,9 @@ Dream:            事前に構造化済み
 
 **AIに必要なのは「アクセス権」ではなく「整理された文脈」。**
 
-PCを丸ごと読めても、10万ファイルの中から今日のミーティング情報を探すのは非効率。Dreamが先に「この人は3つの事業を同時に回していて、15:00からFX事業のCSミーティングがあって、午前中はPantryAppのStoryboard改修をPhase 5まで進めた」と構造化しておけば、AIは即座に的確な応答ができる。
+PCを丸ごと読めても、10万ファイルの中から今日のミーティング情報を探すのは非効率。Whatlyが先に「この人は3つの事業を同時に回していて、15:00からFX事業のCSミーティングがあって、午前中はPantryAppのStoryboard改修をPhase 5まで進めた」と構造化しておけば、AIは即座に的確な応答ができる。
 
-### Dreamの3つの差別化
+### Whatlyの3つの差別化
 
 **1. 事前構造化（Pre-structured Context）**
 
@@ -167,7 +167,7 @@ AIが読む:   0.1秒で「あなた」を理解
 
 **2. 可視化（Visible Intelligence）**
 
-Dreamが何を知っているかをユーザーが確認・修正できる。
+Whatlyが何を知っているかをユーザーが確認・修正できる。
 
 - Insights tab: 「あなた」がどう解析されているかが見える
 - Files tab: me.md を直接編集して「AIの理解」を修正できる
@@ -196,27 +196,27 @@ Full (~1,500+ tokens):  全て。新しいタスクの開始時だけ。
 | やらないこと | 理由 |
 |------------|------|
 | **画面OCR / スクリーンショット** | Screenpipeの領域。CPU/ストレージが重い。キーストローク+クリップボードで十分 |
-| **音声録音・書き起こし** | Omi/Granola/Plaudの領域。ハードウェアが必要。Dreamはテキストに集中 |
+| **音声録音・書き起こし** | Omi/Granola/Plaudの領域。ハードウェアが必要。Whatlyはテキストに集中 |
 | **タスク管理** | Things/Todoist/Linearの領域。記録と管理は別の関心事 |
-| **カレンダー編集** | Calendar.appの領域。Dreamは読み取りのみ |
-| **メール送信・返信** | Mail.appの領域。Dreamは読み取りのみ |
-| **WYSIWYG エディタ** | Notionの領域。Dreamはプレーンマークダウン。シンプルさが価値 |
-| **リアルタイム共同編集** | Google Docs/Notionの領域。Dreamは個人の脳 |
-| **チャットボット / 会話UI** | ChatGPT/Claudeの領域。Dreamはデータ層。AIの頭脳ではなくAIの記憶 |
+| **カレンダー編集** | Calendar.appの領域。Whatlyは読み取りのみ |
+| **メール送信・返信** | Mail.appの領域。Whatlyは読み取りのみ |
+| **WYSIWYG エディタ** | Notionの領域。Whatlyはプレーンマークダウン。シンプルさが価値 |
+| **リアルタイム共同編集** | Google Docs/Notionの領域。Whatlyは個人の脳 |
+| **チャットボット / 会話UI** | ChatGPT/Claudeの領域。Whatlyはデータ層。AIの頭脳ではなくAIの記憶 |
 | **プラグインマーケットプレイス** | 複雑さが指数関数的に増える。コア体験がぼやける |
 | **クラウド同期** | プライバシーの根幹を揺るがす。iCloud/gitは自分でやればいい |
 | **iOS / Android版** | macOS Accessibility APIに依存。モバイルでは同等の記録ができない |
 | **ブラウザ拡張** | インストール摩擦。AppleScript + History.dbで十分 |
 | **カスタムプロンプト編集** | ユーザーにプロンプトを触らせない。「何も考えなくていい」の原則 |
-| **ダッシュボードのカスタマイズ** | ウィジェット配置を考える時間 = 無駄。Dreamが最適配置を決める |
+| **ダッシュボードのカスタマイズ** | ウィジェット配置を考える時間 = 無駄。Whatlyが最適配置を決める |
 
 ### 原則
 
-**Dreamはデータ層であり、AIの頭脳ではない。**
+**Whatlyはデータ層であり、AIの頭脳ではない。**
 
 - AIに「考えさせる」のはClaude/ChatGPT/Cursorの仕事
-- Dreamの仕事は「AIに渡す記憶を整理する」こと
-- Dreamが賢くなるのではなく、Dreamを読んだAIが賢くなる
+- Whatlyの仕事は「AIに渡す記憶を整理する」こと
+- Whatlyが賢くなるのではなく、Whatlyを読んだAIが賢くなる
 
 **1つの画面で1つのことしかしない。**
 
@@ -328,7 +328,7 @@ Design Tokens（`DS`）で統一:
 ### AI書き込み（MCPサーバー）
 
 - `write_note`: AIが会話中にメモを保存
-- `get_user_context`: AIがDreamを読む
+- `get_user_context`: AIがWhatlyを読む
 - `search_history`: AIが過去のイベントを検索
 - `list_files`: AIがファイル構造を確認
 
@@ -405,7 +405,7 @@ Design Tokens（`DS`）で統一:
 
 ## 11. Competitive Positioning
 
-| | Screenpipe | Pieces | Mem0 | **Dream** |
+| | Screenpipe | Pieces | Mem0 | **Whatly** |
 |--|-----------|--------|------|----------|
 | データ取得 | 画面OCR + 音声 | 画面OCR | 会話からのみ | **キーストローク + クリップボード + ウィンドウ + カレンダー + メール** |
 | 出力形式 | SQLite | API | API | **mdファイル（ポータブル、人間もAIも読める）** |
@@ -414,7 +414,7 @@ Design Tokens（`DS`）で統一:
 | ファイル管理 | なし | なし | なし | **あり（Bear風エディタ）** |
 | 設計思想 | 記録インフラ | 開発者ツール | AIメモリ層 | **第二の脳** |
 
-Dreamだけがやっていること:
+Whatlyだけがやっていること:
 1. キーストローク+クリップボードの直接取得（OCRではない）
 2. ポータブルなmdファイル出力（DB/APIではない）
 3. ファイル管理UI（Bear風エディタ）
