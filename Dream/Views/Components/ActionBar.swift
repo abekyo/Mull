@@ -154,7 +154,6 @@ struct ActionBar: View {
         let keystrokeEvents = events.filter { $0.eventType == .keystroke }
         let clipEvents = events.filter { $0.eventType == .clipboard }
         let titleEvents = events.filter { $0.eventType == .screenText }
-        let sessionEvents = events.filter { $0.eventType == .appSwitch }
 
         // Window titles — compressed: only keep final version of each typing sequence
         if !titleEvents.isEmpty {

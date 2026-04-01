@@ -33,10 +33,13 @@ final class DatabaseService: Sendable {
         do {
             pool = try DatabasePool(path: dbPath, configuration: config)
         } catch {
-            print("[Dream] DatabasePool init failed, using temporary: \(error)")
-            // Fallback to temp file (DatabasePool requires WAL which needs a real file)
-            let tmpPath = NSTemporaryDirectory() + "dream-fallback.sqlite"
-            pool = try! DatabasePool(path: tmpPath, configuration: config)
+            print("[Whatly] DatabasePool init failed, using temporary: \(error)")
+            let tmpPath = NSTemporaryDirectory() + "whatly-fallback.sqlite"
+            do {
+                pool = try DatabasePool(path: tmpPath, configuration: config)
+            } catch {
+                fatalError("[Whatly] Cannot create database at all: \(error)")
+            }
         }
         dbPool = pool
         try? migrate()
@@ -137,8 +140,8 @@ final class DatabaseService: Sendable {
 
     func insertEvent(_ event: RecordingEvent) {
         try? dbPool.write { db in
-            var record = event
-            try record.insert(db)
+            var r = event
+            try r.insert(db)
         }
     }
 
@@ -188,8 +191,8 @@ final class DatabaseService: Sendable {
                 sql: "DELETE FROM daily_summaries WHERE date >= ? AND date < ?",
                 arguments: [startOfDay, endOfDay]
             )
-            var record = summary
-            try record.insert(db)
+            var s = summary
+            try s.insert(db)
         }
     }
 
@@ -259,8 +262,8 @@ final class DatabaseService: Sendable {
 
     func insertMemory(_ entry: MemoryEntry) {
         try? dbPool.write { db in
-            var record = entry
-            try record.insert(db)
+            var e = entry
+            try e.insert(db)
         }
     }
 

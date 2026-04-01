@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
 import ApplicationServices
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Central observable state for the entire app.
 @MainActor
