@@ -13,12 +13,14 @@ struct FullWindowView: View {
     enum DashboardTab: String, CaseIterable {
         case live = "Live"
         case insights = "Insights"
+        case files = "Files"
         case timeline = "Timeline"
 
         var icon: String {
             switch self {
             case .live: "waveform"
             case .insights: "sparkles"
+            case .files: "doc.text"
             case .timeline: "calendar"
             }
         }
@@ -86,6 +88,9 @@ struct FullWindowView: View {
                         .environmentObject(appState)
                 case .insights:
                     InsightsTab()
+                        .environmentObject(appState)
+                case .files:
+                    FilesTab()
                         .environmentObject(appState)
                 case .timeline:
                     TimelineTab()
@@ -280,23 +285,26 @@ struct InsightsTab: View {
                         .padding(.horizontal, DS.xl)
                 }
 
-                // Analytics grid
-                LazyVGrid(columns: [
-                    GridItem(.flexible(), spacing: DS.md),
-                    GridItem(.flexible(), spacing: DS.md)
-                ], spacing: DS.md) {
-                    activityHeatmap
-                    weekdayChart
-                    languageCard
-                    appUsageCard
+                // Analytics grid — equal height rows
+                HStack(alignment: .top, spacing: DS.md) {
+                    activityHeatmap.frame(maxWidth: .infinity)
+                    weekdayChart.frame(maxWidth: .infinity)
                 }
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DS.xl)
 
-                // Keywords
+                HStack(alignment: .top, spacing: DS.md) {
+                    languageCard.frame(maxWidth: .infinity)
+                    appUsageCard.frame(maxWidth: .infinity)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, DS.xl)
+
+                // Keywords — full width
                 keywordsCard
                     .padding(.horizontal, DS.xl)
 
-                // What Dream knows
+                // What Dream knows — full width
                 memoryCard
                     .padding(.horizontal, DS.xl)
                     .padding(.bottom, DS.xl)

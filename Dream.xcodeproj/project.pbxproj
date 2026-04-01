@@ -41,6 +41,7 @@
 		E61D1CC4547F5B3EA821F528 /* DreamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83286524AA77A525BEAF6BDC /* DreamApp.swift */; };
 		EF6C769DC173E65EA4D504EA /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A194730322E775A5E9A4907 /* main.swift */; };
 		F15E29DA34485230B47C1A13 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E3917F871D8C4E5C479E762 /* SettingsView.swift */; };
+		F2F84987ED2875CC1528ACAE /* FilesTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D2A8D735B7572745BC364D /* FilesTab.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +57,7 @@
 		479FCCCEEB1D9213BD36FB31 /* SummaryContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryContent.swift; sourceTree = "<group>"; };
 		5BB171E92B4F88C6A829B0ED /* EmailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailService.swift; sourceTree = "<group>"; };
 		5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactExtractor.swift; sourceTree = "<group>"; };
+		71D2A8D735B7572745BC364D /* FilesTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesTab.swift; sourceTree = "<group>"; };
 		800206DAA1BB06787FF4E585 /* PrivacyStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyStatusBar.swift; sourceTree = "<group>"; };
 		83286524AA77A525BEAF6BDC /* DreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DreamApp.swift; sourceTree = "<group>"; };
 		8FAE3FD1DCE2396532C6762E /* SearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBar.swift; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				AEF3828CE5B527D50E297071 /* AIExportSheet.swift */,
+				71D2A8D735B7572745BC364D /* FilesTab.swift */,
 				9316E203B2E0226D3413E6A6 /* FullWindowView.swift */,
 				CBBAAF1E805104C572763E27 /* MenuBarPanel.swift */,
 				A7153E77328B786D13B939D5 /* OnboardingView.swift */,
@@ -328,6 +331,7 @@
 				BE7838DE9D6CDB49F0FB887B /* DreamEngine.swift in Sources */,
 				4585D44C543E009F76A92690 /* EmailService.swift in Sources */,
 				411723302DAA0FDE401F5D40 /* FactExtractor.swift in Sources */,
+				F2F84987ED2875CC1528ACAE /* FilesTab.swift in Sources */,
 				079C654ADA7CA274C291FD6F /* FullWindowView.swift in Sources */,
 				95D1F8839C950B4AE70EF8DF /* KeychainService.swift in Sources */,
 				DB430A797F69E5B85C9AB1A4 /* LiveContextGenerator.swift in Sources */,

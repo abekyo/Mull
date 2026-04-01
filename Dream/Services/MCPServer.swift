@@ -133,6 +133,32 @@ final class MCPServer {
                         ]
                     ]
                 ]
+            ],
+            [
+                "name": "write_note",
+                "description": "Create or update a markdown note in the user's Dream folder. Use this to save information the user might need later, record decisions made during conversation, or store context for future sessions. The note will be visible in Dream's Files tab and readable by any AI assistant.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "path": [
+                            "type": "string",
+                            "description": "File path relative to ~/Dream/ (e.g. 'notes/meeting-2026-04-01.md')"
+                        ],
+                        "content": [
+                            "type": "string",
+                            "description": "Markdown content to write"
+                        ]
+                    ],
+                    "required": ["path", "content"]
+                ]
+            ],
+            [
+                "name": "list_files",
+                "description": "List all markdown files in the user's Dream folder. Returns file names, sizes, and whether they are auto-generated or user-created.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [:]
+                ]
             ]
         ]
     }
@@ -157,6 +183,16 @@ final class MCPServer {
             let days = args["days"] as? Int ?? 7
             let content = analytics.generatePatternSummary(days: days)
             respondToolResult(id: id, text: content)
+
+        case "write_note":
+            let path = args["path"] as? String ?? ""
+            let content = args["content"] as? String ?? ""
+            let result = writeNote(path: path, content: content)
+            respondToolResult(id: id, text: result)
+
+        case "list_files":
+            let result = listFiles()
+            respondToolResult(id: id, text: result)
 
         default:
             respondError(id: id, code: -32602, message: "Unknown tool: \(name)")
@@ -262,6 +298,61 @@ final class MCPServer {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Write / List Files
+
+    private func writeNote(path: String, content: String) -> String {
+        guard !path.isEmpty, !content.isEmpty else {
+            return "Error: path and content are required"
+        }
+
+        // Security: prevent path traversal
+        let cleaned = path.replacingOccurrences(of: "..", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard cleaned.hasSuffix(".md") else {
+            return "Error: only .md files are allowed"
+        }
+
+        let filePath = dreamDir.appendingPathComponent(cleaned)
+        let parentDir = filePath.deletingLastPathComponent()
+
+        do {
+            try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+            try content.write(to: filePath, atomically: true, encoding: .utf8)
+            return "Written: ~/Dream/\(cleaned) (\(content.count) chars)"
+        } catch {
+            return "Error writing file: \(error.localizedDescription)"
+        }
+    }
+
+    private func listFiles() -> String {
+        var lines: [String] = ["Files in ~/Dream/:"]
+        listDir(dreamDir, prefix: "", lines: &lines)
+        return lines.joined(separator: "\n")
+    }
+
+    private func listDir(_ url: URL, prefix: String, lines: inout [String]) {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) else { return }
+
+        for item in contents {
+            let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            let name = item.lastPathComponent
+
+            if isDir {
+                lines.append("\(prefix)📁 \(name)/")
+                listDir(item, prefix: prefix + "  ", lines: &lines)
+            } else if name.hasSuffix(".md") {
+                let size = (try? item.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+                let auto = ["me.md", "now.md", "full.md", "MEMORY.md"].contains(name) ? " (auto)" : ""
+                lines.append("\(prefix)📄 \(name) [\(sizeStr)]\(auto)")
+            }
+        }
     }
 
     // MARK: - JSON-RPC Helpers
