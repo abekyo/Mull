@@ -426,19 +426,6 @@ struct OnboardingView: View {
     private func startRecordingAndProof() {
         appState.hasCompletedOnboarding = true
         appState.startRecording()
-
-        // Poll event count to show live numbers
-        liveEventCount = appState.todayEventCount
-        liveTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            Task { @MainActor in
-                let newCount = appState.database.eventCountToday()
-                if newCount != liveEventCount {
-                    withAnimation(.spring(duration: 0.2)) {
-                        liveEventCount = newCount
-                    }
-                }
-            }
-        }
     }
 
     private func finishOnboarding() {
