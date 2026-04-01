@@ -312,12 +312,15 @@ final class RecordingService {
                   text != self.lastClipboardText else { return }
             self.lastClipboardText = text
 
-            // Skip Dream's own output (this is a bug, not data — we'd be recording our own output)
-            if text.hasPrefix("Raw activity data for") ||
-               text.hasPrefix("Context about the user") ||
-               text.hasPrefix("No activity recorded") ||
-               text.contains("Dream is recording.") ||
-               text.contains("Dream is still learning") {
+            // Skip Dream's own output (recording our own output is a feedback loop)
+            if text.contains("Dream is recording") ||
+               text.contains("Dream is still learning") ||
+               text.contains("auto-updated:") ||
+               text.contains("About the user (auto") ||
+               text.contains("What the user is currently") ||
+               text.contains("Raw activity data for") ||
+               text.contains("Context about the user") ||
+               text.contains("No activity recorded") {
                 return
             }
 

@@ -32,11 +32,17 @@ final class AnalyticsEngine {
 
         for event in textEvents {
             guard let text = event.textContent else { continue }
+            // Skip Dream's own output
+            if text.contains("auto-updated") || text.contains("Dream is recording") { continue }
             let words = tokenize(text)
             for word in words {
                 let lower = word.lowercased()
-                guard lower.count > 1 else { continue }
+                guard lower.count > 2 else { continue } // Skip 1-2 char words
                 guard !stopWords.contains(lower) else { continue }
+                // Skip pure numbers
+                guard !lower.allSatisfy(\.isNumber) else { continue }
+                // Skip file paths
+                guard !lower.contains("/") else { continue }
                 wordCounts[lower, default: 0] += 1
             }
         }
@@ -71,9 +77,15 @@ final class AnalyticsEngine {
             }
         }
 
-        // Only keep phrases that appear 3+ times (real patterns, not noise)
+        // Filter noise phrases (dates, screenshots, file paths)
+        let noisePatterns = ["screenshot", "2024", "2025", "2026", "2027", "at am", "at pm",
+                             "png", "jpg", "jpeg", "dream is", "events captured"]
+
         return phraseCounts
             .filter { $0.value >= 3 }
+            .filter { phrase in
+                !noisePatterns.contains { phrase.key.contains($0) }
+            }
             .sorted { $0.value > $1.value }
             .prefix(limit)
             .map { KeywordStat(word: $0.key, count: $0.value) }
@@ -300,10 +312,14 @@ final class AnalyticsEngine {
         "08", "09", "10", "11", "12", "13", "14", "15", "16", "17",
         "18", "19", "20", "21", "22", "23", "24", "25", "26", "27",
         "28", "29", "30", "31", "2024", "2025", "2026", "2027",
-        // File extension noise
+        // File extension / path noise
         "png", "jpg", "jpeg", "gif", "svg", "pdf", "md", "txt",
         "swift", "ts", "tsx", "js", "json", "html", "css",
         "screenshot", "img", "image", "file", "folder",
+        "users", "stanford", "downloads", "documents", "library",
+        "developer", "xcode", "deriveddata", "build", "products",
+        "debug", "release", "contents", "macos", "resources",
+        "about", "auto", "updated",
     ]
 }
 

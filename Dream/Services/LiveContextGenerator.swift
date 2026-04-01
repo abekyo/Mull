@@ -206,12 +206,23 @@ enum LiveContextGenerator {
 
         let clipEvents = todayEvents.filter { $0.eventType == .clipboard }
         if !clipEvents.isEmpty {
-            parts.append("")
-            parts.append("Clipboard today (\(clipEvents.count) entries):")
+            // Dedup clipboard + filter Dream's own output
+            var clipSeen = Set<String>()
+            var clipLines: [String] = []
             for event in clipEvents {
                 guard let text = event.textContent, !text.isEmpty else { continue }
+                // Skip Dream's own output
+                if isDreamOutput(text) { continue }
+                let key = String(text.prefix(80).lowercased())
+                guard !clipSeen.contains(key) else { continue }
+                clipSeen.insert(key)
                 let clean = String(text.prefix(500)).replacingOccurrences(of: "\n", with: "\\n")
-                parts.append("- \(clean)")
+                clipLines.append("- \(clean)")
+            }
+            if !clipLines.isEmpty {
+                parts.append("")
+                parts.append("Clipboard today (\(clipLines.count) unique entries):")
+                parts.append(contentsOf: clipLines)
             }
         }
 
@@ -233,21 +244,40 @@ enum LiveContextGenerator {
 
     // MARK: - Helpers
 
+    /// Check if text is Dream's own output (should not be re-recorded).
+    private static func isDreamOutput(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("about the user (auto-updated") ||
+               lower.contains("what the user is currently working on") ||
+               lower.contains("dream is recording") ||
+               lower.contains("dream is still learning") ||
+               lower.contains("raw activity data for today") ||
+               lower.contains("context about the user today") ||
+               lower.contains("no activity recorded yet")
+    }
+
     private static func pct(_ value: Double) -> String {
         String(format: "%.0f", value)
     }
 
     /// Remove incremental typing sequences, keep only final version.
+    /// Scans forward: if the next item starts with the current (or vice versa), skip current.
+    /// Also handles non-adjacent duplicates by checking all future items within a window.
     private static func compress(_ items: [String]) -> [String] {
         guard !items.isEmpty else { return [] }
         var result: [String] = []
-        for i in 0..<items.count {
-            if i + 1 < items.count {
-                let current = items[i]
-                let next = items[i + 1]
-                if next.hasPrefix(current) || current.hasPrefix(next) { continue }
+        let window = min(items.count, 10) // Look ahead up to 10 items
+
+        outer: for i in 0..<items.count {
+            let current = items[i]
+            // Check if any future item within window is an extension of current
+            for j in (i + 1)..<min(i + window, items.count) {
+                let future = items[j]
+                if future.hasPrefix(current) && future.count > current.count {
+                    continue outer // Current is a prefix of a future item → skip
+                }
             }
-            result.append(items[i])
+            result.append(current)
         }
         return result
     }
