@@ -32,11 +32,15 @@ final class AnalyticsEngine {
 
         for event in textEvents {
             guard let text = event.textContent else { continue }
+            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
             // Skip noise sources
             if text.contains("auto-updated") || text.contains("Whatly is recording") { continue }
             if text.hasPrefix("/Users/") || text.hasPrefix("Screenshot ") { continue }
             if text.contains("Conditional downcast") || text.contains("Validation failed") { continue }
-            if text.hasPrefix("#") && text.contains("0x") { continue } // Stack traces
+            if text.hasPrefix("#") && text.contains("0x") { continue }
+            // Skip short romaji fragments from keystroke events
+            if event.eventType == .keystroke && text.count < 5 &&
+               !text.unicodeScalars.contains(where: { $0.value > 127 }) { continue }
             let words = tokenize(text)
             for word in words {
                 let lower = word.lowercased()
@@ -108,6 +112,13 @@ final class AnalyticsEngine {
 
     // MARK: - App Usage Patterns
 
+    /// Apps to exclude from analytics output.
+    static let noiseApps: Set<String> = [
+        "Whatly", "Dream", "UserNotificationCenter", "NotificationCenter",
+        "SecurityAgent", "loginwindow", "universalAccessAuthWarn",
+        "System Settings", "SystemPreferences",
+    ]
+
     /// App usage breakdown with time estimates.
     func appUsage(days: Int = 7) -> [AppUsageStat] {
         let since = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
@@ -116,7 +127,7 @@ final class AnalyticsEngine {
 
         var appEventCounts: [String: Int] = [:]
         for event in events {
-            guard let app = event.appName else { continue }
+            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
             appEventCounts[app, default: 0] += 1
         }
 
@@ -189,10 +200,13 @@ final class AnalyticsEngine {
     // MARK: - Language Mix
 
     /// Ratio of Japanese / English / Code in typed content.
+    /// Uses clipboard + window titles only (not raw keystrokes, which are romaji).
     func languageMix(days: Int = 7) -> LanguageMix {
         let since = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
         let events = database.fetchEvents(from: since, to: Date())
-            .filter { $0.eventType == .keystroke || $0.eventType == .clipboard }
+            // Only clipboard + window titles — these are post-IME, reliable for language detection
+            // Raw keystrokes are romaji and would falsely register as English
+            .filter { $0.eventType == .clipboard || $0.eventType == .screenText }
 
         var japaneseChars = 0
         var englishChars = 0
@@ -200,6 +214,7 @@ final class AnalyticsEngine {
 
         for event in events {
             guard let text = event.textContent else { continue }
+            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
             for scalar in text.unicodeScalars {
                 if (0x3000...0x9FFF).contains(scalar.value) || (0xFF00...0xFFEF).contains(scalar.value) {
                     japaneseChars += 1

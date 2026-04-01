@@ -166,8 +166,8 @@ final class RecordingService {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
-        // Flush buffer every 1 second — minimal lag while still batching
-        keystrokeFlushTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // Flush buffer every 3 seconds — reduces IME romaji fragmentation
+        keystrokeFlushTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.flushKeystrokeBuffer()
         }
     }
@@ -426,10 +426,25 @@ final class RecordingService {
     // MARK: - Helpers
 
     private func isExcludedApp() -> Bool {
-        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-            return false
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+
+        // Check bundle ID
+        if let bundleID = app.bundleIdentifier, excludedBundleIDs.contains(bundleID) {
+            return true
         }
-        return excludedBundleIDs.contains(bundleID)
+
+        // Also check by app name (catches renamed bundles, Xcode debug builds)
+        let excludedNames: Set<String> = [
+            "Whatly", "Dream",  // Our own app (old + new name)
+            "UserNotificationCenter", "NotificationCenter",
+            "SecurityAgent", "loginwindow",
+            "universalAccessAuthWarn",
+        ]
+        if let name = app.localizedName, excludedNames.contains(name) {
+            return true
+        }
+
+        return false
     }
 
     private static let trivialChars = CharacterSet.whitespacesAndNewlines
