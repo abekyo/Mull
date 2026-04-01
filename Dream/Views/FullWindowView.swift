@@ -700,6 +700,9 @@ struct InsightsTab: View {
 struct TimelineTab: View {
     @EnvironmentObject var appState: AppState
     @State private var selectedDate = Date()
+    @State private var cachedAnalysis: DailyActivity?
+    @State private var cachedBlocks: [TimeBlock] = []
+    @State private var lastAnalysisDate: Date = .distantPast
 
     var body: some View {
         NavigationSplitView {
@@ -707,7 +710,16 @@ struct TimelineTab: View {
                 .navigationSplitViewColumnWidth(min: 230, ideal: 260, max: 300)
         } detail: {
             detail
+                .onAppear { refreshAnalysis() }
+                .onChange(of: selectedDate) { _, _ in refreshAnalysis() }
         }
+    }
+
+    private func refreshAnalysis() {
+        let engine = TimeBlockEngine(database: appState.database)
+        cachedBlocks = engine.generateBlocks(for: selectedDate)
+        cachedAnalysis = engine.analyzDay(for: selectedDate)
+        lastAnalysisDate = Date()
     }
 
     // MARK: - Sidebar
@@ -990,8 +1002,7 @@ struct TimelineTab: View {
 
     @ViewBuilder
     private func mainActivitiesView(for date: Date) -> some View {
-        let engine = TimeBlockEngine(database: appState.database)
-        let analysis = engine.analyzDay(for: date)
+        let analysis = cachedAnalysis ?? DailyActivity(mainActivities: [], otherActivities: [], totalDuration: 0, appBreakdown: [])
 
         if !analysis.mainActivities.isEmpty {
             VStack(alignment: .leading, spacing: DS.md) {
@@ -1092,8 +1103,7 @@ struct TimelineTab: View {
 
     @ViewBuilder
     private func timeBlocksView(for date: Date) -> some View {
-        let engine = TimeBlockEngine(database: appState.database)
-        let blocks = engine.generateBlocks(for: date)
+        let blocks = cachedBlocks
 
         if !blocks.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
