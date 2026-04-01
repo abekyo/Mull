@@ -67,6 +67,64 @@ NotionとObsidianとRewindとClaude Codeのメモリを全部足して、それ�
 
 ---
 
+## 3.5 Positioning: Why Not Just Give AI Full PC Access?
+
+Claude Code、openClaw、Computer Use — これらはPCを丸ごと操作・解析できる。しかし「アクセスできる」と「理解している」は全く違う。
+
+```
+Claude Code:      PC全体にアクセス可能
+                  → でも毎回ファイルを探索する
+                  → 100万ファイルの中から関連情報を探す
+                  → 遅い。トークンを浪費する。ノイジー。
+
+Dream:            事前に構造化済み
+                  → me.md を読むだけで「誰か」がわかる
+                  → now.md を読むだけで「今何してるか」がわかる
+                  → 瞬時。安い。的確。
+```
+
+**AIに必要なのは「アクセス権」ではなく「整理された文脈」。**
+
+PCを丸ごと読めても、10万ファイルの中から今日のミーティング情報を探すのは非効率。Dreamが先に「この人は3つの事業を同時に回していて、15:00からFX事業のCSミーティングがあって、午前中はPantryAppのStoryboard改修をPhase 5まで進めた」と構造化しておけば、AIは即座に的確な応答ができる。
+
+### Dreamの3つの差別化
+
+**1. 事前構造化（Pre-structured Context）**
+
+生データを即座に構造化する。AIが毎回解析する必要がない。
+
+```
+生データ:    4,235 events / day
+  ↓ AnalyticsEngine + FactExtractor + TimeBlockEngine
+構造化:     me.md (~200 tokens) + now.md (~500 tokens)
+  ↓
+AIが読む:   0.1秒で「あなた」を理解
+```
+
+**2. 可視化（Visible Intelligence）**
+
+Dreamが何を知っているかをユーザーが確認・修正できる。
+
+- Insights tab: 「あなた」がどう解析されているかが見える
+- Files tab: me.md を直接編集して「AIの理解」を修正できる
+- Timeline: 「メインでやったこと」の推論結果を確認できる
+
+ブラックボックスではない。ユーザーが信頼できる透明性。
+
+**3. 選択的コンテキスト（Right-sized Context）**
+
+全てを渡すのではなく、必要な分だけ渡す。
+
+```
+Profile (~200 tokens):  身元だけ。常に安全。
+Standard (~700 tokens): 身元 + 今の作業。通常はこれで十分。
+Full (~1,500+ tokens):  全て。新しいタスクの開始時だけ。
+```
+
+100万トークンのコンテキストウィンドウがあっても、無駄に埋めるべきではない。必要な文脈を最小トークンで渡すことで、AIの精度を最大化する。
+
+---
+
 ## 4. Design Language
 
 ### Color Scheme
