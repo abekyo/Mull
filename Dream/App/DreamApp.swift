@@ -28,14 +28,6 @@ struct DreamApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // Main window (Dock click opens this)
-        WindowGroup {
-            FullWindowView()
-                .environmentObject(appState)
-        }
-        .defaultSize(width: 800, height: 600)
-        .keyboardShortcut("d", modifiers: [.command, .shift])
-
         // Settings
         Settings {
             SettingsView()
@@ -50,36 +42,73 @@ struct DreamApp: App {
     }
 }
 
-// MARK: - AppDelegate
+// MARK: - AppDelegate — manages real NSWindows directly
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
+    var mainWindow: NSWindow?
     var onboardingWindow: NSWindow?
+    static var shared: AppDelegate?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
+
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
         if !hasCompletedOnboarding {
             showOnboarding()
+        } else {
+            showMainWindow()
         }
     }
 
-    /// Clicking the Dock icon when no windows are visible reopens the main window.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            // Reopen main window
-            NSApp.activate(ignoringOtherApps: true)
+            showMainWindow()
         }
         return true
     }
 
-    func showOnboarding() {
-        let appState = AppState()
+    // MARK: - Main Window
 
-        let onboardingView = OnboardingView(isPresented: .constant(true))
+    func showMainWindow() {
+        if let existing = mainWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let appState = AppState()
+        let view = FullWindowView()
             .environmentObject(appState)
 
-        let hostingController = NSHostingController(rootView: onboardingView)
+        let controller = NSHostingController(rootView: view)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Dream"
+        window.contentViewController = controller
+        window.center()
+        window.setFrameAutosaveName("DreamMainWindow")
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+
+        self.mainWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Onboarding Window
+
+    func showOnboarding() {
+        let appState = AppState()
+        let view = OnboardingView(isPresented: .constant(true))
+            .environmentObject(appState)
+
+        let controller = NSHostingController(rootView: view)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
@@ -88,7 +117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "Welcome to Dream"
-        window.contentViewController = hostingController
+        window.contentViewController = controller
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -100,5 +129,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func closeOnboarding() {
         onboardingWindow?.close()
         onboardingWindow = nil
+        showMainWindow()
     }
 }

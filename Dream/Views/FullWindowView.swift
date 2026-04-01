@@ -1,16 +1,13 @@
 import SwiftUI
 
-/// Surface 4: Full window — the "second brain" dashboard.
+/// The Dream dashboard — three tabs designed to make you feel understood.
 ///
-/// Not just a timeline viewer. This is where Dream proactively shows you
-/// what it understands about you. Three tabs:
-///
-///   1. Live — Real-time view of what's being recorded right now
-///   2. Insights — AI-generated analysis of your patterns (after Dream runs)
-///   3. Timeline — Daily summaries archive
+/// Live:     Real-time proof Dream is watching (builds trust)
+/// Insights: The "wow" moment — Dream shows you patterns about yourself
+/// Timeline: Daily summaries archive
 struct FullWindowView: View {
     @EnvironmentObject var appState: AppState
-    @State private var selectedTab: DashboardTab = .live
+    @State private var selectedTab: DashboardTab = .insights
     @State private var showAIExport = false
 
     enum DashboardTab: String, CaseIterable {
@@ -20,8 +17,8 @@ struct FullWindowView: View {
 
         var icon: String {
             switch self {
-            case .live: "record.circle"
-            case .insights: "brain.head.profile"
+            case .live: "waveform"
+            case .insights: "sparkles"
             case .timeline: "calendar"
             }
         }
@@ -30,70 +27,74 @@ struct FullWindowView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Tab bar
-            HStack(spacing: 0) {
+            HStack(spacing: 2) {
                 ForEach(DashboardTab.allCases, id: \.self) { tab in
                     Button {
-                        withAnimation(.spring(duration: 0.2)) { selectedTab = tab }
+                        withAnimation(.spring(duration: 0.25)) { selectedTab = tab }
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: DS.xs) {
                             Image(systemName: tab.icon)
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                             Text(tab.rawValue)
-                                .font(.system(size: 13, weight: selectedTab == tab ? .semibold : .regular))
+                                .font(DS.bodyMedium)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, DS.lg)
+                        .padding(.vertical, DS.sm)
                         .foregroundStyle(selectedTab == tab ? Color.accentColor : .secondary)
-                        .background(selectedTab == tab ? Color.accentColor.opacity(0.1) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .background(
+                            selectedTab == tab
+                                ? Color.accentColor.opacity(0.1)
+                                : Color.clear
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
                     }
                     .buttonStyle(.plain)
                 }
 
                 Spacer()
 
-                // Actions
                 Button {
                     showAIExport = true
                 } label: {
                     Label("Copy to AI", systemImage: "brain.head.profile")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, weight: .medium))
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Color.accentColor)
                 .controlSize(.small)
-                .keyboardShortcut("a", modifiers: .command)
 
                 Button {
                     appState.triggerDreamNow()
                 } label: {
-                    Label("Dream Now", systemImage: "moon.stars")
+                    Label("Summarize", systemImage: "moon.stars")
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(appState.isDreaming || appState.todayEventCount == 0)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(.controlBackgroundColor).opacity(0.5))
+            .padding(.horizontal, DS.xl)
+            .padding(.vertical, DS.sm)
 
             Divider()
 
             // Content
-            switch selectedTab {
-            case .live:
-                LiveTab()
-                    .environmentObject(appState)
-            case .insights:
-                InsightsTab()
-                    .environmentObject(appState)
-            case .timeline:
-                TimelineTab()
-                    .environmentObject(appState)
+            Group {
+                switch selectedTab {
+                case .live:
+                    LiveTab()
+                        .environmentObject(appState)
+                case .insights:
+                    InsightsTab()
+                        .environmentObject(appState)
+                case .timeline:
+                    TimelineTab()
+                        .environmentObject(appState)
+                }
             }
+            .transition(.opacity)
         }
-        .frame(minWidth: 700, minHeight: 500)
+        .frame(minWidth: 760, minHeight: 560)
         .sheet(isPresented: $showAIExport) {
             AIExportSheet()
                 .environmentObject(appState)
@@ -101,7 +102,7 @@ struct FullWindowView: View {
     }
 }
 
-// MARK: - Live Tab (Real-time recording view)
+// MARK: - Live Tab
 
 struct LiveTab: View {
     @EnvironmentObject var appState: AppState
@@ -111,54 +112,60 @@ struct LiveTab: View {
     var body: some View {
         VStack(spacing: 0) {
             // Status bar
-            HStack {
-                Circle()
-                    .fill(appState.isRecording ? Color.green : Color.red)
-                    .frame(width: 8, height: 8)
-                Text(appState.isRecording ? "Recording" : "Stopped")
-                    .font(.system(size: 13, weight: .medium))
+            HStack(spacing: DS.md) {
+                HStack(spacing: DS.sm) {
+                    Circle()
+                        .fill(appState.isRecording ? DS.recording : DS.error)
+                        .frame(width: 8, height: 8)
+                        .shadow(color: appState.isRecording ? DS.recording.opacity(0.5) : .clear, radius: 4)
+                    Text(appState.isRecording ? "Recording" : "Stopped")
+                        .font(DS.bodyMedium)
+                }
 
                 Spacer()
 
-                Text("\(appState.todayEventCount) events today")
-                    .font(.system(size: 12))
+                Text("\(appState.todayEventCount) events")
+                    .font(DS.captionFont)
                     .foregroundStyle(.secondary)
+                    .monospacedDigit()
 
                 Text(appState.todayStorageFormatted)
-                    .font(.system(size: 12))
+                    .font(DS.captionFont)
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
+            .padding(.horizontal, DS.xl)
+            .padding(.vertical, DS.md)
 
-            // Event type legend
+            // Legend
             HStack(spacing: DS.lg) {
-                legendItem(color: .blue, label: "Keyboard")
-                legendItem(color: .orange, label: "Clipboard")
-                legendItem(color: .green, label: "Window")
-                legendItem(color: .purple, label: "App switch")
+                legendDot(color: .blue, label: "Keyboard")
+                legendDot(color: .orange, label: "Clipboard")
+                legendDot(color: .green, label: "Window")
+                legendDot(color: .purple, label: "App")
             }
             .font(DS.captionFont)
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, 20)
-            .padding(.vertical, DS.xs)
+            .padding(.horizontal, DS.xl)
+            .padding(.bottom, DS.sm)
 
             Divider()
 
-            // Live event stream
+            // Event stream
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
+                    LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(liveEvents.enumerated()), id: \.offset) { index, event in
                             LiveEventRow(event: event)
                                 .id(index)
                         }
                     }
-                    .padding(16)
+                    .padding(.vertical, DS.sm)
                 }
                 .onChange(of: liveEvents.count) { _, _ in
                     if let last = liveEvents.indices.last {
-                        withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(last, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -169,64 +176,63 @@ struct LiveTab: View {
 
     private func startRefresh() {
         loadEvents()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
             loadEvents()
         }
     }
 
-    private func legendItem(color: Color, label: String) -> some View {
+    private func loadEvents() {
+        let start = Calendar.current.startOfDay(for: Date())
+        let all = appState.database.fetchEvents(from: start, to: Date())
+        liveEvents = Array(all.suffix(150))
+    }
+
+    private func legendDot(color: Color, label: String) -> some View {
         HStack(spacing: DS.xs) {
             Circle().fill(color).frame(width: 6, height: 6)
             Text(label)
         }
     }
-
-    private func loadEvents() {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        // Show last 100 events
-        let all = appState.database.fetchEvents(from: startOfDay, to: Date())
-        liveEvents = Array(all.suffix(100))
-    }
 }
 
 struct LiveEventRow: View {
     let event: RecordingEvent
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            // Time
-            Text(timeString)
+        HStack(alignment: .top, spacing: DS.sm) {
+            Text(timeStr)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .frame(width: 50, alignment: .trailing)
+                .foregroundStyle(.quaternary)
+                .frame(width: 48, alignment: .trailing)
 
-            // Type indicator
             Circle()
                 .fill(typeColor)
-                .frame(width: 6, height: 6)
-                .padding(.top, 4)
+                .frame(width: 5, height: 5)
+                .padding(.top, 5)
 
-            // Content
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 if let app = event.appName {
                     Text(app)
-                        .font(.system(size: 10))
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
                 Text(event.textContent ?? "")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .font(.system(size: 11))
+                    .foregroundStyle(isHovered ? .primary : .secondary)
+                    .lineLimit(isHovered ? 5 : 1)
                     .textSelection(.enabled)
             }
 
             Spacer()
         }
+        .padding(.horizontal, DS.xl)
         .padding(.vertical, 2)
+        .background(isHovered ? Color.primary.opacity(0.03) : Color.clear)
+        .onHover { isHovered = $0 }
     }
 
-    private var timeString: String {
+    private var timeStr: String {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         return f.string(from: event.timestamp)
@@ -243,68 +249,374 @@ struct LiveEventRow: View {
     }
 }
 
-// MARK: - Insights Tab (AI analysis)
+// MARK: - Insights Tab (the "wow" tab)
 
 struct InsightsTab: View {
     @EnvironmentObject var appState: AppState
     @State private var keywords: [KeywordStat] = []
-    @State private var phrases: [KeywordStat] = []
     @State private var appUsage: [AppUsageStat] = []
     @State private var hourly: [HourlyStat] = []
     @State private var weekday: [WeekdayStat] = []
-    @State private var langMix: LanguageMix = LanguageMix(japanesePercent: 0, englishPercent: 0, codePercent: 0)
+    @State private var langMix = LanguageMix(japanesePercent: 0, englishPercent: 0, codePercent: 0)
+    @State private var facts: [Fact] = []
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(spacing: DS.lg) {
+                // Hero: identity card
+                heroCard
+                    .padding(.horizontal, DS.xl)
+                    .padding(.top, DS.lg)
+
+                // Schedule (if available)
+                if let schedule = appState.calendar.todaySchedule() {
+                    scheduleCard(schedule)
+                        .padding(.horizontal, DS.xl)
+                }
+
                 // Dream summary (if available)
                 if let summary = appState.todaySummary {
-                    card(title: "Today's Dream") {
-                        SummaryContent(summary: summary)
-                    }
+                    summaryCard(summary)
+                        .padding(.horizontal, DS.xl)
                 }
 
-                // Two-column layout for analytics
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(spacing: 16) {
-                        keywordsCard
-                        phrasesCard
-                        languageCard
-                    }
-                    VStack(spacing: 16) {
-                        appUsageCard
-                        hourlyCard
-                        weekdayCard
-                    }
+                // Analytics grid
+                LazyVGrid(columns: [
+                    GridItem(.flexible(), spacing: DS.md),
+                    GridItem(.flexible(), spacing: DS.md)
+                ], spacing: DS.md) {
+                    activityHeatmap
+                    weekdayChart
+                    languageCard
+                    appUsageCard
                 }
+                .padding(.horizontal, DS.xl)
 
-                // Memory
+                // Keywords
+                keywordsCard
+                    .padding(.horizontal, DS.xl)
+
+                // What Dream knows
                 memoryCard
+                    .padding(.horizontal, DS.xl)
+                    .padding(.bottom, DS.xl)
             }
-            .padding(20)
         }
-        .onAppear { refreshAnalytics() }
+        .onAppear { refresh() }
     }
 
-    private func refreshAnalytics() {
+    private func refresh() {
         let engine = appState.analytics
         keywords = engine.topKeywords(days: 7, limit: 20)
-        phrases = engine.topPhrases(days: 7, limit: 10)
         appUsage = engine.appUsage(days: 7)
         hourly = engine.hourlyPattern(days: 7)
         weekday = engine.weekdayPattern(days: 30)
         langMix = engine.languageMix(days: 7)
+        facts = FactExtractor(analytics: engine, database: appState.database).extractFacts(days: 7)
     }
 
-    // MARK: - Cards
+    // MARK: - Hero Card
+
+    private var heroCard: some View {
+        VStack(spacing: DS.md) {
+            // Big identity statement
+            HStack(spacing: DS.md) {
+                ZStack {
+                    Circle()
+                        .fill(DS.accentGradient)
+                        .frame(width: 48, height: 48)
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: DS.xs) {
+                    Text("Your Profile")
+                        .font(DS.titleFont)
+
+                    if facts.isEmpty {
+                        Text("Dream is still learning about you...")
+                            .font(DS.captionFont)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(appState.todayEventCount)")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.accentColor)
+                    Text("events today")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            // Facts as tags
+            if !facts.isEmpty {
+                FlowLayout(spacing: DS.xs) {
+                    ForEach(Array(facts.enumerated()), id: \.offset) { _, fact in
+                        factTag(fact)
+                    }
+                }
+            }
+        }
+        .dreamHeroCard()
+    }
+
+    private func factTag(_ fact: Fact) -> some View {
+        HStack(spacing: DS.xs) {
+            Image(systemName: factIcon(fact.category))
+                .font(.system(size: 8))
+                .foregroundStyle(factColor(fact.category))
+            Text(fact.text)
+                .font(.system(size: 11))
+        }
+        .padding(.horizontal, DS.sm)
+        .padding(.vertical, DS.xs)
+        .background(factColor(fact.category).opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
+    }
+
+    private func factIcon(_ category: FactCategory) -> String {
+        switch category {
+        case .identity: "person.fill"
+        case .skills: "wrench.fill"
+        case .projects: "folder.fill"
+        case .patterns: "clock.fill"
+        }
+    }
+
+    private func factColor(_ category: FactCategory) -> Color {
+        switch category {
+        case .identity: .blue
+        case .skills: .green
+        case .projects: .orange
+        case .patterns: .purple
+        }
+    }
+
+    // MARK: - Schedule Card
+
+    private func scheduleCard(_ schedule: String) -> some View {
+        VStack(alignment: .leading, spacing: DS.sm) {
+            HStack {
+                Image(systemName: "calendar")
+                    .foregroundStyle(Color.accentColor)
+                Text("Today's Schedule")
+                    .font(DS.titleFont)
+            }
+
+            let lines = schedule.components(separatedBy: "\n").dropFirst() // Skip "Today's schedule:" header
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                let isNow = line.contains("← NOW")
+                let isSoon = line.contains("← in")
+
+                HStack(spacing: DS.sm) {
+                    Circle()
+                        .fill(isNow ? DS.recording : (isSoon ? DS.paused : Color.secondary.opacity(0.3)))
+                        .frame(width: 6, height: 6)
+
+                    Text(line.replacingOccurrences(of: "- ", with: ""))
+                        .font(isNow ? DS.bodyMedium : DS.bodyFont)
+                        .foregroundStyle(isNow ? .primary : .secondary)
+                }
+            }
+        }
+        .dreamCard()
+    }
+
+    // MARK: - Summary Card
+
+    private func summaryCard(_ summary: DailySummary) -> some View {
+        VStack(alignment: .leading, spacing: DS.sm) {
+            HStack {
+                Image(systemName: "moon.stars.fill")
+                    .foregroundStyle(Color.accentColor)
+                Text("Today's Dream")
+                    .font(DS.titleFont)
+                Spacer()
+                Text(String(format: "%.0fs", summary.processingSeconds))
+                    .font(DS.microFont)
+                    .foregroundStyle(.tertiary)
+            }
+
+            SummaryContent(summary: summary)
+        }
+        .dreamCard()
+    }
+
+    // MARK: - Activity Heatmap (hourly)
+
+    private var activityHeatmap: some View {
+        VStack(alignment: .leading, spacing: DS.sm) {
+            Text("ACTIVITY")
+                .sectionLabel()
+
+            // 24-hour bar chart
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(hourly) { h in
+                    VStack(spacing: 2) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(barColor(intensity: h.intensity))
+                            .frame(width: 10, height: max(3, h.intensity * 50))
+
+                        if h.hour % 6 == 0 {
+                            Text("\(h.hour)")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.quaternary)
+                        }
+                    }
+                }
+            }
+            .frame(height: 65)
+
+            let peaks = hourly.sorted { $0.eventCount > $1.eventCount }.prefix(3).map { "\($0.hour):00" }
+            if !peaks.isEmpty {
+                Text("Peak: \(peaks.joined(separator: ", "))")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .dreamCard()
+    }
+
+    private func barColor(intensity: Double) -> Color {
+        if intensity > 0.7 { return Color.accentColor }
+        if intensity > 0.3 { return Color.accentColor.opacity(0.6) }
+        return Color.accentColor.opacity(0.15)
+    }
+
+    // MARK: - Weekday Chart
+
+    private var weekdayChart: some View {
+        VStack(alignment: .leading, spacing: DS.sm) {
+            Text("WEEK")
+                .sectionLabel()
+
+            HStack(spacing: DS.sm) {
+                ForEach(weekday) { day in
+                    VStack(spacing: DS.xs) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(barColor(intensity: day.intensity))
+                            .frame(width: 28, height: max(4, day.intensity * 40))
+
+                        Text(day.name)
+                            .font(.system(size: 9))
+                            .foregroundStyle(day.intensity > 0.7 ? .primary : .tertiary)
+                    }
+                }
+            }
+            .frame(height: 60)
+
+            let busiest = weekday.max(by: { $0.eventCount < $1.eventCount })
+            if let b = busiest {
+                Text("Busiest: \(b.name)")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .dreamCard()
+    }
+
+    // MARK: - Language Mix
+
+    private var languageCard: some View {
+        VStack(alignment: .leading, spacing: DS.sm) {
+            Text("LANGUAGE")
+                .sectionLabel()
+
+            // Segmented bar
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    if langMix.japanesePercent > 0 {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.red.opacity(0.65))
+                            .frame(width: geo.size.width * langMix.japanesePercent / 100)
+                    }
+                    if langMix.englishPercent > 0 {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.blue.opacity(0.55))
+                            .frame(width: geo.size.width * langMix.englishPercent / 100)
+                    }
+                    if langMix.codePercent > 0 {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.green.opacity(0.55))
+                            .frame(width: geo.size.width * langMix.codePercent / 100)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+            }
+            .frame(height: 14)
+
+            HStack(spacing: DS.md) {
+                langLabel(color: .red, name: "日本語", pct: langMix.japanesePercent)
+                langLabel(color: .blue, name: "English", pct: langMix.englishPercent)
+                langLabel(color: .green, name: "Code", pct: langMix.codePercent)
+            }
+        }
+        .dreamCard()
+    }
+
+    private func langLabel(color: Color, name: String, pct: Double) -> some View {
+        HStack(spacing: DS.xs) {
+            Circle().fill(color.opacity(0.65)).frame(width: 6, height: 6)
+            Text("\(name) \(String(format: "%.0f", pct))%")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - App Usage
+
+    private var appUsageCard: some View {
+        VStack(alignment: .leading, spacing: DS.sm) {
+            Text("APPS")
+                .sectionLabel()
+
+            ForEach(Array(appUsage.prefix(5))) { app in
+                HStack(spacing: DS.sm) {
+                    Text(app.appName)
+                        .font(.system(size: 11))
+                        .frame(width: 60, alignment: .leading)
+                        .lineLimit(1)
+
+                    GeometryReader { geo in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.accentColor.opacity(0.5))
+                            .frame(width: geo.size.width * app.percentage / 100)
+                    }
+                    .frame(height: 8)
+
+                    Text(String(format: "%.0f%%", app.percentage))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 28, alignment: .trailing)
+                }
+                .frame(height: 18)
+            }
+        }
+        .dreamCard()
+    }
+
+    // MARK: - Keywords
 
     private var keywordsCard: some View {
-        card(title: "Top Keywords (7 days)") {
+        VStack(alignment: .leading, spacing: DS.sm) {
+            Text("TOP KEYWORDS")
+                .sectionLabel()
+
             if keywords.isEmpty {
-                Text("Not enough data yet").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text("Keywords appear after a few hours of recording")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
             } else {
-                FlowLayout(spacing: 4) {
+                FlowLayout(spacing: DS.xs) {
                     ForEach(keywords.prefix(15)) { kw in
+                        let maxCount = keywords.first?.count ?? 1
+                        let intensity = Double(kw.count) / Double(max(maxCount, 1))
+
                         HStack(spacing: 3) {
                             Text(kw.word)
                                 .font(.system(size: 11))
@@ -312,198 +624,153 @@ struct InsightsTab: View {
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundStyle(.tertiary)
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, DS.sm)
                         .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(Double(kw.count) / Double(max(keywords.first?.count ?? 1, 1)) * 0.2 + 0.05))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .background(Color.accentColor.opacity(intensity * 0.15 + 0.03))
+                        .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
                     }
                 }
             }
         }
+        .dreamCard()
     }
 
-    private var phrasesCard: some View {
-        card(title: "Repeated Phrases") {
-            if phrases.isEmpty {
-                Text("Patterns emerge after a few days").font(.system(size: 11)).foregroundStyle(.tertiary)
-            } else {
-                ForEach(phrases) { phrase in
-                    HStack {
-                        Text("\"\(phrase.word)\"")
-                            .font(.system(size: 11))
-                        Spacer()
-                        Text("\(phrase.count)x")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-        }
-    }
-
-    private var appUsageCard: some View {
-        card(title: "App Usage (7 days)") {
-            ForEach(Array(appUsage.prefix(8))) { app in
-                HStack(spacing: 8) {
-                    Text(app.appName)
-                        .font(.system(size: 11))
-                        .frame(width: 80, alignment: .leading)
-                    GeometryReader { geo in
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.accentColor.opacity(0.6))
-                            .frame(width: geo.size.width * app.percentage / 100)
-                    }
-                    .frame(height: 8)
-                    Text(String(format: "%.0f%%", app.percentage))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 30, alignment: .trailing)
-                }
-                .frame(height: 16)
-            }
-        }
-    }
-
-    private var hourlyCard: some View {
-        card(title: "Activity by Hour") {
-            HStack(alignment: .bottom, spacing: 2) {
-                ForEach(hourly) { h in
-                    VStack(spacing: 2) {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(Color.accentColor.opacity(h.intensity * 0.8 + 0.1))
-                            .frame(width: 8, height: max(2, h.intensity * 40))
-                        if h.hour % 6 == 0 {
-                            Text("\(h.hour)")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-            }
-            .frame(height: 55)
-
-            let peaks = appState.analytics.peakHours(days: 7)
-            if !peaks.isEmpty {
-                Text("Peak: \(peaks.map { "\($0):00" }.joined(separator: ", "))")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var weekdayCard: some View {
-        card(title: "Activity by Day (30 days)") {
-            HStack(spacing: 8) {
-                ForEach(weekday) { day in
-                    VStack(spacing: 4) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.accentColor.opacity(day.intensity * 0.7 + 0.1))
-                            .frame(width: 24, height: max(4, day.intensity * 30))
-                        Text(day.name)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .frame(height: 50)
-        }
-    }
-
-    private var languageCard: some View {
-        card(title: "Language Mix") {
-            HStack(spacing: 0) {
-                if langMix.japanesePercent > 0 {
-                    Rectangle()
-                        .fill(Color.red.opacity(0.6))
-                        .frame(width: langMix.japanesePercent * 2)
-                }
-                if langMix.englishPercent > 0 {
-                    Rectangle()
-                        .fill(Color.blue.opacity(0.6))
-                        .frame(width: langMix.englishPercent * 2)
-                }
-                if langMix.codePercent > 0 {
-                    Rectangle()
-                        .fill(Color.green.opacity(0.6))
-                        .frame(width: langMix.codePercent * 2)
-                }
-            }
-            .frame(height: 12)
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-
-            HStack(spacing: 12) {
-                legendDot(color: .red, label: "Japanese \(String(format: "%.0f", langMix.japanesePercent))%")
-                legendDot(color: .blue, label: "English \(String(format: "%.0f", langMix.englishPercent))%")
-                legendDot(color: .green, label: "Code \(String(format: "%.0f", langMix.codePercent))%")
-            }
-        }
-    }
+    // MARK: - Memory Card
 
     private var memoryCard: some View {
         let memories = appState.database.fetchAllMemories()
 
-        return card(title: "What Dream Knows About You") {
+        return VStack(alignment: .leading, spacing: DS.sm) {
+            HStack {
+                Image(systemName: "brain")
+                    .foregroundStyle(Color.accentColor)
+                Text("What Dream Knows")
+                    .font(DS.titleFont)
+            }
+
             if memories.isEmpty {
-                Text("Dream will learn about you after the first nightly run.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                VStack(spacing: DS.sm) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.quaternary)
+                    Text("Dream will learn about you over time")
+                        .font(DS.bodyFont)
+                        .foregroundStyle(.tertiary)
+                    Text("Memories are extracted after each nightly Dream run")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.quaternary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DS.lg)
             } else {
                 ForEach(memories) { memory in
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: DS.sm) {
                         Text(memory.memoryType.rawValue)
                             .font(.system(size: 9, weight: .medium))
-                            .padding(.horizontal, 6)
+                            .padding(.horizontal, DS.sm)
                             .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.1))
+                            .background(Color.accentColor.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 3))
-                        VStack(alignment: .leading, spacing: 2) {
+
+                        VStack(alignment: .leading, spacing: 1) {
                             Text(memory.name)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(DS.bodyMedium)
                             Text(memory.description)
-                                .font(.system(size: 11))
+                                .font(DS.captionFont)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
             }
         }
+        .dreamCard()
     }
+}
 
-    // MARK: - Helpers
+// MARK: - Timeline Tab
 
-    private func card<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-            content()
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.controlBackgroundColor).opacity(0.4))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
+struct TimelineTab: View {
+    @EnvironmentObject var appState: AppState
+    @State private var selectedDate = Date()
 
-    private func legendDot(color: Color, label: String) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(color.opacity(0.6)).frame(width: 6, height: 6)
-            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+    var body: some View {
+        NavigationSplitView {
+            VStack(spacing: DS.lg) {
+                DatePicker("", selection: $selectedDate, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .padding(.horizontal, DS.sm)
+
+                Button {
+                    selectedDate = Date()
+                } label: {
+                    Label("Today", systemImage: "calendar")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal, DS.md)
+
+                Spacer()
+            }
+            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+        } detail: {
+            ScrollView {
+                LazyVStack(spacing: DS.md) {
+                    ForEach(appState.recentSummaries) { summary in
+                        VStack(alignment: .leading, spacing: DS.md) {
+                            Text(summary.dateFormatted.uppercased())
+                                .sectionLabel()
+
+                            SummaryContent(summary: summary)
+
+                            HStack {
+                                Label("\(summary.eventCount) events", systemImage: "waveform.path")
+                                Spacer()
+                                Label(String(format: "%.0fs", summary.processingSeconds), systemImage: "clock")
+                            }
+                            .font(DS.captionFont)
+                            .foregroundStyle(.tertiary)
+                        }
+                        .id(summary.dateShort)
+                        .dreamCard()
+                    }
+
+                    if appState.recentSummaries.isEmpty {
+                        VStack(spacing: DS.lg) {
+                            Image(systemName: "moon.stars")
+                                .font(.system(size: 40))
+                                .foregroundStyle(Color.accentColor.opacity(0.3))
+                            Text("No Dreams yet")
+                                .font(DS.titleFont)
+                            Text("Your first summary appears after tonight's Dream run")
+                                .font(DS.bodyFont)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 60)
+                    }
+                }
+                .padding(DS.xl)
+            }
         }
     }
 }
 
-/// Simple flow layout for keyword tags.
+// MARK: - Flow Layout
+
 struct FlowLayout: Layout {
     var spacing: CGFloat = 4
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = arrange(proposal: proposal, subviews: subviews)
-        return result.size
+        arrange(proposal: proposal, subviews: subviews).size
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let result = arrange(proposal: proposal, subviews: subviews)
         for (index, position) in result.positions.enumerated() {
-            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y),
+                proposal: .unspecified
+            )
         }
     }
 
@@ -529,76 +796,6 @@ struct FlowLayout: Layout {
         }
 
         return (CGSize(width: maxX, height: y + rowHeight), positions)
-    }
-}
-
-// MARK: - Timeline Tab (Daily summaries archive)
-
-struct TimelineTab: View {
-    @EnvironmentObject var appState: AppState
-    @State private var selectedDate = Date()
-    @State private var searchQuery = ""
-
-    var body: some View {
-        NavigationSplitView {
-            VStack(spacing: 16) {
-                DatePicker("", selection: $selectedDate, displayedComponents: .date)
-                    .datePickerStyle(.graphical)
-                    .padding(.horizontal, 8)
-
-                Button {
-                    selectedDate = Date()
-                } label: {
-                    Label("Today", systemImage: "calendar")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .padding(.horizontal, 12)
-
-                Spacer()
-            }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
-        } detail: {
-            ScrollView {
-                LazyVStack(spacing: 16) {
-                    ForEach(appState.recentSummaries) { summary in
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(summary.dateFormatted.uppercased())
-                                .font(.system(size: 12, weight: .semibold))
-                                .tracking(0.5)
-                                .foregroundStyle(.secondary)
-
-                            SummaryContent(summary: summary)
-
-                            HStack {
-                                Label("\(summary.eventCount) events", systemImage: "waveform.path")
-                                Spacer()
-                                Label(String(format: "%.0fs", summary.processingSeconds), systemImage: "clock")
-                            }
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                        }
-                        .id(summary.dateShort)
-                        .padding(16)
-                        .background(Color(.controlBackgroundColor).opacity(0.4))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-
-                    if appState.recentSummaries.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "moon.stars")
-                                .font(.system(size: 32))
-                                .foregroundStyle(Color.accentColor.opacity(0.4))
-                            Text("No Dreams yet")
-                                .font(.system(size: 14, weight: .medium))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 60)
-                    }
-                }
-                .padding(20)
-            }
-        }
     }
 }
 

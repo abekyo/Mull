@@ -40,26 +40,37 @@ struct OnboardingView: View {
     // MARK: - Step 1: Welcome
 
     private var welcomeStep: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: DS.xl) {
             Spacer()
 
-            Image(systemName: "moon.stars.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(Color.accentColor)
+            // Hero icon with gradient
+            ZStack {
+                Circle()
+                    .fill(DS.accentGradient)
+                    .frame(width: 72, height: 72)
+                    .shadow(color: Color.accentColor.opacity(0.3), radius: 16, y: 4)
+                Image(systemName: "moon.stars.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.white)
+            }
 
-            Text("Dream")
-                .font(.system(size: 24, weight: .semibold))
+            VStack(spacing: DS.sm) {
+                Text("Dream")
+                    .font(.system(size: 28, weight: .bold))
 
-            Text("Remember everything.\nExplain nothing.")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                Text("Remember everything.\nExplain nothing.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
 
-            Text("Dream lives in your menu bar and silently\nrecords what you work on. Every night, AI\nsummarizes your day.")
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+            // Value props
+            VStack(alignment: .leading, spacing: DS.md) {
+                valueProp(icon: "eye.slash", text: "Silently records what you work on")
+                valueProp(icon: "moon.stars", text: "AI summarizes your day every night")
+                valueProp(icon: "brain.head.profile", text: "Any AI instantly knows your context")
+            }
+            .padding(.horizontal, 48)
 
             Spacer()
 
@@ -330,6 +341,18 @@ struct OnboardingView: View {
             .tint(Color.accentColor)
             .padding(.horizontal, 40)
             .padding(.bottom, 24)
+        }
+    }
+
+    private func valueProp(icon: String, text: String) -> some View {
+        HStack(spacing: DS.md) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 24)
+            Text(text)
+                .font(DS.bodyFont)
+                .foregroundStyle(.secondary)
         }
     }
 

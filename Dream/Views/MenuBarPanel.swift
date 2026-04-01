@@ -182,6 +182,46 @@ struct MenuBarPanel: View {
         }
     }
 
+    // MARK: - Mini Insight
+
+    private var miniInsight: some View {
+        let topApp = appState.analytics.appUsage(days: 1).first
+        let peaks = appState.analytics.peakHours(days: 1)
+        let lang = appState.analytics.languageMix(days: 1)
+
+        let insight: String
+        if let app = topApp {
+            let pct = String(format: "%.0f", app.percentage)
+            insight = "\(app.appName) \(pct)% of today"
+            if !peaks.isEmpty {
+                // More detail
+            }
+        } else {
+            insight = "Recording..."
+        }
+
+        let langNote: String
+        if lang.japanesePercent > 60 {
+            langNote = "Mostly Japanese today"
+        } else if lang.englishPercent > 60 {
+            langNote = "Mostly English today"
+        } else if lang.japanesePercent > 20 && lang.englishPercent > 20 {
+            langNote = "Bilingual day"
+        } else {
+            langNote = ""
+        }
+
+        return HStack(spacing: DS.sm) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 9))
+                .foregroundStyle(Color.accentColor)
+
+            Text([insight, langNote].filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(DS.captionFont)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
     // MARK: - Today's Card
 
     @ViewBuilder
@@ -209,6 +249,11 @@ struct MenuBarPanel: View {
                 .padding(.vertical, DS.sm)
             } else {
                 recordingStatus
+            }
+
+            // Mini insight — one interesting fact from today
+            if appState.todayEventCount > 20 {
+                miniInsight
             }
 
             ActionBar(showAIExport: $showAIExport)
