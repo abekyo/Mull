@@ -40,8 +40,8 @@ targets:
         com.apple.security.files.bookmarks.app-scope: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.dream.app
-        PRODUCT_NAME: Dream
+        PRODUCT_BUNDLE_IDENTIFIER: com.whatly.app
+        PRODUCT_NAME: Whatly
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -50,11 +50,11 @@ targets:
         ENABLE_HARDENED_RUNTIME: false
         GENERATE_INFOPLIST_FILE: true
 
-  DreamMCP:
+  WhatlyMCP:
     type: tool
     platform: macOS
     sources:
-      - DreamMCP
+      - WhatlyMCP
       - Dream/Services/MCPServer.swift
       - Dream/Services/DatabaseService.swift
       - Dream/Services/AnalyticsEngine.swift
@@ -64,7 +64,7 @@ targets:
       - package: GRDB
     settings:
       base:
-        PRODUCT_NAME: DreamMCP
+        PRODUCT_NAME: WhatlyMCP
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
         GENERATE_INFOPLIST_FILE: true

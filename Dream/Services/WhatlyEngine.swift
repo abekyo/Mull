@@ -2,7 +2,7 @@ import Foundation
 
 /// The Dream Engine — 3-gate trigger system + 4-phase LLM consolidation.
 /// Ported from Claude Code's autoDream architecture.
-final class DreamEngine {
+final class WhatlyEngine {
 
     private let database: DatabaseService
     private let fileManager = FileManager.default
@@ -18,7 +18,7 @@ final class DreamEngine {
     // Paths
     private var dreamOutputDir: URL {
         let home = fileManager.homeDirectoryForCurrentUser
-        return home.appendingPathComponent("Dream", isDirectory: true)
+        return home.appendingPathComponent("Whatly", isDirectory: true)
     }
 
     private var dailyDir: URL {
@@ -60,7 +60,7 @@ final class DreamEngine {
     // MARK: - 3-Gate Trigger System
 
     /// Check all three gates (cheapest first). Returns true only if all pass.
-    func shouldDream() -> Bool {
+    func shouldRun() -> Bool {
         // Gate 1: Time — has enough time passed? (cost: 1 DB read)
         guard passesTimeGate() else { return false }
 
@@ -81,8 +81,8 @@ final class DreamEngine {
 
     /// Gate 1: At least `minHoursSinceLast` hours since last Dream.
     private func passesTimeGate() -> Bool {
-        guard let lock = database.fetchDreamLock() else { return true }
-        guard let lastDream = lock.lastDreamAt else { return true } // Never dreamed
+        guard let lock = database.fetchWhatlyLock() else { return true }
+        guard let lastDream = lock.lastSummaryAt else { return true } // Never dreamed
 
         let hoursSince = Date().timeIntervalSince(lastDream) / 3600
         return hoursSince >= minHoursSinceLast
@@ -90,22 +90,22 @@ final class DreamEngine {
 
     /// Gate 2: At least `minEventsRequired` new recording events.
     private func passesDataGate() -> Bool {
-        let lock = database.fetchDreamLock()
-        let since = lock?.lastDreamAt ?? Date.distantPast
+        let lock = database.fetchWhatlyLock()
+        let since = lock?.lastSummaryAt ?? Date.distantPast
         let events = database.fetchEvents(from: since, to: Date())
         return events.count >= minEventsRequired
     }
 
     /// Gate 3: No other Dream process is running (PID check).
     private func passesLockGate() -> Bool {
-        guard let lock = database.fetchDreamLock() else { return true }
+        guard let lock = database.fetchWhatlyLock() else { return true }
         guard let holderPID = lock.holderPID else { return true }
 
         // Check if the PID is still alive
         let isAlive = kill(holderPID, 0) == 0
         if isAlive {
             // Check stale threshold (1 hour)
-            if let lastDream = lock.lastDreamAt {
+            if let lastDream = lock.lastSummaryAt {
                 let hoursSince = Date().timeIntervalSince(lastDream) / 3600
                 return hoursSince > 1.0 // Stale after 1 hour — reclaim
             }
@@ -117,24 +117,24 @@ final class DreamEngine {
     // MARK: - Acquire / Release Lock
 
     private func acquireLock() {
-        var lock = database.fetchDreamLock() ?? DreamLock(sessionsSinceLast: 0)
+        var lock = database.fetchWhatlyLock() ?? WhatlyLock(sessionsSinceLast: 0)
         lock.holderPID = Int32(ProcessInfo.processInfo.processIdentifier)
-        database.updateDreamLock(lock)
+        database.updateWhatlyLock(lock)
     }
 
     private func releaseLock(success: Bool) {
-        var lock = database.fetchDreamLock() ?? DreamLock(sessionsSinceLast: 0)
+        var lock = database.fetchWhatlyLock() ?? WhatlyLock(sessionsSinceLast: 0)
         lock.holderPID = nil
         if success {
-            lock.lastDreamAt = Date()
+            lock.lastSummaryAt = Date()
             lock.sessionsSinceLast = 0
         }
-        database.updateDreamLock(lock)
+        database.updateWhatlyLock(lock)
     }
 
     // MARK: - 4-Phase Dream Execution
 
-    func runDream() async throws -> DailySummary {
+    func runSummary() async throws -> DailySummary {
         let startTime = Date()
         acquireLock()
 
@@ -155,7 +155,7 @@ final class DreamEngine {
             } catch {
                 // LLM failed (no API key, Ollama not running, etc.)
                 // Fall back to rule-based summary — still useful, no LLM needed
-                print("[Dream] LLM failed: \(error.localizedDescription). Using rule-based summary.")
+                print("[Whatly] LLM failed: \(error.localizedDescription). Using rule-based summary.")
                 summary = phase3RuleBasedFallback(rawData: rawData)
             }
 
@@ -454,7 +454,7 @@ final class DreamEngine {
         }
 
         guard !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw DreamError.llmFailed("LLM returned empty response. Check your API key or model.")
+            throw WhatlyError.llmFailed("LLM returned empty response. Check your API key or model.")
         }
 
         return response
@@ -481,18 +481,18 @@ final class DreamEngine {
         do {
             (data, _) = try await URLSession.shared.data(for: request)
         } catch let error as URLError where error.code == .cannotConnectToHost {
-            throw DreamError.llmFailed("Ollama is not running. Start it with: ollama serve")
+            throw WhatlyError.llmFailed("Ollama is not running. Start it with: ollama serve")
         } catch let error as URLError where error.code == .timedOut {
-            throw DreamError.llmFailed("Ollama timed out. The model may be too large for your hardware.")
+            throw WhatlyError.llmFailed("Ollama timed out. The model may be too large for your hardware.")
         } catch {
-            throw DreamError.llmFailed("Cannot connect to Ollama at localhost:11434. Error: \(error.localizedDescription)")
+            throw WhatlyError.llmFailed("Cannot connect to Ollama at localhost:11434. Error: \(error.localizedDescription)")
         }
 
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
         // Check for Ollama-level errors (e.g., model not found)
         if let errorMsg = json?["error"] as? String {
-            throw DreamError.llmFailed("Ollama: \(errorMsg)")
+            throw WhatlyError.llmFailed("Ollama: \(errorMsg)")
         }
 
         return json?["response"] as? String ?? ""
@@ -501,7 +501,7 @@ final class DreamEngine {
     /// Call Anthropic Claude API.
     private func callClaude(prompt: String) async throws -> String {
         guard let apiKey = KeychainService.load(key: "claude_api_key"), !apiKey.isEmpty else {
-            throw DreamError.missingAPIKey("Claude")
+            throw WhatlyError.missingAPIKey("Claude")
         }
 
         let url = URL(string: "https://api.anthropic.com/v1/messages")!
@@ -529,7 +529,7 @@ final class DreamEngine {
     /// Call OpenAI API.
     private func callOpenAI(prompt: String) async throws -> String {
         guard let apiKey = KeychainService.load(key: "openai_api_key"), !apiKey.isEmpty else {
-            throw DreamError.missingAPIKey("OpenAI")
+            throw WhatlyError.missingAPIKey("OpenAI")
         }
 
         let url = URL(string: "https://api.openai.com/v1/chat/completions")!
@@ -780,9 +780,9 @@ final class DreamEngine {
     ///   full.md (~1500 tokens) — Everything. Use when starting a big new task.
     ///
     /// Usage in any CLAUDE.md:
-    ///   Light:  `Read ~/Dream/me.md`
-    ///   Normal: `Read ~/Dream/me.md` + `Read ~/Dream/now.md`
-    ///   Full:   `Read ~/Dream/full.md`
+    ///   Light:  `Read ~/Whatly/me.md`
+    ///   Normal: `Read ~/Whatly/me.md` + `Read ~/Whatly/now.md`
+    ///   Full:   `Read ~/Whatly/full.md`
     private func generateMeFile() throws {
         let memories = database.fetchAllMemories()
         let recentSummaries = database.fetchRecentSummaries(limit: 7)
@@ -943,16 +943,16 @@ final class DreamEngine {
 
     // MARK: - Scheduling
 
-    private var dreamTimer: Timer?
+    private var whatlyTimer: Timer?
 
     /// Called when a scheduled Dream completes. Set by AppState.
-    var onDreamComplete: ((DailySummary) -> Void)?
-    var onDreamFailed: ((Error) -> Void)?
+    var onSummaryComplete: ((DailySummary) -> Void)?
+    var onSummaryFailed: ((Error) -> Void)?
 
     /// Schedule the nightly dream using a proper macOS Timer.
     /// Survives app sleep/wake. Reschedules automatically.
-    func scheduleDream(at hour: Int, minute: Int = 0) {
-        dreamTimer?.invalidate()
+    func scheduleSummary(at hour: Int, minute: Int = 0) {
+        whatlyTimer?.invalidate()
 
         let calendar = Calendar.current
         var components = calendar.dateComponents([.year, .month, .day], from: Date())
@@ -965,27 +965,27 @@ final class DreamEngine {
             ? calendar.date(byAdding: .day, value: 1, to: scheduledDate)!
             : scheduledDate
 
-        dreamTimer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
+        whatlyTimer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
             guard let self else { return }
             Task {
-                if self.shouldDream() {
+                if self.shouldRun() {
                     do {
-                        let summary = try await self.runDream()
-                        self.onDreamComplete?(summary)
+                        let summary = try await self.runSummary()
+                        self.onSummaryComplete?(summary)
                     } catch {
-                        self.onDreamFailed?(error)
+                        self.onSummaryFailed?(error)
                     }
                 }
-                self.scheduleDream(at: hour, minute: minute)
+                self.scheduleSummary(at: hour, minute: minute)
             }
         }
         // Add to common run loop so it fires even during UI tracking
-        RunLoop.main.add(dreamTimer!, forMode: .common)
+        RunLoop.main.add(whatlyTimer!, forMode: .common)
     }
 
     func cancelSchedule() {
-        dreamTimer?.invalidate()
-        dreamTimer = nil
+        whatlyTimer?.invalidate()
+        whatlyTimer = nil
     }
 }
 
@@ -1009,7 +1009,7 @@ struct ConsolidatedSummary {
     let memoryUpdatesJSON: String?
 }
 
-enum DreamError: LocalizedError {
+enum WhatlyError: LocalizedError {
     case missingAPIKey(String)
     case llmFailed(String)
 

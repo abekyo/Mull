@@ -9,9 +9,9 @@ final class AppState: ObservableObject {
 
     // MARK: - Dream Engine State
 
-    @Published var isDreaming = false
-    @Published var dreamProgress: String?
-    @Published var lastDreamDate: Date?
+    @Published var isSummarizing = false
+    @Published var whatlyProgress: String?
+    @Published var lastSummaryDate: Date?
 
     // MARK: - Recording State
 
@@ -37,13 +37,13 @@ final class AppState: ObservableObject {
 
     @Published var todaySummary: DailySummary?
     @Published var recentSummaries: [DailySummary] = []
-    @Published var hasUnreadDream = false
+    @Published var hasUnreadSummary = false
 
     // MARK: - Services
 
     let database: DatabaseService
     let recorder: RecordingService
-    let dreamEngine: DreamEngine
+    let whatlyEngine: WhatlyEngine
     let analytics: AnalyticsEngine
     let calendar: CalendarService
     let email: EmailService
@@ -54,7 +54,7 @@ final class AppState: ObservableObject {
 
     deinit {
         refreshTimer?.invalidate()
-        dreamEngine.cancelSchedule()
+        whatlyEngine.cancelSchedule()
         if let monitor = globalShortcutMonitor {
             NSEvent.removeMonitor(monitor)
         }
@@ -65,7 +65,7 @@ final class AppState: ObservableObject {
     init() {
         self.database = DatabaseService()
         self.recorder = RecordingService(database: database)
-        self.dreamEngine = DreamEngine(database: database)
+        self.whatlyEngine = WhatlyEngine(database: database)
         self.analytics = AnalyticsEngine(database: database)
         self.calendar = CalendarService()
         self.email = EmailService(database: database)
@@ -89,31 +89,31 @@ final class AppState: ObservableObject {
         // Onboarding is handled by AppDelegate.applicationDidFinishLaunching
 
         // Schedule nightly dream + wire up completion callbacks
-        dreamEngine.onDreamComplete = { [weak self] summary in
+        whatlyEngine.onSummaryComplete = { [weak self] summary in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.todaySummary = summary
-                self.hasUnreadDream = true
-                self.lastDreamDate = Date()
+                self.hasUnreadSummary = true
+                self.lastSummaryDate = Date()
                 self.loadRecentSummaries()
                 self.sendNotification(
-                    title: "Tonight's Dream is ready ☽",
+                    title: "Tonight's summary is ready ☽",
                     body: summary.preview
                 )
             }
         }
-        dreamEngine.onDreamFailed = { [weak self] error in
+        whatlyEngine.onSummaryFailed = { [weak self] error in
             Task { @MainActor [weak self] in
                 self?.sendNotification(
-                    title: "Dream failed",
+                    title: "Summary failed",
                     body: error.localizedDescription
                 )
             }
         }
 
-        let hour = UserDefaults.standard.object(forKey: "dreamTime") as? Int ?? 23
-        let minute = UserDefaults.standard.object(forKey: "dreamTimeMinute") as? Int ?? 0
-        dreamEngine.scheduleDream(at: hour, minute: minute)
+        let hour = UserDefaults.standard.object(forKey: "summaryTime") as? Int ?? 23
+        let minute = UserDefaults.standard.object(forKey: "summaryTimeMinute") as? Int ?? 0
+        whatlyEngine.scheduleSummary(at: hour, minute: minute)
 
         // Set default output limit if not configured
         if UserDefaults.standard.object(forKey: "outputMaxChars") == nil {
@@ -192,37 +192,37 @@ final class AppState: ObservableObject {
     }
 
     /// Run Dream immediately (manual trigger).
-    func triggerDreamNow() {
-        guard !isDreaming else { return }
+    func triggerSummaryNow() {
+        guard !isSummarizing else { return }
 
         Task {
-            isDreaming = true
-            dreamProgress = "Dreaming..."
+            isSummarizing = true
+            whatlyProgress = "Summarizing..."
 
             do {
-                let summary = try await dreamEngine.runDream()
+                let summary = try await whatlyEngine.runSummary()
                 todaySummary = summary
-                hasUnreadDream = true
-                lastDreamDate = Date()
+                hasUnreadSummary = true
+                lastSummaryDate = Date()
                 loadRecentSummaries()
-                dreamProgress = nil
+                whatlyProgress = nil
 
                 // macOS notification — pull user back
                 sendNotification(
-                    title: "Dream is ready",
+                    title: "Summary is ready",
                     body: summary.preview
                 )
             } catch {
-                dreamProgress = "Dream failed: \(error.localizedDescription)"
+                whatlyProgress = "Dream failed: \(error.localizedDescription)"
                 sendNotification(
-                    title: "Dream failed",
+                    title: "Summary failed",
                     body: error.localizedDescription
                 )
                 try? await Task.sleep(for: .seconds(5))
-                dreamProgress = nil
+                whatlyProgress = nil
             }
 
-            isDreaming = false
+            isSummarizing = false
         }
     }
 
@@ -245,8 +245,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    func markDreamRead() {
-        hasUnreadDream = false
+    func markSummaryRead() {
+        hasUnreadSummary = false
     }
 
     /// Open the main Dream window from anywhere via ⌘+Shift+D
@@ -254,7 +254,7 @@ final class AppState: ObservableObject {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         // Open the main window by its ID
-        if let window = NSApp.windows.first(where: { $0.title == "Dream" }) {
+        if let window = NSApp.windows.first(where: { $0.title == "Whatly" }) {
             window.makeKeyAndOrderFront(nil)
         }
     }

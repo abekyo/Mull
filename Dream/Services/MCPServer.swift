@@ -11,10 +11,10 @@ import Foundation
 ///   User never did anything. AI just... knows.
 ///
 /// Resources exposed:
-///   dream://me       — who the user is (~200 tokens)
-///   dream://now      — what they're working on (~500 tokens)
-///   dream://full     — everything (~2000 tokens)
-///   dream://today    — raw today's events
+///   whatly://me       — who the user is (~200 tokens)
+///   whatly://now      — what they're working on (~500 tokens)
+///   whatly://full     — everything (~2000 tokens)
+///   whatly://today    — raw today's events
 ///
 /// Tools exposed:
 ///   get_user_context — get me.md + now.md (for mid-conversation queries)
@@ -24,13 +24,13 @@ final class MCPServer {
 
     private let database: DatabaseService
     private let analytics: AnalyticsEngine
-    private let dreamDir: URL
+    private let whatlyDir: URL
 
     init(database: DatabaseService) {
         self.database = database
         self.analytics = AnalyticsEngine(database: database)
-        self.dreamDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Dream")
+        self.whatlyDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Whatly")
     }
 
     /// Run the MCP server loop. Blocks forever (reads stdin until EOF).
@@ -60,7 +60,7 @@ final class MCPServer {
                     "tools": ["listChanged": false],
                     "resources": ["subscribe": false, "listChanged": false]
                 ],
-                "serverInfo": ["name": "dream", "version": "1.0.0"]
+                "serverInfo": ["name": "whatly", "version": "1.0.0"]
             ])
 
         case "notifications/initialized":
@@ -136,13 +136,13 @@ final class MCPServer {
             ],
             [
                 "name": "write_note",
-                "description": "Create or update a markdown note in the user's Dream folder. Use this to save information the user might need later, record decisions made during conversation, or store context for future sessions. The note will be visible in Dream's Files tab and readable by any AI assistant.",
+                "description": "Create or update a markdown note in the user's Whatly folder. Use this to save information the user might need later, record decisions made during conversation, or store context for future sessions. The note will be visible in Whatly's Files tab and readable by any AI assistant.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
                         "path": [
                             "type": "string",
-                            "description": "File path relative to ~/Dream/ (e.g. 'notes/meeting-2026-04-01.md')"
+                            "description": "File path relative to ~/Whatly/ (e.g. 'notes/meeting-2026-04-01.md')"
                         ],
                         "content": [
                             "type": "string",
@@ -154,7 +154,7 @@ final class MCPServer {
             ],
             [
                 "name": "list_files",
-                "description": "List all markdown files in the user's Dream folder. Returns file names, sizes, and whether they are auto-generated or user-created.",
+                "description": "List all markdown files in the user's Whatly folder. Returns file names, sizes, and whether they are auto-generated or user-created.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [:]
@@ -204,19 +204,19 @@ final class MCPServer {
     private func resourceDefinitions() -> [[String: Any]] {
         [
             [
-                "uri": "dream://me",
+                "uri": "whatly://me",
                 "name": "User Profile (me.md)",
                 "description": "Who this user is — identity, skills, preferences. ~200 tokens.",
                 "mimeType": "text/markdown"
             ],
             [
-                "uri": "dream://now",
+                "uri": "whatly://now",
                 "name": "Current Context (now.md)",
                 "description": "What the user is currently working on — projects, today's files, app usage. ~500 tokens.",
                 "mimeType": "text/markdown"
             ],
             [
-                "uri": "dream://full",
+                "uri": "whatly://full",
                 "name": "Full Context (full.md)",
                 "description": "Complete user context including raw activity data. ~2000 tokens.",
                 "mimeType": "text/markdown"
@@ -229,16 +229,16 @@ final class MCPServer {
 
         let fileName: String
         switch uri {
-        case "dream://me": fileName = "me.md"
-        case "dream://now": fileName = "now.md"
-        case "dream://full": fileName = "full.md"
+        case "whatly://me": fileName = "me.md"
+        case "whatly://now": fileName = "now.md"
+        case "whatly://full": fileName = "full.md"
         default:
             respondError(id: id, code: -32602, message: "Unknown resource: \(uri)")
             return
         }
 
-        let filePath = dreamDir.appendingPathComponent(fileName)
-        let content = (try? String(contentsOf: filePath, encoding: .utf8)) ?? "(No data yet. Dream is still recording.)"
+        let filePath = whatlyDir.appendingPathComponent(fileName)
+        let content = (try? String(contentsOf: filePath, encoding: .utf8)) ?? "(No data yet. Whatly is still recording.)"
 
         respond(id: id, result: [
             "contents": [[
@@ -265,14 +265,14 @@ final class MCPServer {
 
         var parts: [String] = []
         for file in files {
-            let path = dreamDir.appendingPathComponent(file)
+            let path = whatlyDir.appendingPathComponent(file)
             if let content = try? String(contentsOf: path, encoding: .utf8), !content.isEmpty {
                 parts.append(content)
             }
         }
 
         if parts.isEmpty {
-            return "(Dream is still recording. No user context available yet. Ask the user directly for now.)"
+            return "(Whatly is still recording. No user context available yet. Ask the user directly for now.)"
         }
 
         return parts.joined(separator: "\n\n")
@@ -314,21 +314,21 @@ final class MCPServer {
             return "Error: only .md files are allowed"
         }
 
-        let filePath = dreamDir.appendingPathComponent(cleaned)
+        let filePath = whatlyDir.appendingPathComponent(cleaned)
         let parentDir = filePath.deletingLastPathComponent()
 
         do {
             try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
             try content.write(to: filePath, atomically: true, encoding: .utf8)
-            return "Written: ~/Dream/\(cleaned) (\(content.count) chars)"
+            return "Written: ~/Whatly/\(cleaned) (\(content.count) chars)"
         } catch {
             return "Error writing file: \(error.localizedDescription)"
         }
     }
 
     private func listFiles() -> String {
-        var lines: [String] = ["Files in ~/Dream/:"]
-        listDir(dreamDir, prefix: "", lines: &lines)
+        var lines: [String] = ["Files in ~/Whatly/:"]
+        listDir(whatlyDir, prefix: "", lines: &lines)
         return lines.joined(separator: "\n")
     }
 

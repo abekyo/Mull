@@ -66,14 +66,14 @@ struct FullWindowView: View {
                 .controlSize(.small)
 
                 Button {
-                    appState.triggerDreamNow()
+                    appState.triggerSummaryNow()
                 } label: {
                     Label("Summarize", systemImage: "moon.stars")
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(appState.isDreaming || appState.todayEventCount == 0)
+                .disabled(appState.isSummarizing || appState.todayEventCount == 0)
             }
             .padding(.horizontal, DS.xl)
             .padding(.vertical, DS.sm)
@@ -343,7 +343,7 @@ struct InsightsTab: View {
                         .font(DS.titleFont)
 
                     if facts.isEmpty {
-                        Text("Dream is still learning about you...")
+                        Text("Whatly is still learning about you...")
                             .font(DS.captionFont)
                             .foregroundStyle(.tertiary)
                     }
@@ -442,7 +442,7 @@ struct InsightsTab: View {
             HStack {
                 Image(systemName: "moon.stars.fill")
                     .foregroundStyle(Color.accentColor)
-                Text("Today's Dream")
+                Text("Today's Summary")
                     .font(DS.titleFont)
                 Spacer()
                 Text(String(format: "%.0fs", summary.processingSeconds))
@@ -652,7 +652,7 @@ struct InsightsTab: View {
             HStack {
                 Image(systemName: "brain")
                     .foregroundStyle(Color.accentColor)
-                Text("What Dream Knows")
+                Text("What Whatly Knows")
                     .font(DS.titleFont)
             }
 
@@ -661,10 +661,10 @@ struct InsightsTab: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 20))
                         .foregroundStyle(.quaternary)
-                    Text("Dream will learn about you over time")
+                    Text("Whatly will learn about you over time")
                         .font(DS.bodyFont)
                         .foregroundStyle(.tertiary)
-                    Text("Memories are extracted after each nightly Dream run")
+                    Text("Memories are extracted after each nightly summary")
                         .font(DS.captionFont)
                         .foregroundStyle(.quaternary)
                 }
@@ -741,22 +741,22 @@ struct TimelineTab: View {
 
             // Generate Now button
             Button {
-                appState.triggerDreamNow()
+                appState.triggerSummaryNow()
             } label: {
                 HStack(spacing: DS.sm) {
-                    if appState.isDreaming {
+                    if appState.isSummarizing {
                         ProgressView().controlSize(.mini)
                     } else {
                         Image(systemName: "sparkles")
                     }
-                    Text(appState.isDreaming ? "Generating..." : "Generate Summary")
+                    Text(appState.isSummarizing ? "Generating..." : "Generate Summary")
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(Color.accentColor)
             .padding(.horizontal, DS.md)
-            .disabled(appState.isDreaming || appState.todayEventCount == 0)
+            .disabled(appState.isSummarizing || appState.todayEventCount == 0)
 
             if appState.todayEventCount == 0 {
                 Text("Start working to generate a summary")
@@ -884,7 +884,7 @@ struct TimelineTab: View {
                 HStack {
                     Image(systemName: "moon.stars.fill")
                         .foregroundStyle(Color.accentColor)
-                    Text("Dream Summary")
+                    Text("Summary")
                         .font(DS.titleFont)
                     Spacer()
                     Text(summary.llmProvider)
@@ -904,7 +904,7 @@ struct TimelineTab: View {
                 Text("No summary yet for today")
                     .font(DS.bodyMedium)
 
-                Text("Press \"Generate Summary\" to create one now,\nor wait for tonight's automatic Dream.")
+                Text("Press \"Generate Summary\" to create one now,\nor wait for tonight's automatic summary.")
                     .font(DS.captionFont)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
@@ -968,7 +968,7 @@ struct TimelineTab: View {
                 HStack {
                     Image(systemName: "moon.stars.fill")
                         .foregroundStyle(Color.accentColor)
-                    Text("Dream Summary")
+                    Text("Summary")
                         .font(DS.titleFont)
                     Spacer()
 
@@ -989,7 +989,7 @@ struct TimelineTab: View {
                 Image(systemName: "moon.zzz")
                     .font(.system(size: 28))
                     .foregroundStyle(.quaternary)
-                Text("No Dream for this day")
+                Text("No summary for this day")
                     .font(DS.bodyMedium)
                     .foregroundStyle(.secondary)
             }

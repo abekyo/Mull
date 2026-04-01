@@ -7,15 +7,15 @@ import Foundation
 /// before the nightly Dream has ever run.
 enum LiveContextGenerator {
 
-    private static let dreamDir: URL = {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Dream")
+    private static let whatlyDir: URL = {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Whatly")
     }()
 
     static var calendarService: CalendarService?
     static var emailService: EmailService?
 
     static func generate(analytics: AnalyticsEngine, database: DatabaseService) throws {
-        try FileManager.default.createDirectory(at: dreamDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: whatlyDir, withIntermediateDirectories: true)
 
         let memories = database.fetchAllMemories()
         let summaries = database.fetchRecentSummaries(limit: 7)
@@ -25,7 +25,7 @@ enum LiveContextGenerator {
         try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendarService, timestamp: timestamp)
         try generateFull(database: database, analytics: analytics, timestamp: timestamp)
         // NOTE: Claude Code integration is manual. User runs:
-        //   claude mcp add --transport stdio --scope user dream -- /path/to/DreamMCP
+        //   claude mcp add --transport stdio --scope user dream -- /path/to/WhatlyMCP
         // We don't auto-write to ~/.claude.json or ~/.claude/CLAUDE.md — that's invasive.
     }
 
@@ -58,11 +58,11 @@ enum LiveContextGenerator {
         }
 
         if lines.count <= 2 {
-            lines.append("- (Dream is still learning. More data will improve this profile.)")
+            lines.append("- (Whatly is still learning. More data will improve this profile.)")
         }
 
         try lines.joined(separator: "\n")
-            .write(to: dreamDir.appendingPathComponent("me.md"), atomically: true, encoding: .utf8)
+            .write(to: whatlyDir.appendingPathComponent("me.md"), atomically: true, encoding: .utf8)
     }
 
     // MARK: - now.md (~500 tokens) — What you're working on
@@ -176,7 +176,7 @@ enum LiveContextGenerator {
         }
 
         try lines.joined(separator: "\n")
-            .write(to: dreamDir.appendingPathComponent("now.md"), atomically: true, encoding: .utf8)
+            .write(to: whatlyDir.appendingPathComponent("now.md"), atomically: true, encoding: .utf8)
     }
 
     // MARK: - full.md — Everything
@@ -185,8 +185,8 @@ enum LiveContextGenerator {
         var parts: [String] = []
 
         // Combine me.md + now.md
-        let mePath = dreamDir.appendingPathComponent("me.md")
-        let nowPath = dreamDir.appendingPathComponent("now.md")
+        let mePath = whatlyDir.appendingPathComponent("me.md")
+        let nowPath = whatlyDir.appendingPathComponent("now.md")
 
         if let me = try? String(contentsOf: mePath, encoding: .utf8) {
             parts.append(me)
@@ -225,7 +225,7 @@ enum LiveContextGenerator {
             for event in clipEvents {
                 guard let text = event.textContent, !text.isEmpty else { continue }
                 // Skip Dream's own output
-                if isDreamOutput(text) { continue }
+                if isWhatlyOutput(text) { continue }
                 let key = String(text.prefix(80).lowercased())
                 guard !clipSeen.contains(key) else { continue }
                 clipSeen.insert(key)
@@ -240,7 +240,7 @@ enum LiveContextGenerator {
         }
 
         try parts.joined(separator: "\n")
-            .write(to: dreamDir.appendingPathComponent("full.md"), atomically: true, encoding: .utf8)
+            .write(to: whatlyDir.appendingPathComponent("full.md"), atomically: true, encoding: .utf8)
     }
 
     // MARK: - Auto-install into Claude Code config
@@ -248,20 +248,20 @@ enum LiveContextGenerator {
     // Claude Code / Cursor integration is manual (not auto-installed):
     //
     // Option 1 — MCP Server (recommended):
-    //   claude mcp add --transport stdio --scope user dream -- /path/to/DreamMCP
+    //   claude mcp add --transport stdio --scope user dream -- /path/to/WhatlyMCP
     //
     // Option 2 — File reference in CLAUDE.md:
-    //   Read ~/Dream/me.md and ~/Dream/now.md for context about who I am.
+    //   Read ~/Whatly/me.md and ~/Whatly/now.md for context about who I am.
     //
     // Option 3 — Copy & paste from menu bar panel
 
     // MARK: - Helpers
 
     /// Check if text is noise that shouldn't appear in AI context.
-    private static func isDreamOutput(_ text: String) -> Bool {
+    private static func isWhatlyOutput(_ text: String) -> Bool {
         // Dream's own output
-        if text.contains("auto-updated") || text.contains("Dream is recording") ||
-           text.contains("Dream is still learning") || text.contains("Raw activity data for") ||
+        if text.contains("auto-updated") || text.contains("Whatly is recording") ||
+           text.contains("Whatly is still learning") || text.contains("Raw activity data for") ||
            text.contains("Context about the user") || text.contains("No activity recorded") {
             return true
         }

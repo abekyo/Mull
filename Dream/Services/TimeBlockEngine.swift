@@ -313,7 +313,7 @@ extension TimeBlockEngine {
 
         // Extract project name from common patterns
         // "PantryApp — ViewController.swift" → "PantryApp"
-        // "Dream — DreamEngine.swift" → "Dream"
+        // "Dream — WhatlyEngine.swift" → "Whatly"
         let separators = [" — ", " - ", " | "]
         for sep in separators {
             let parts = label.components(separatedBy: sep)

@@ -15,8 +15,8 @@ struct AIExportSheet: View {
     @State private var showCopiedConfirmation = false
     @State private var previewText = ""
 
-    private let dreamDir = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Dream")
+    private let whatlyDir = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Whatly")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -206,7 +206,7 @@ struct AIExportSheet: View {
         var parts: [String] = []
 
         for fileName in selectedLayer.files {
-            let filePath = dreamDir.appendingPathComponent(fileName)
+            let filePath = whatlyDir.appendingPathComponent(fileName)
             if let content = try? String(contentsOf: filePath, encoding: .utf8) {
                 parts.append(content)
             }

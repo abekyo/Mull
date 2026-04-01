@@ -29,7 +29,7 @@ struct RecordingEvent: Codable, FetchableRecord, PersistableRecord {
 
 // MARK: - Daily Summaries
 
-/// A Dream-generated daily summary.
+/// A Auto-generated daily summary.
 struct DailySummary: Codable, FetchableRecord, PersistableRecord, Identifiable {
     var id: Int64?
     var date: Date
@@ -79,7 +79,7 @@ struct MemoryEntry: Codable, FetchableRecord, PersistableRecord, Identifiable {
     var description: String
     var memoryType: MemoryType
     var content: String
-    var filePath: String         // Relative path within ~/Dream/memory/
+    var filePath: String         // Relative path within ~/Whatly/memory/
     var createdAt: Date
     var updatedAt: Date
 
@@ -100,9 +100,9 @@ struct MemoryEntry: Codable, FetchableRecord, PersistableRecord, Identifiable {
 // MARK: - Dream Lock
 
 /// Tracks Dream execution state for the 3-gate trigger system.
-struct DreamLock: Codable, FetchableRecord, PersistableRecord {
+struct WhatlyLock: Codable, FetchableRecord, PersistableRecord {
     var id: Int64?
-    var lastDreamAt: Date?
+    var lastSummaryAt: Date?
     var holderPID: Int32?
     var sessionsSinceLast: Int
 

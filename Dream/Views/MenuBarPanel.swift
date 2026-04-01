@@ -233,12 +233,12 @@ struct MenuBarPanel: View {
 
             if let summary = appState.todaySummary {
                 SummaryContent(summary: summary)
-            } else if appState.isDreaming {
+            } else if appState.isSummarizing {
                 VStack(alignment: .leading, spacing: DS.xs) {
                     HStack(spacing: DS.sm) {
                         ProgressView()
                             .controlSize(.small)
-                        Text(appState.dreamProgress ?? "Analyzing your day...")
+                        Text(appState.whatlyProgress ?? "Analyzing your day...")
                             .font(DS.bodyFont)
                             .foregroundStyle(.secondary)
                     }
@@ -285,8 +285,8 @@ struct MenuBarPanel: View {
 
             // Dream Now or schedule info
             HStack {
-                let dreamHour = UserDefaults.standard.object(forKey: "dreamTime") as? Int ?? 23
-                let dreamMin = UserDefaults.standard.object(forKey: "dreamTimeMinute") as? Int ?? 0
+                let dreamHour = UserDefaults.standard.object(forKey: "summaryTime") as? Int ?? 23
+                let dreamMin = UserDefaults.standard.object(forKey: "summaryTimeMinute") as? Int ?? 0
                 Text("Summary at \(String(format: "%02d:%02d", dreamHour, dreamMin))")
                     .font(DS.captionFont)
                     .foregroundStyle(.tertiary)
@@ -295,7 +295,7 @@ struct MenuBarPanel: View {
 
                 if appState.todayEventCount > 10 {
                     Button {
-                        appState.triggerDreamNow()
+                        appState.triggerSummaryNow()
                     } label: {
                         Text("Summarize Now")
                             .font(DS.captionFont)
@@ -305,7 +305,7 @@ struct MenuBarPanel: View {
                 }
             }
 
-            if let error = appState.dreamProgress, error.hasPrefix("Dream failed") {
+            if let error = appState.whatlyProgress, error.hasPrefix("Summary failed") {
                 Text(error)
                     .font(DS.captionFont)
                     .foregroundStyle(DS.error)
@@ -393,7 +393,7 @@ struct MenuBarPanel: View {
                 .foregroundStyle(Color.accentColor.opacity(0.3))
 
             VStack(spacing: DS.xs) {
-                Text("Dream is recording")
+                Text("Whatly is recording")
                     .font(DS.titleFont)
                 Text("Your first summary will be ready tonight at 23:00.")
                     .font(DS.bodyFont)

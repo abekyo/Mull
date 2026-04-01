@@ -119,7 +119,7 @@ struct FactExtractor {
             "⌘", "？", "？", "！", "。", "、",  // Japanese punctuation = chat, not project
         ]
         let skipApps = Set(["Xcode", "Code", "Terminal", "Safari", "Firefox", "Chrome",
-                            "Finder", "Simulator", "System Settings", "Dream"])
+                            "Finder", "Simulator", "System Settings", "Whatly"])
 
         for event in events where event.eventType == .screenText {
             guard let text = event.textContent else { continue }

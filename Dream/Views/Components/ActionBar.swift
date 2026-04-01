@@ -99,19 +99,19 @@ struct ActionBar: View {
     // MARK: - Actions
 
     private func copyContent() {
-        let dreamDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Dream")
+        let whatlyDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Whatly")
         let text: String
 
         // Priority: full.md (richest) → now.md + me.md → live build
-        let fullFile = dreamDir.appendingPathComponent("full.md")
+        let fullFile = whatlyDir.appendingPathComponent("full.md")
         if let fullContent = try? String(contentsOf: fullFile, encoding: .utf8), fullContent.count > 50 {
             text = fullContent
         } else {
             // Combine me.md + now.md
             var parts: [String] = []
             for file in ["me.md", "now.md"] {
-                if let content = try? String(contentsOf: dreamDir.appendingPathComponent(file), encoding: .utf8),
+                if let content = try? String(contentsOf: whatlyDir.appendingPathComponent(file), encoding: .utf8),
                    !content.isEmpty {
                     parts.append(content)
                 }
@@ -256,11 +256,11 @@ struct ActionBar: View {
         if let summary = appState.todaySummary {
             content = summary.content
         } else {
-            content = "Dream is recording. \(appState.todayEventCount) events captured today."
+            content = "Whatly is recording. \(appState.todayEventCount) events captured today."
         }
 
         let exportDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Dream")
+            .appendingPathComponent("Whatly")
         try? FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
 
         let formatter = DateFormatter()

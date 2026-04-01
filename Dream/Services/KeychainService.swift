@@ -5,7 +5,7 @@ import Security
 /// Never stores keys in UserDefaults/plist.
 enum KeychainService {
 
-    private static let serviceName = "com.dream.app"
+    private static let serviceName = "com.whatly.app"
 
     static func save(key: String, value: String) {
         guard let data = value.data(using: .utf8) else { return }
@@ -23,7 +23,7 @@ enum KeychainService {
 
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
-            print("[Dream] Keychain save failed for \(key): \(status)")
+            print("[Whatly] Keychain save failed for \(key): \(status)")
         }
     }
 

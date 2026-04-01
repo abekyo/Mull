@@ -55,7 +55,7 @@ struct OnboardingView: View {
             }
 
             VStack(spacing: DS.sm) {
-                Text("Dream")
+                Text("Whatly")
                     .font(.system(size: 28, weight: .bold))
 
                 Text("Remember everything.\nExplain nothing.")
@@ -110,7 +110,7 @@ struct OnboardingView: View {
             Text("Two Permissions Needed")
                 .font(.system(size: 18, weight: .semibold))
 
-            Text("Dream needs these to record your activity.\nAll data stays on your Mac.")
+            Text("Whatly needs these to record your activity.\nAll data stays on your Mac.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -211,8 +211,8 @@ struct OnboardingView: View {
 
                 howToStep("1", "Click \"Open Settings\" above (or go to System Settings → Privacy & Security → Accessibility)")
                 howToStep("2", "Click the lock icon 🔒 at bottom-left and authenticate")
-                howToStep("3", "Find \"Dream\" in the list and toggle it ON")
-                howToStep("", "If Dream isn't listed, click \"+\" and add it")
+                howToStep("3", "Find \"Whatly\" in the list and toggle it ON")
+                howToStep("", "If Whatly isn't listed, click \"+\" and add it")
             }
 
             Divider()
@@ -224,8 +224,8 @@ struct OnboardingView: View {
 
                 howToStep("1", "Go to System Settings → Privacy & Security → Input Monitoring")
                 howToStep("2", "Click the lock icon 🔒 and authenticate")
-                howToStep("3", "Click \"+\" and add \"Dream\"")
-                howToStep("", "If running from Xcode: add \"Xcode\" instead (Dream runs as Xcode's child process)")
+                howToStep("3", "Click \"+\" and add \"Whatly\"")
+                howToStep("", "If running from Xcode: add \"Xcode\" instead (Summary runs as Xcode's child process)")
             }
 
             Divider()
@@ -234,7 +234,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("After granting both:")
                     .font(.system(size: 12, weight: .semibold))
-                howToStep("", "Restart Dream (⌘Q → reopen, or ⌘R in Xcode)")
+                howToStep("", "Restart Whatly (⌘Q → reopen, or ⌘R in Xcode)")
                 howToStep("", "The checkmarks above will turn green automatically")
             }
         }
@@ -313,11 +313,11 @@ struct OnboardingView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.green)
 
-            Text("Dream is ready.")
+            Text("Whatly is ready.")
                 .font(.system(size: 18, weight: .semibold))
 
             VStack(spacing: 8) {
-                instructionRow(icon: "moon.fill", text: "Find Dream in your menu bar (☽)")
+                instructionRow(icon: "moon.fill", text: "Find Whatly in your menu bar (☽)")
                 instructionRow(icon: "clock", text: "Tonight at 23:00, your first summary appears")
                 instructionRow(icon: "brain.head.profile", text: "Press ⌘A anytime to share context with AI")
             }

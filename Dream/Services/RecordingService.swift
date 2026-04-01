@@ -42,7 +42,7 @@ final class RecordingService {
 
     // Excluded apps
     private static let defaultExcluded: Set<String> = [
-        "com.dream.app",
+        "com.whatly.app",
         "com.1password.1password",
         "com.agilebits.onepassword7",
         "com.bitwarden.desktop",
@@ -79,16 +79,16 @@ final class RecordingService {
         // Don't check AXIsProcessTrusted() here — it returns false on Xcode debug builds
         // even when permission is granted. CGEvent.tapCreate will fail if truly not permitted.
         isRunning = true
-        print("[Dream] Recording started")
+        print("[Whatly] Recording started")
 
         startAppSwitchMonitor()
-        print("[Dream] App switch monitor started")
+        print("[Whatly] App switch monitor started")
 
         startClipboardMonitor()
-        print("[Dream] Clipboard monitor started")
+        print("[Whatly] Clipboard monitor started")
 
         startWindowTitleMonitor()
-        print("[Dream] Window title monitor started")
+        print("[Whatly] Window title monitor started")
 
         startKeystrokeCapture()
         // CGEvent tap creation logs its own success/failure
@@ -96,7 +96,7 @@ final class RecordingService {
         startWakeMonitor()
         startHealthCheck()
         updateCurrentApp()
-        print("[Dream] All monitors running")
+        print("[Whatly] All monitors running")
     }
 
     func stop() {
@@ -154,12 +154,12 @@ final class RecordingService {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("[Dream] ⚠️ CGEvent tap creation FAILED")
-            print("[Dream] → Grant 'Input Monitoring' in System Settings → Privacy & Security → Input Monitoring")
-            print("[Dream] → Clipboard and window title recording will still work without this")
+            print("[Whatly] ⚠️ CGEvent tap creation FAILED")
+            print("[Whatly] → Grant 'Input Monitoring' in System Settings → Privacy & Security → Input Monitoring")
+            print("[Whatly] → Clipboard and window title recording will still work without this")
             return
         }
-        print("[Dream] ✓ CGEvent tap created successfully — keystroke capture active")
+        print("[Whatly] ✓ CGEvent tap created successfully — keystroke capture active")
 
         eventTap = tap
         runLoopSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
@@ -364,8 +364,8 @@ final class RecordingService {
             self.lastClipboardText = text
 
             // Skip Dream's own output (recording our own output is a feedback loop)
-            if text.contains("Dream is recording") ||
-               text.contains("Dream is still learning") ||
+            if text.contains("Whatly is recording") ||
+               text.contains("Whatly is still learning") ||
                text.contains("auto-updated:") ||
                text.contains("About the user (auto") ||
                text.contains("What the user is currently") ||
@@ -375,7 +375,7 @@ final class RecordingService {
                 return
             }
 
-            print("[Dream] Clipboard captured: \(text.prefix(50))...")
+            print("[Whatly] Clipboard captured: \(text.prefix(50))...")
             self.recordEvent(type: .clipboard, text: String(text.prefix(5000)))
         }
     }
@@ -412,12 +412,12 @@ final class RecordingService {
 
             if let tap = self.eventTap {
                 if !CGEvent.tapIsEnabled(tap: tap) {
-                    print("[Dream] Event tap was disabled by macOS — re-enabling")
+                    print("[Whatly] Event tap was disabled by macOS — re-enabling")
                     CGEvent.tapEnable(tap: tap, enable: true)
                 }
             } else {
                 // Event tap was destroyed entirely — recreate
-                print("[Dream] Event tap was destroyed — recreating")
+                print("[Whatly] Event tap was destroyed — recreating")
                 self.startKeystrokeCapture()
             }
         }
@@ -446,7 +446,7 @@ final class RecordingService {
             guard stripped.count > 0 else { return }
         }
 
-        print("[Dream] Recording event: \(type.rawValue) — \(cleaned.prefix(60))")
+        print("[Whatly] Recording event: \(type.rawValue) — \(cleaned.prefix(60))")
 
         let event = RecordingEvent(
             timestamp: Date(),
@@ -466,7 +466,7 @@ final class RecordingService {
     }
 
     func removeExcludedApp(_ bundleID: String) {
-        guard bundleID != "com.dream.app" else { return }
+        guard bundleID != "com.whatly.app" else { return }
         excludedBundleIDs.remove(bundleID)
         persistExcludedApps()
     }

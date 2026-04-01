@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct DreamApp: App {
+struct WhatlyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
 
@@ -10,14 +10,14 @@ struct DreamApp: App {
         MenuBarExtra {
             MenuBarPanel()
                 .environmentObject(appState)
-                .onAppear { appState.markDreamRead() }
+                .onAppear { appState.markSummaryRead() }
         } label: {
             Label {
-                Text("Dream")
+                Text("Whatly")
             } icon: {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: menuBarIconName)
-                    if appState.hasUnreadDream {
+                    if appState.hasUnreadSummary {
                         Circle()
                             .fill(Color.accentColor)
                             .frame(width: 5, height: 5)
@@ -36,7 +36,7 @@ struct DreamApp: App {
     }
 
     private var menuBarIconName: String {
-        if appState.isDreaming { return "moon.stars.fill" }
+        if appState.isSummarizing { return "moon.stars.fill" }
         if appState.isPaused { return "moon.zzz" }
         return "moon.fill"
     }
@@ -90,10 +90,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Dream"
+        window.title = "Whatly"
         window.contentViewController = controller
         window.center()
-        window.setFrameAutosaveName("DreamMainWindow")
+        window.setFrameAutosaveName("WhatlyMainWindow")
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
 
@@ -116,7 +116,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Welcome to Dream"
+        window.title = "Welcome to Whatly"
         window.contentViewController = controller
         window.center()
         window.isReleasedWhenClosed = false

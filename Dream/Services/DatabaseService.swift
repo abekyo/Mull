@@ -3,7 +3,7 @@ import GRDB
 
 /// SQLite database layer using GRDB with WAL mode and FTS5 full-text search.
 /// Uses DatabasePool for concurrent read/write (recording writes don't block Dream reads).
-/// All data stays local at ~/Library/Application Support/Dream/dream.sqlite.
+/// All data stays local at ~/Library/Application Support/Dream/whatly.sqlite.
 final class DatabaseService: Sendable {
 
     let dbPool: DatabasePool
@@ -13,15 +13,15 @@ final class DatabaseService: Sendable {
     init() {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!.appendingPathComponent("Dream", isDirectory: true)
+        ).first!.appendingPathComponent("Whatly", isDirectory: true)
 
         do {
             try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         } catch {
-            print("[Dream] Failed to create app support directory: \(error)")
+            print("[Whatly] Failed to create app support directory: \(error)")
         }
 
-        let dbPath = appSupport.appendingPathComponent("dream.sqlite").path
+        let dbPath = appSupport.appendingPathComponent("whatly.sqlite").path
         var config = Configuration()
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA journal_mode = WAL")
@@ -122,15 +122,15 @@ final class DatabaseService: Sendable {
             }
 
             // Dream lock
-            try db.create(table: "dream_lock") { t in
+            try db.create(table: "whatly_lock") { t in
                 t.autoIncrementedPrimaryKey("id")
-                t.column("lastDreamAt", .datetime)
+                t.column("lastSummaryAt", .datetime)
                 t.column("holderPID", .integer)
                 t.column("sessionsSinceLast", .integer).notNull().defaults(to: 0)
             }
 
             // Insert initial lock row
-            try db.execute(sql: "INSERT INTO dream_lock (sessionsSinceLast) VALUES (0)")
+            try db.execute(sql: "INSERT INTO whatly_lock (sessionsSinceLast) VALUES (0)")
         }
 
         try migrator.migrate(dbPool)
@@ -179,7 +179,7 @@ final class DatabaseService: Sendable {
 
     // MARK: - Summaries
 
-    /// Upsert: if a summary for this date already exists (e.g. "Dream Now" twice),
+    /// Upsert: if a summary for this date already exists (e.g. "Summarize Now" twice),
     /// replace it with the newer version instead of silently failing.
     func insertSummary(_ summary: DailySummary) {
         try? dbPool.write { db in
@@ -283,13 +283,13 @@ final class DatabaseService: Sendable {
 
     // MARK: - Dream Lock (3-Gate System)
 
-    func fetchDreamLock() -> DreamLock? {
+    func fetchWhatlyLock() -> WhatlyLock? {
         try? dbPool.read { db in
-            try DreamLock.fetchOne(db)
+            try WhatlyLock.fetchOne(db)
         }
     }
 
-    func updateDreamLock(_ lock: DreamLock) {
+    func updateWhatlyLock(_ lock: WhatlyLock) {
         try? dbPool.write { db in
             try lock.update(db)
         }
@@ -298,7 +298,7 @@ final class DatabaseService: Sendable {
     func incrementSessionCount() {
         try? dbPool.write { db in
             try db.execute(sql: """
-                UPDATE dream_lock SET sessionsSinceLast = sessionsSinceLast + 1
+                UPDATE whatly_lock SET sessionsSinceLast = sessionsSinceLast + 1
             """)
         }
     }
@@ -310,7 +310,7 @@ final class DatabaseService: Sendable {
             try db.execute(sql: "DELETE FROM recording_events")
             try db.execute(sql: "DELETE FROM daily_summaries")
             try db.execute(sql: "DELETE FROM memory_entries")
-            try db.execute(sql: "UPDATE dream_lock SET lastDreamAt = NULL, sessionsSinceLast = 0")
+            try db.execute(sql: "UPDATE whatly_lock SET lastSummaryAt = NULL, sessionsSinceLast = 0")
         }
     }
 
@@ -339,7 +339,7 @@ final class DatabaseService: Sendable {
     func totalStorageBytes() -> Int64 {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!.appendingPathComponent("Dream/dream.sqlite")
+        ).first!.appendingPathComponent("Whatly/whatly.sqlite")
 
         let attrs = try? FileManager.default.attributesOfItem(atPath: appSupport.path)
         let mainSize = attrs?[.size] as? Int64 ?? 0

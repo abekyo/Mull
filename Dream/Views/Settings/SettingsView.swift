@@ -31,11 +31,11 @@ struct SettingsView: View {
 
 struct GeneralTab: View {
     @EnvironmentObject var appState: AppState
-    @AppStorage("dreamTime") private var dreamTimeHour = 23
-    @AppStorage("dreamTimeMinute") private var dreamTimeMinute = 0
+    @AppStorage("summaryTime") private var summaryTimeHour = 23
+    @AppStorage("summaryTimeMinute") private var summaryTimeMinute = 0
     @AppStorage("launchAtLogin") private var launchAtLogin = true
     @AppStorage("outputMaxChars") private var outputMaxChars = 50000
-    @AppStorage("exportPath") private var exportPath = "~/Dream"
+    @AppStorage("exportPath") private var exportPath = "~/Whatly"
     @AppStorage("obsidianVault") private var obsidianVault = ""
     @AppStorage("autoExport") private var autoExport = false
 
@@ -50,11 +50,11 @@ struct GeneralTab: View {
 
     var body: some View {
         Form {
-            Section("Dream") {
+            Section("Whatly") {
                 HStack {
                     Text("Nightly summary at")
                     Spacer()
-                    Picker("", selection: $dreamTimeHour) {
+                    Picker("", selection: $summaryTimeHour) {
                         ForEach(0..<24, id: \.self) { h in
                             Text(String(format: "%02d", h)).tag(h)
                         }
@@ -62,7 +62,7 @@ struct GeneralTab: View {
                     .frame(width: 60)
                     .labelsHidden()
                     Text(":")
-                    Picker("", selection: $dreamTimeMinute) {
+                    Picker("", selection: $summaryTimeMinute) {
                         ForEach([0, 15, 30, 45], id: \.self) { m in
                             Text(String(format: "%02d", m)).tag(m)
                         }
@@ -116,11 +116,11 @@ struct GeneralTab: View {
         }
         .formStyle(.grouped)
         .padding()
-        .onChange(of: dreamTimeHour) { _, h in
-            appState.dreamEngine.scheduleDream(at: h, minute: dreamTimeMinute)
+        .onChange(of: summaryTimeHour) { _, h in
+            appState.whatlyEngine.scheduleDream(at: h, minute: summaryTimeMinute)
         }
-        .onChange(of: dreamTimeMinute) { _, m in
-            appState.dreamEngine.scheduleDream(at: dreamTimeHour, minute: m)
+        .onChange(of: summaryTimeMinute) { _, m in
+            appState.whatlyEngine.scheduleDream(at: summaryTimeHour, minute: m)
         }
     }
 }
@@ -333,7 +333,7 @@ struct DataTab: View {
                     Spacer()
                     Button("Open in Finder") {
                         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-                            .first!.appendingPathComponent("Dream")
+                            .first!.appendingPathComponent("Whatly")
                         NSWorkspace.shared.open(url)
                     }
                     .font(DS.captionFont)
@@ -448,7 +448,7 @@ struct DataTab: View {
         appState.todaySummary = nil
         appState.todayEventCount = 0
         appState.loadRecentSummaries()
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Dream")
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Whatly")
         try? FileManager.default.removeItem(at: dir)
         refresh()
     }
