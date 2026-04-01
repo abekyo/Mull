@@ -7,7 +7,7 @@ import SwiftUI
 /// Timeline: Daily summaries archive
 struct FullWindowView: View {
     @EnvironmentObject var appState: AppState
-    @State private var selectedTab: DashboardTab = .insights
+    @State private var selectedTab: DashboardTab = .timeline
     @State private var showAIExport = false
 
     enum DashboardTab: String, CaseIterable {

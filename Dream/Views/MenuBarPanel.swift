@@ -85,8 +85,8 @@ struct MenuBarPanel: View {
             PrivacyStatusBar()
             Spacer()
             HStack(spacing: DS.sm) {
-                keyHint("⌘A", label: "AI")
-                keyHint("⌘C", label: "Copy")
+                keyHint("⇧⌘C", label: "Copy")
+                keyHint("⇧⌘D", label: "Open")
                 keyHint("Esc", label: "Close")
             }
         }

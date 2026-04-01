@@ -123,12 +123,21 @@ final class AppState: ObservableObject {
         // Apply data retention on launch
         applyDataRetention()
 
-        // Global keyboard shortcut: ⌘+Shift+D opens the main window
+        // Global keyboard shortcuts
         globalShortcutMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            // ⌘+Shift+D
-            if event.modifierFlags.contains([.command, .shift]) && event.keyCode == 2 {
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            // ⌘+Shift+D — open main window
+            if mods == [.command, .shift] && event.keyCode == 2 {
                 Task { @MainActor in
                     self?.openMainWindow()
+                }
+            }
+
+            // ⌘+Shift+C — instant copy context to clipboard (no UI, no sheet)
+            if mods == [.command, .shift] && event.keyCode == 8 {
+                Task { @MainActor in
+                    self?.copyContextToClipboard()
                 }
             }
         }
@@ -247,6 +256,38 @@ final class AppState: ObservableObject {
 
     func markSummaryRead() {
         hasUnreadSummary = false
+    }
+
+    /// Instant copy — no UI, no sheet. ⌘+Shift+C from anywhere.
+    func copyContextToClipboard() {
+        let whatlyDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Whatly")
+
+        // Read full.md (richest) → fallback to me.md + now.md
+        let text: String
+        let fullFile = whatlyDir.appendingPathComponent("full.md")
+        if let content = try? String(contentsOf: fullFile, encoding: .utf8), content.count > 50 {
+            text = content
+        } else {
+            var parts: [String] = []
+            for file in ["me.md", "now.md"] {
+                if let content = try? String(contentsOf: whatlyDir.appendingPathComponent(file), encoding: .utf8),
+                   !content.isEmpty {
+                    parts.append(content)
+                }
+            }
+            text = parts.isEmpty ? "Whatly is still recording. No context yet." : parts.joined(separator: "\n\n")
+        }
+
+        // Apply max chars
+        let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
+        let finalText = (maxChars > 0 && text.count > maxChars) ? String(text.prefix(maxChars)) : text
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(finalText, forType: .string)
+
+        // Notify user
+        sendNotification(title: "Copied to clipboard", body: "\(finalText.count) chars · Paste into any AI")
     }
 
     /// Open the main Dream window from anywhere via ⌘+Shift+D
