@@ -117,10 +117,10 @@ struct GeneralTab: View {
         .formStyle(.grouped)
         .padding()
         .onChange(of: summaryTimeHour) { _, h in
-            appState.whatlyEngine.scheduleDream(at: h, minute: summaryTimeMinute)
+            appState.whatlyEngine.scheduleSummary(at: h, minute: summaryTimeMinute)
         }
         .onChange(of: summaryTimeMinute) { _, m in
-            appState.whatlyEngine.scheduleDream(at: summaryTimeHour, minute: m)
+            appState.whatlyEngine.scheduleSummary(at: summaryTimeHour, minute: m)
         }
     }
 }
