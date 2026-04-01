@@ -1,15 +1,13 @@
 import SwiftUI
 
-/// Files tab — Bear-inspired markdown viewer/editor with full file management.
+/// Files tab — Bear-inspired markdown viewer/editor.
 struct FilesTab: View {
     @EnvironmentObject var appState: AppState
     @State private var selectedFile: DreamFile?
     @State private var fileTree: [DreamFileNode] = []
     @State private var editorContent: String = ""
     @State private var isDirty = false
-    @State private var isToolbarVisible = false
 
-    // Dialogs
     @State private var showNewFile = false
     @State private var showNewFolder = false
     @State private var showRename = false
@@ -21,201 +19,130 @@ struct FilesTab: View {
         .appendingPathComponent("Dream")
 
     var body: some View {
-        HSplitView {
+        NavigationSplitView {
             sidebar
-                .frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
-            Divider()
+                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
+        } detail: {
             editor
-                .frame(minWidth: 400)
         }
         .onAppear { refreshFileTree() }
+        .sheet(isPresented: $showNewFile) { dialogSheet(title: "New File", placeholder: "filename", hint: hintPath(".md"), action: "Create") { createFile() } }
+        .sheet(isPresented: $showNewFolder) { dialogSheet(title: "New Folder", placeholder: "folder name", hint: hintPath("/"), action: "Create") { createFolder() } }
+        .sheet(isPresented: $showRename) { dialogSheet(title: "Rename", placeholder: "new name", hint: "\(sanitized(dialogName)).md", action: "Rename") { renameFile() } }
+        .confirmationDialog("Delete this file?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) { deleteSelectedFile() }
+        } message: { Text("Delete \"\(selectedFile?.name ?? "")\"? This cannot be undone.") }
+    }
+
+    private func hintPath(_ suffix: String) -> String {
+        dialogParentDir.isEmpty ? "~/Dream/\(sanitized(dialogName))\(suffix)" : "~/Dream/\(dialogParentDir)/\(sanitized(dialogName))\(suffix)"
     }
 
     // MARK: - Sidebar
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header + actions
+            // Header
             HStack {
                 Text("Dream")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.tertiary)
-
                 Spacer()
-
-                // Action buttons
-                HStack(spacing: DS.xs) {
-                    Button { showNewFileDialog(parent: "") } label: {
-                        Image(systemName: "doc.badge.plus")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tertiary)
-                    .help("New File")
-
-                    Button { showNewFolderDialog(parent: "") } label: {
-                        Image(systemName: "folder.badge.plus")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tertiary)
-                    .help("New Folder")
-
-                    Button { refreshFileTree() } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tertiary)
-                    .help("Refresh")
-
-                    Button { openInFinder() } label: {
-                        Image(systemName: "folder")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tertiary)
-                    .help("Open in Finder")
+                HStack(spacing: DS.sm) {
+                    sidebarButton(icon: "doc.badge.plus", help: "New File") { showNewFileDialog(parent: "") }
+                    sidebarButton(icon: "folder.badge.plus", help: "New Folder") { showNewFolderDialog(parent: "") }
+                    sidebarButton(icon: "arrow.clockwise", help: "Refresh") { refreshFileTree() }
+                    sidebarButton(icon: "folder", help: "Finder") { NSWorkspace.shared.open(dreamDir) }
                 }
             }
             .padding(.horizontal, DS.md)
-            .padding(.top, DS.md)
-            .padding(.bottom, DS.sm)
+            .padding(.vertical, DS.sm)
 
             Divider()
 
-            // File tree
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(coreFiles, id: \.name) { file in
-                        sidebarItem(file: file)
-                    }
-
-                    if !folders.isEmpty {
-                        Divider()
-                            .padding(.vertical, DS.sm)
-                            .padding(.horizontal, DS.md)
-                    }
-
-                    ForEach(folders, id: \.name) { folder in
-                        sidebarFolder(folder)
+            // Files
+            List(selection: Binding(
+                get: { selectedFile?.path },
+                set: { path in
+                    if let path, let file = findFile(path: path) { selectFile(file) }
+                }
+            )) {
+                // Core files
+                Section {
+                    ForEach(coreFiles, id: \.path) { file in
+                        sidebarRow(file: file)
+                            .tag(file.path)
                     }
                 }
-                .padding(.horizontal, DS.sm)
-                .padding(.vertical, DS.xs)
+
+                // Folders
+                ForEach(folders, id: \.name) { folder in
+                    Section(folder.name.uppercased()) {
+                        ForEach(folder.children, id: \.id) { child in
+                            if let file = child.file {
+                                sidebarRow(file: file)
+                                    .tag(file.path)
+                            }
+                        }
+                    }
+                }
             }
+            .listStyle(.sidebar)
         }
         .background(Color(.controlBackgroundColor).opacity(0.3))
-        .sheet(isPresented: $showNewFile) { newFileSheet }
-        .sheet(isPresented: $showNewFolder) { newFolderSheet }
-        .sheet(isPresented: $showRename) { renameSheet }
-        .confirmationDialog("Delete this file?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) { deleteSelectedFile() }
-        } message: {
-            Text("Delete \"\(selectedFile?.name ?? "")\"? This cannot be undone.")
-        }
     }
 
-    // MARK: - Sidebar Items
-
-    private func sidebarItem(file: DreamFile) -> some View {
-        let isSelected = selectedFile?.path == file.path
-
-        return Button {
-            selectFile(file)
-        } label: {
-            HStack(spacing: DS.sm) {
-                Circle()
-                    .fill(fileAccent(file.name))
-                    .frame(width: 6, height: 6)
-
-                Text(displayName(file.name))
-                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                if file.isAutoGenerated {
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.3))
-                        .frame(width: 4, height: 4)
-                }
-            }
-            .padding(.horizontal, DS.sm)
-            .padding(.vertical, 5)
-            .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+    private func sidebarButton(icon: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 11))
         }
         .buttonStyle(.plain)
-        .contextMenu { fileContextMenu(file: file) }
+        .foregroundStyle(.tertiary)
+        .help(help)
     }
 
-    private func sidebarFolder(_ folder: DreamFileNode) -> some View {
-        DisclosureGroup {
-            ForEach(folder.children) { child in
-                if let file = child.file {
-                    sidebarItem(file: file)
-                        .padding(.leading, DS.sm)
-                }
-            }
-        } label: {
-            HStack {
-                Text(folder.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .textCase(.uppercase)
-                    .tracking(0.3)
+    private func sidebarRow(file: DreamFile) -> some View {
+        HStack(spacing: DS.sm) {
+            Circle()
+                .fill(fileAccent(file.name))
+                .frame(width: 6, height: 6)
 
-                Spacer()
+            Text(displayName(file.name))
+                .font(DS.bodyFont)
+                .lineLimit(1)
 
-                Text("\(folder.children.count)")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
-            }
-            .padding(.top, DS.sm)
-            .padding(.bottom, DS.xs)
-        }
-        .padding(.horizontal, DS.sm)
-        .contextMenu {
-            Button("New File in \(folder.name)") {
-                showNewFileDialog(parent: folder.name)
-            }
-            Button("Open in Finder") {
-                NSWorkspace.shared.open(dreamDir.appendingPathComponent(folder.name))
+            Spacer()
+
+            if file.isAutoGenerated {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.3))
+                    .frame(width: 4, height: 4)
             }
         }
+        .contextMenu { fileContextMenu(file: file) }
     }
 
     // MARK: - Context Menu
 
     @ViewBuilder
     private func fileContextMenu(file: DreamFile) -> some View {
-        Button("Open in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([file.url])
-        }
-
+        Button("Open in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
         if !file.isAutoGenerated {
             Divider()
-
             Button("Rename...") {
                 dialogName = file.name.replacingOccurrences(of: ".md", with: "")
                 showRename = true
             }
-
             Button("Delete", role: .destructive) {
                 selectedFile = file
                 showDeleteConfirm = true
             }
         }
-
         Divider()
-
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(file.url.path, forType: .string)
         }
-
         Button("Copy Content") {
             if let content = try? String(contentsOf: file.url, encoding: .utf8) {
                 NSPasteboard.general.clearContents()
@@ -227,147 +154,88 @@ struct FilesTab: View {
     // MARK: - Editor
 
     private var editor: some View {
-        VStack(spacing: 0) {
+        Group {
             if let file = selectedFile {
-                // Toolbar — appears on hover
-                editorToolbar(file: file)
-                    .opacity(isToolbarVisible || isDirty ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.15), value: isToolbarVisible)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(editorTitle(file: file))
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .padding(.bottom, DS.sm)
-                            .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 0) {
+                    // Toolbar
+                    HStack(spacing: DS.md) {
+                        Circle().fill(fileAccent(file.name)).frame(width: 8, height: 8)
+                        Text(displayName(file.name))
+                            .font(DS.titleFont)
 
                         if file.isAutoGenerated {
-                            HStack(spacing: DS.xs) {
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 9))
-                                Text("Auto-generated · updates every 60s")
-                                    .font(.system(size: 11))
-                            }
-                            .foregroundStyle(.quaternary)
-                            .padding(.bottom, DS.md)
+                            Text("auto")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, DS.xs)
+                                .padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
                         }
 
-                        TextEditor(text: $editorContent)
-                            .font(.system(size: 14))
-                            .scrollContentBackground(.hidden)
-                            .lineSpacing(4)
-                            .frame(minHeight: 400)
-                            .onChange(of: editorContent) { _, _ in isDirty = true }
+                        Spacer()
+
+                        Text(file.sizeFormatted)
+                            .font(DS.microFont)
+                            .foregroundStyle(.quaternary)
+
+                        if isDirty {
+                            Text("Edited")
+                                .font(DS.captionFont)
+                                .foregroundStyle(.orange)
+                        }
+
+                        Button("Save") { saveFile() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(!isDirty)
+                            .keyboardShortcut("s", modifiers: .command)
                     }
-                    .padding(.horizontal, DS.xxl)
-                    .padding(.top, DS.xl)
-                    .padding(.bottom, 60)
+                    .padding(.horizontal, DS.xl)
+                    .padding(.vertical, DS.sm)
+
+                    Divider()
+
+                    // Editor
+                    TextEditor(text: $editorContent)
+                        .font(.system(size: 14))
+                        .scrollContentBackground(.hidden)
+                        .lineSpacing(4)
+                        .padding(.horizontal, DS.lg)
+                        .padding(.top, DS.md)
+                        .onChange(of: editorContent) { _, _ in isDirty = true }
                 }
-                .onHover { isToolbarVisible = $0 }
+                .background(Color(.textBackgroundColor))
             } else {
-                emptyEditor
+                VStack(spacing: DS.lg) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 32, weight: .thin))
+                        .foregroundStyle(.quaternary)
+                    Text("Select a file")
+                        .font(DS.titleFont)
+                        .foregroundStyle(.tertiary)
+                    Text("Edit me.md to tell AI who you are\nCreate notes for extra context")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.quaternary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.textBackgroundColor))
             }
         }
-        .background(Color(.textBackgroundColor))
     }
 
-    private func editorToolbar(file: DreamFile) -> some View {
-        HStack(spacing: DS.md) {
-            Text(file.name)
-                .font(.system(size: 11))
-                .foregroundStyle(.quaternary)
-
-            Text(file.sizeFormatted)
-                .font(DS.microFont)
-                .foregroundStyle(.quaternary)
-
-            Spacer()
-
-            if isDirty {
-                Text("Edited")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange.opacity(0.7))
-            }
-
-            Button("Save") { saveFile() }
-                .font(.system(size: 11, weight: .medium))
-                .buttonStyle(.plain)
-                .foregroundStyle(isDirty ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary))
-                .disabled(!isDirty)
-                .keyboardShortcut("s", modifiers: .command)
-        }
-        .padding(.horizontal, DS.xxl)
-        .padding(.vertical, DS.sm)
-    }
-
-    private var emptyEditor: some View {
-        VStack(spacing: DS.lg) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 32, weight: .thin))
-                .foregroundStyle(.quaternary)
-
-            VStack(spacing: DS.xs) {
-                Text("Select a file")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                Text("Edit me.md to tell AI who you are\nCreate notes for extra context")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.quaternary)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.textBackgroundColor))
-    }
-
-    // MARK: - Dialogs
-
-    private var newFileSheet: some View {
-        dialogSheet(
-            title: "New File",
-            placeholder: "filename",
-            hint: dialogParentDir.isEmpty
-                ? "~/Dream/\(sanitized(dialogName)).md"
-                : "~/Dream/\(dialogParentDir)/\(sanitized(dialogName)).md",
-            action: "Create"
-        ) { createFile() }
-    }
-
-    private var newFolderSheet: some View {
-        dialogSheet(
-            title: "New Folder",
-            placeholder: "folder name",
-            hint: "~/Dream/\(sanitized(dialogName))/",
-            action: "Create"
-        ) { createFolder() }
-    }
-
-    private var renameSheet: some View {
-        dialogSheet(
-            title: "Rename",
-            placeholder: "new name",
-            hint: "\(sanitized(dialogName)).md",
-            action: "Rename"
-        ) { renameFile() }
-    }
+    // MARK: - Dialog Sheet
 
     private func dialogSheet(title: String, placeholder: String, hint: String, action: String, onSubmit: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: DS.md) {
-            Text(title)
-                .font(.system(size: 15, weight: .semibold))
-
+            Text(title).font(DS.titleFont)
             TextField(placeholder, text: $dialogName)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { onSubmit() }
-
-            Text(hint)
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-
+            Text(hint).font(DS.captionFont).foregroundStyle(.tertiary)
             HStack {
-                Button("Cancel") { dismissDialogs() }
-                    .keyboardShortcut(.cancelAction)
+                Button("Cancel") { dismissDialogs() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(action) { onSubmit() }
                     .buttonStyle(.borderedProminent)
@@ -381,29 +249,18 @@ struct FilesTab: View {
 
     // MARK: - File Operations
 
-    private func showNewFileDialog(parent: String) {
-        dialogParentDir = parent
-        dialogName = ""
-        showNewFile = true
-    }
-
-    private func showNewFolderDialog(parent: String) {
-        dialogParentDir = parent
-        dialogName = ""
-        showNewFolder = true
-    }
+    private func showNewFileDialog(parent: String) { dialogParentDir = parent; dialogName = ""; showNewFile = true }
+    private func showNewFolderDialog(parent: String) { dialogParentDir = parent; dialogName = ""; showNewFolder = true }
+    private func dismissDialogs() { showNewFile = false; showNewFolder = false; showRename = false; dialogName = ""; dialogParentDir = "" }
 
     private func createFile() {
         let name = sanitized(dialogName)
         guard !name.isEmpty else { return }
-
         let dir = dialogParentDir.isEmpty ? dreamDir : dreamDir.appendingPathComponent(dialogParentDir)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-
         let fileName = name.hasSuffix(".md") ? name : "\(name).md"
         let filePath = dir.appendingPathComponent(fileName)
         let content = "# \(dialogName.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
-
         try? content.write(to: filePath, atomically: true, encoding: .utf8)
         dismissDialogs()
         refreshFileTree()
@@ -413,14 +270,9 @@ struct FilesTab: View {
     private func createFolder() {
         let name = sanitized(dialogName)
         guard !name.isEmpty else { return }
-
-        let folderPath = dreamDir.appendingPathComponent(name)
-        try? FileManager.default.createDirectory(at: folderPath, withIntermediateDirectories: true)
-
-        // Create a placeholder file so folder shows up
-        let placeholder = folderPath.appendingPathComponent("readme.md")
-        try? "# \(dialogName.trimmingCharacters(in: .whitespacesAndNewlines))\n".write(to: placeholder, atomically: true, encoding: .utf8)
-
+        let path = dreamDir.appendingPathComponent(name)
+        try? FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+        try? "# \(dialogName.trimmingCharacters(in: .whitespacesAndNewlines))\n".write(to: path.appendingPathComponent("readme.md"), atomically: true, encoding: .utf8)
         dismissDialogs()
         refreshFileTree()
     }
@@ -429,33 +281,19 @@ struct FilesTab: View {
         guard let file = selectedFile, !file.isAutoGenerated else { return }
         let name = sanitized(dialogName)
         guard !name.isEmpty else { return }
-
         let fileName = name.hasSuffix(".md") ? name : "\(name).md"
         let newURL = file.url.deletingLastPathComponent().appendingPathComponent(fileName)
-
         try? FileManager.default.moveItem(at: file.url, to: newURL)
         dismissDialogs()
         refreshFileTree()
-        selectedFile = DreamFile(name: fileName, url: newURL, size: file.size, modified: Date(), isAutoGenerated: false)
-        editorContent = (try? String(contentsOf: newURL, encoding: .utf8)) ?? ""
-        isDirty = false
+        selectFile(DreamFile(name: fileName, url: newURL, size: file.size, modified: Date(), isAutoGenerated: false))
     }
 
     private func deleteSelectedFile() {
         guard let file = selectedFile, !file.isAutoGenerated else { return }
         try? FileManager.default.removeItem(at: file.url)
-        selectedFile = nil
-        editorContent = ""
-        isDirty = false
+        selectedFile = nil; editorContent = ""; isDirty = false
         refreshFileTree()
-    }
-
-    private func dismissDialogs() {
-        showNewFile = false
-        showNewFolder = false
-        showRename = false
-        dialogName = ""
-        dialogParentDir = ""
     }
 
     private func selectFile(_ file: DreamFile) {
@@ -471,25 +309,19 @@ struct FilesTab: View {
         isDirty = false
     }
 
-    private func openInFinder() {
-        NSWorkspace.shared.open(dreamDir)
-    }
-
     // MARK: - Helpers
 
     private func sanitized(_ name: String) -> String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "-")
-            .lowercased()
+        name.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: " ", with: "-").lowercased()
     }
 
     private func displayName(_ name: String) -> String {
         switch name {
-        case "me.md": return "About Me"
-        case "now.md": return "Current Context"
-        case "full.md": return "Full Context"
-        case "MEMORY.md": return "Memory Index"
-        default: return name.replacingOccurrences(of: ".md", with: "").replacingOccurrences(of: "-", with: " ").capitalized
+        case "me.md": "About Me"
+        case "now.md": "Current Context"
+        case "full.md": "Full Context"
+        case "MEMORY.md": "Memory Index"
+        default: name.replacingOccurrences(of: ".md", with: "").replacingOccurrences(of: "-", with: " ").capitalized
         }
     }
 
@@ -503,10 +335,12 @@ struct FilesTab: View {
         }
     }
 
-    private func editorTitle(file: DreamFile) -> String {
-        let firstLine = editorContent.components(separatedBy: "\n").first ?? ""
-        if firstLine.hasPrefix("# ") { return String(firstLine.dropFirst(2)) }
-        return displayName(file.name)
+    private func findFile(path: String) -> DreamFile? {
+        if let core = coreFiles.first(where: { $0.path == path }) { return core }
+        for folder in folders {
+            if let child = folder.children.first(where: { $0.file?.path == path }) { return child.file }
+        }
+        return nil
     }
 
     private var coreFiles: [DreamFile] {
@@ -518,33 +352,23 @@ struct FilesTab: View {
         }
     }
 
-    private var folders: [DreamFileNode] {
-        fileTree.filter(\.isDirectory)
-    }
+    private var folders: [DreamFileNode] { fileTree.filter(\.isDirectory) }
 
-    private func refreshFileTree() {
-        fileTree = scanDirectory(dreamDir)
-    }
+    private func refreshFileTree() { fileTree = scanDirectory(dreamDir) }
 
     private func scanDirectory(_ url: URL) -> [DreamFileNode] {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else { return [] }
-
         let coreNames = Set(["me.md", "now.md", "full.md", "MEMORY.md"])
         var nodes: [DreamFileNode] = []
-
         for item in contents.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
             let isDir = values?.isDirectory ?? false
             let name = item.lastPathComponent
-
             if !isDir && coreNames.contains(name) { continue }
-
             if isDir {
                 let children = scanDirectory(item).flatMap { $0.isDirectory ? $0.children : [$0] }
-                if !children.isEmpty {
-                    nodes.append(DreamFileNode(name: name, isDirectory: true, file: nil, children: children))
-                }
+                if !children.isEmpty { nodes.append(DreamFileNode(name: name, isDirectory: true, file: nil, children: children)) }
             } else if name.hasSuffix(".md") {
                 let file = DreamFile(name: name, url: item, size: Int64(values?.fileSize ?? 0), modified: values?.contentModificationDate ?? Date(), isAutoGenerated: false)
                 nodes.append(DreamFileNode(name: name, isDirectory: false, file: file, children: []))
@@ -556,7 +380,7 @@ struct FilesTab: View {
 
 // MARK: - Data Types
 
-struct DreamFile: Identifiable {
+struct DreamFile: Identifiable, Hashable {
     let name: String
     let url: URL
     let size: Int64
@@ -565,6 +389,8 @@ struct DreamFile: Identifiable {
     var id: String { url.path }
     var path: String { url.path }
     var sizeFormatted: String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
+    func hash(into hasher: inout Hasher) { hasher.combine(url.path) }
+    static func == (lhs: DreamFile, rhs: DreamFile) -> Bool { lhs.url.path == rhs.url.path }
 }
 
 struct DreamFileNode: Identifiable {
