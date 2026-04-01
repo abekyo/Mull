@@ -695,62 +695,350 @@ struct TimelineTab: View {
 
     var body: some View {
         NavigationSplitView {
-            VStack(spacing: DS.lg) {
-                DatePicker("", selection: $selectedDate, displayedComponents: .date)
-                    .datePickerStyle(.graphical)
-                    .padding(.horizontal, DS.sm)
+            sidebar
+                .navigationSplitViewColumnWidth(min: 230, ideal: 260, max: 300)
+        } detail: {
+            detail
+        }
+    }
 
-                Button {
-                    selectedDate = Date()
-                } label: {
-                    Label("Today", systemImage: "calendar")
-                        .frame(maxWidth: .infinity)
+    // MARK: - Sidebar
+
+    private var sidebar: some View {
+        VStack(spacing: DS.md) {
+            DatePicker("", selection: $selectedDate, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .padding(.horizontal, DS.sm)
+
+            Button {
+                selectedDate = Date()
+            } label: {
+                Label("Today", systemImage: "calendar")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .padding(.horizontal, DS.md)
+
+            // Generate Now button
+            Button {
+                appState.triggerDreamNow()
+            } label: {
+                HStack(spacing: DS.sm) {
+                    if appState.isDreaming {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "sparkles")
+                    }
+                    Text(appState.isDreaming ? "Generating..." : "Generate Summary")
                 }
-                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.accentColor)
+            .padding(.horizontal, DS.md)
+            .disabled(appState.isDreaming || appState.todayEventCount == 0)
+
+            if appState.todayEventCount == 0 {
+                Text("Start working to generate a summary")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, DS.md)
+            }
+
+            Divider()
                 .padding(.horizontal, DS.md)
 
-                Spacer()
-            }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
-        } detail: {
+            // Summary list in sidebar
             ScrollView {
-                LazyVStack(spacing: DS.md) {
+                LazyVStack(spacing: 2) {
+                    // Today (even without summary)
+                    sidebarRow(
+                        date: Date(),
+                        label: "Today",
+                        hasSummary: appState.todaySummary != nil,
+                        eventCount: appState.todayEventCount,
+                        isSelected: Calendar.current.isDateInToday(selectedDate)
+                    )
+
                     ForEach(appState.recentSummaries) { summary in
-                        VStack(alignment: .leading, spacing: DS.md) {
-                            Text(summary.dateFormatted.uppercased())
-                                .sectionLabel()
-
-                            SummaryContent(summary: summary)
-
-                            HStack {
-                                Label("\(summary.eventCount) events", systemImage: "waveform.path")
-                                Spacer()
-                                Label(String(format: "%.0fs", summary.processingSeconds), systemImage: "clock")
-                            }
-                            .font(DS.captionFont)
-                            .foregroundStyle(.tertiary)
+                        if !Calendar.current.isDateInToday(summary.date) {
+                            sidebarRow(
+                                date: summary.date,
+                                label: summary.dateFormatted,
+                                hasSummary: true,
+                                eventCount: summary.eventCount,
+                                isSelected: Calendar.current.isDate(selectedDate, inSameDayAs: summary.date)
+                            )
                         }
-                        .id(summary.dateShort)
-                        .dreamCard()
-                    }
-
-                    if appState.recentSummaries.isEmpty {
-                        VStack(spacing: DS.lg) {
-                            Image(systemName: "moon.stars")
-                                .font(.system(size: 40))
-                                .foregroundStyle(Color.accentColor.opacity(0.3))
-                            Text("No Dreams yet")
-                                .font(DS.titleFont)
-                            Text("Your first summary appears after tonight's Dream run")
-                                .font(DS.bodyFont)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 60)
                     }
                 }
-                .padding(DS.xl)
+                .padding(.horizontal, DS.sm)
             }
+        }
+    }
+
+    private func sidebarRow(date: Date, label: String, hasSummary: Bool, eventCount: Int, isSelected: Bool) -> some View {
+        Button {
+            selectedDate = date
+        } label: {
+            HStack(spacing: DS.sm) {
+                Circle()
+                    .fill(hasSummary ? Color.accentColor : Color.secondary.opacity(0.3))
+                    .frame(width: 6, height: 6)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label)
+                        .font(DS.bodyMedium)
+                        .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                    Text("\(eventCount) events")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                if hasSummary {
+                    Image(systemName: "moon.stars.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.accentColor.opacity(0.5))
+                }
+            }
+            .padding(.horizontal, DS.sm)
+            .padding(.vertical, DS.sm)
+            .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Detail
+
+    private var detail: some View {
+        ScrollView {
+            VStack(spacing: DS.lg) {
+                if Calendar.current.isDateInToday(selectedDate) {
+                    todayDetail
+                } else {
+                    pastDayDetail
+                }
+            }
+            .padding(DS.xl)
+        }
+    }
+
+    // MARK: - Today Detail
+
+    @ViewBuilder
+    private var todayDetail: some View {
+        // Header
+        VStack(spacing: DS.sm) {
+            Text("TODAY")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(.tertiary)
+
+            Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                .font(DS.titleFont)
+
+            HStack(spacing: DS.lg) {
+                statBadge(value: "\(appState.todayEventCount)", label: "events")
+                statBadge(value: appState.todayStorageFormatted, label: "captured")
+                if let summary = appState.todaySummary {
+                    statBadge(value: String(format: "%.0fs", summary.processingSeconds), label: "processed")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, DS.sm)
+
+        if let summary = appState.todaySummary {
+            // Dream summary
+            VStack(alignment: .leading, spacing: DS.md) {
+                HStack {
+                    Image(systemName: "moon.stars.fill")
+                        .foregroundStyle(Color.accentColor)
+                    Text("Dream Summary")
+                        .font(DS.titleFont)
+                    Spacer()
+                    Text(summary.llmProvider)
+                        .font(DS.microFont)
+                        .foregroundStyle(.tertiary)
+                }
+                SummaryContent(summary: summary)
+            }
+            .dreamCard()
+        } else {
+            // No summary yet — show live data preview
+            VStack(spacing: DS.md) {
+                Image(systemName: "moon.haze")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Color.accentColor.opacity(0.4))
+
+                Text("No summary yet for today")
+                    .font(DS.bodyMedium)
+
+                Text("Press \"Generate Summary\" to create one now,\nor wait for tonight's automatic Dream.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+
+                // Show top apps as preview
+                let apps = appState.analytics.appUsage(days: 1)
+                if !apps.isEmpty {
+                    VStack(alignment: .leading, spacing: DS.xs) {
+                        Text("TODAY SO FAR")
+                            .sectionLabel()
+                        ForEach(Array(apps.prefix(5))) { app in
+                            HStack {
+                                Text(app.appName)
+                                    .font(DS.captionFont)
+                                Spacer()
+                                Text(String(format: "%.0f%%", app.percentage))
+                                    .font(DS.microFont)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .padding(.top, DS.sm)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .dreamCard()
+        }
+
+        // Raw events preview
+        recentEventsPreview
+    }
+
+    // MARK: - Past Day Detail
+
+    @ViewBuilder
+    private var pastDayDetail: some View {
+        let summary = appState.recentSummaries.first(where: {
+            Calendar.current.isDate($0.date, inSameDayAs: selectedDate)
+        })
+
+        VStack(spacing: DS.sm) {
+            Text(selectedDate.formatted(.dateTime.weekday(.wide)).uppercased())
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(.tertiary)
+
+            Text(selectedDate.formatted(.dateTime.month(.wide).day().year()))
+                .font(DS.titleFont)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, DS.sm)
+
+        if let summary {
+            VStack(alignment: .leading, spacing: DS.md) {
+                HStack {
+                    Image(systemName: "moon.stars.fill")
+                        .foregroundStyle(Color.accentColor)
+                    Text("Dream Summary")
+                        .font(DS.titleFont)
+                    Spacer()
+
+                    HStack(spacing: DS.md) {
+                        Label("\(summary.eventCount) events", systemImage: "waveform.path")
+                        Label(String(format: "%.0fs", summary.processingSeconds), systemImage: "clock")
+                        Label(summary.llmProvider, systemImage: "brain")
+                    }
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+                }
+
+                SummaryContent(summary: summary)
+            }
+            .dreamCard()
+        } else {
+            VStack(spacing: DS.md) {
+                Image(systemName: "moon.zzz")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.quaternary)
+                Text("No Dream for this day")
+                    .font(DS.bodyMedium)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 40)
+        }
+    }
+
+    // MARK: - Recent Events Preview
+
+    private var recentEventsPreview: some View {
+        let events = appState.database.fetchEvents(
+            from: Calendar.current.startOfDay(for: selectedDate),
+            to: Calendar.current.isDateInToday(selectedDate)
+                ? Date()
+                : Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: selectedDate))!
+        ).suffix(20)
+
+        return Group {
+            if !events.isEmpty {
+                VStack(alignment: .leading, spacing: DS.sm) {
+                    Text("RECENT EVENTS")
+                        .sectionLabel()
+
+                    ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                        HStack(alignment: .top, spacing: DS.sm) {
+                            Text(formatTime(event.timestamp))
+                                .font(DS.microFont)
+                                .foregroundStyle(.quaternary)
+                                .frame(width: 48, alignment: .trailing)
+
+                            Circle()
+                                .fill(eventColor(event.eventType))
+                                .frame(width: 5, height: 5)
+                                .padding(.top, 5)
+
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let app = event.appName {
+                                    Text(app)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Text(event.textContent ?? "")
+                                    .font(DS.captionFont)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .textSelection(.enabled)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                .dreamCard()
+            }
+        }
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f.string(from: date)
+    }
+
+    private func eventColor(_ type: RecordingEvent.EventType) -> Color {
+        switch type {
+        case .keystroke: .blue
+        case .clipboard: .orange
+        case .screenText: .green
+        case .appSwitch: .purple
+        case .audio: .pink
+        }
+    }
+
+    private func statBadge(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.accentColor)
+            Text(label)
+                .font(DS.captionFont)
+                .foregroundStyle(.tertiary)
         }
     }
 }
