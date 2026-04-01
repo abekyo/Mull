@@ -29,7 +29,7 @@ struct OnboardingView: View {
                 readyStep
             }
         }
-        .frame(width: 440, height: 380)
+        .frame(width: 460, height: 520)
         .background(.ultraThinMaterial)
         .interactiveDismissDisabled()
         .onDisappear {
@@ -86,8 +86,10 @@ struct OnboardingView: View {
 
     // MARK: - Step 2: Permissions (polls until both granted)
 
+    @State private var showHowTo = false
+
     private var permissionsStep: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             Spacer()
 
             Image(systemName: "hand.raised.fill")
@@ -104,7 +106,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, 24)
 
             // Permission checklist
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 permissionCheckRow(
                     name: "Accessibility",
                     detail: "Read window titles",
@@ -118,8 +120,9 @@ struct OnboardingView: View {
                     action: { appState.permissions.openInputMonitoringSettings() }
                 )
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, 36)
 
+            // Status
             if appState.permissions.accessibilityGranted && appState.permissions.inputMonitoringGranted {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
@@ -139,10 +142,28 @@ struct OnboardingView: View {
                 }
             }
 
+            // How-to guide (expandable)
+            Button {
+                withAnimation(.spring(duration: 0.2)) { showHowTo.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: showHowTo ? "chevron.down" : "questionmark.circle")
+                        .font(.system(size: 11))
+                    Text(showHowTo ? "Hide instructions" : "How do I grant permissions?")
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+
+            if showHowTo {
+                howToGuide
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             Spacer()
 
-            VStack(spacing: 8) {
-                // Skip button if user doesn't want to grant (clipboard still works)
+            VStack(spacing: 6) {
                 if !appState.permissions.accessibilityGranted || !appState.permissions.inputMonitoringGranted {
                     Button {
                         withAnimation { step = .ready }
@@ -163,9 +184,74 @@ struct OnboardingView: View {
                 .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 40)
-            .padding(.bottom, 24)
+            .padding(.bottom, 20)
         }
         .onAppear { startPermissionPolling() }
+    }
+
+    // MARK: - How-To Guide
+
+    private var howToGuide: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Accessibility
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Accessibility")
+                    .font(.system(size: 12, weight: .semibold))
+
+                howToStep("1", "Click \"Open Settings\" above (or go to System Settings → Privacy & Security → Accessibility)")
+                howToStep("2", "Click the lock icon 🔒 at bottom-left and authenticate")
+                howToStep("3", "Find \"Dream\" in the list and toggle it ON")
+                howToStep("", "If Dream isn't listed, click \"+\" and add it")
+            }
+
+            Divider()
+
+            // Input Monitoring
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Input Monitoring")
+                    .font(.system(size: 12, weight: .semibold))
+
+                howToStep("1", "Go to System Settings → Privacy & Security → Input Monitoring")
+                howToStep("2", "Click the lock icon 🔒 and authenticate")
+                howToStep("3", "Click \"+\" and add \"Dream\"")
+                howToStep("", "If running from Xcode: add \"Xcode\" instead (Dream runs as Xcode's child process)")
+            }
+
+            Divider()
+
+            // After granting
+            VStack(alignment: .leading, spacing: 4) {
+                Text("After granting both:")
+                    .font(.system(size: 12, weight: .semibold))
+                howToStep("", "Restart Dream (⌘Q → reopen, or ⌘R in Xcode)")
+                howToStep("", "The checkmarks above will turn green automatically")
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .padding(12)
+        .background(Color(.controlBackgroundColor).opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 28)
+    }
+
+    private func howToStep(_ number: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            if !number.isEmpty {
+                Text(number)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 12)
+            } else {
+                Text("→")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 12)
+            }
+            Text(text)
+                .font(.system(size: 11))
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func permissionCheckRow(name: String, detail: String, granted: Bool, action: @escaping () -> Void) -> some View {

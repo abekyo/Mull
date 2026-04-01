@@ -143,12 +143,12 @@ final class AppState: ObservableObject {
         refreshStats()
     }
 
+    private var lastMeFileUpdate: Date = .distantPast
+
     private func refreshStats() {
-        // Check if date changed (midnight crossing)
         let today = Calendar.current.startOfDay(for: Date())
         let lastDay = Calendar.current.startOfDay(for: lastRefreshDate)
         if today != lastDay {
-            // New day — reload summaries, reset counts
             loadTodaySummary()
             loadRecentSummaries()
         }
@@ -156,6 +156,15 @@ final class AppState: ObservableObject {
 
         todayEventCount = database.eventCountToday()
         todayStorageBytes = database.storageBytesToday()
+
+        // Auto-generate me.md/now.md every 60 seconds if we have data
+        // No LLM needed — pure rule-based from AnalyticsEngine
+        if todayEventCount > 0 && Date().timeIntervalSince(lastMeFileUpdate) > 60 {
+            lastMeFileUpdate = Date()
+            Task.detached { [analytics, database] in
+                try? LiveContextGenerator.generate(analytics: analytics, database: database)
+            }
+        }
     }
 
     // MARK: - Actions
@@ -219,19 +228,22 @@ final class AppState: ObservableObject {
     }
 
     private func sendNotification(title: String, body: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
 
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil // Deliver immediately
-        )
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
 
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        UNUserNotificationCenter.current().add(request)
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+            center.add(request)
+        }
     }
 
     func markDreamRead() {
@@ -272,16 +284,11 @@ final class AppState: ObservableObject {
     func applyDataRetention() {
         let retentionSetting = UserDefaults.standard.string(forKey: "dataRetention") ?? "unlimited"
 
-        // Always prune raw events older than 7 days (summaries are kept per retention)
-        try? database.deleteEventsOlderThan(days: 7)
-
-        // Apply user's retention setting to summaries + events
+        // Only apply user's configured retention — no hidden forced deletion
         if retentionSetting != "unlimited", let days = Int(retentionSetting) {
             try? database.deleteEventsOlderThan(days: days)
             try? database.deleteSummariesOlderThan(days: days)
+            database.vacuum()
         }
-
-        // Reclaim disk space
-        database.vacuum()
     }
 }

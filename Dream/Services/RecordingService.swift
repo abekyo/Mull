@@ -296,6 +296,7 @@ final class RecordingService {
     // MARK: - 4. Clipboard Monitor
 
     private func startClipboardMonitor() {
+        clipboardTimer?.invalidate()
         lastClipboardCount = NSPasteboard.general.changeCount
         lastClipboardText = NSPasteboard.general.string(forType: .string) ?? ""
 

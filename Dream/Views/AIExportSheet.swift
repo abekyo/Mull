@@ -332,7 +332,7 @@ struct AIExportSheet: View {
         // Apply user's max character setting
         let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
         let finalContext = (maxChars > 0 && context.count > maxChars)
-            ? String(context.prefix(maxChars)) + "\n\n[Truncated at \(maxChars) chars. Change in Settings → Export.]"
+            ? String(context.prefix(maxChars))
             : context
 
         NSPasteboard.general.clearContents()

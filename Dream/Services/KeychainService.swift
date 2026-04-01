@@ -21,7 +21,10 @@ enum KeychainService {
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
 
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            print("[Dream] Keychain save failed for \(key): \(status)")
+        }
     }
 
     static func load(key: String) -> String? {

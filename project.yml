@@ -46,3 +46,22 @@ targets:
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         ENABLE_HARDENED_RUNTIME: false
         GENERATE_INFOPLIST_FILE: true
+
+  DreamMCP:
+    type: tool
+    platform: macOS
+    sources:
+      - DreamMCP
+      - Dream/Services/MCPServer.swift
+      - Dream/Services/DatabaseService.swift
+      - Dream/Services/AnalyticsEngine.swift
+      - Dream/Services/KeychainService.swift
+      - Dream/Models/Models.swift
+    dependencies:
+      - package: GRDB
+    settings:
+      base:
+        PRODUCT_NAME: DreamMCP
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: true

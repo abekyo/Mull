@@ -145,11 +145,19 @@ final class DreamEngine {
             // Phase 2: Gather
             let rawData = phase2Gather()
 
-            // Phase 3: Consolidate
-            let summary = try await phase3Consolidate(
-                rawData: rawData,
-                existingMemories: existingMemories
-            )
+            // Phase 3: Consolidate — try LLM first, fall back to rule-based
+            let summary: ConsolidatedSummary
+            do {
+                summary = try await phase3Consolidate(
+                    rawData: rawData,
+                    existingMemories: existingMemories
+                )
+            } catch {
+                // LLM failed (no API key, Ollama not running, etc.)
+                // Fall back to rule-based summary — still useful, no LLM needed
+                print("[Dream] LLM failed: \(error.localizedDescription). Using rule-based summary.")
+                summary = phase3RuleBasedFallback(rawData: rawData)
+            }
 
             // Phase 4: Prune & Index
             try phase4PruneAndIndex(summary: summary)
@@ -233,7 +241,70 @@ final class DreamEngine {
         )
     }
 
-    // MARK: - Phase 3: Consolidate
+    // MARK: - Phase 3 Fallback: Rule-based summary (no LLM)
+
+    /// Generate a summary using pure counting and grouping. No LLM call.
+    /// Not as polished as LLM output, but works from day one with zero config.
+    private func phase3RuleBasedFallback(rawData: GatheredData) -> ConsolidatedSummary {
+        func summarizePeriod(_ events: [RecordingEvent]) -> String? {
+            guard !events.isEmpty else { return nil }
+
+            var lines: [String] = []
+
+            // Window titles → what you worked on
+            var titleSeen = Set<String>()
+            for event in events where (event.eventType == .screenText || event.eventType == .appSwitch) {
+                let title = event.windowTitle ?? event.textContent ?? ""
+                guard !title.isEmpty else { continue }
+                let key = String(title.prefix(50).lowercased())
+                guard !titleSeen.contains(key) else { continue }
+                titleSeen.insert(key)
+                lines.append("- \(title) (\(event.appName ?? ""))")
+                if lines.count >= 5 { break }
+            }
+
+            // Clipboard → what you copied
+            let clips = events.filter { $0.eventType == .clipboard }
+            for clip in clips.prefix(3) {
+                guard let text = clip.textContent, text.count > 5 else { continue }
+                let clean = String(text.prefix(100)).replacingOccurrences(of: "\n", with: " ")
+                lines.append("- Copied: \(clean)")
+            }
+
+            return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        }
+
+        let morning = summarizePeriod(rawData.morning)
+        let afternoon = summarizePeriod(rawData.afternoon)
+        let evening = summarizePeriod(rawData.evening)
+
+        // App usage summary
+        let topApps = rawData.appGroups
+            .sorted { $0.value.count > $1.value.count }
+            .prefix(5)
+            .map { "\($0.key): \($0.value.count) events" }
+            .joined(separator: ", ")
+
+        let dateStr = Date().formatted(.dateTime.year().month().day())
+        var md: [String] = ["# \(dateStr) (rule-based summary)", ""]
+        if let m = morning { md.append("## Morning"); md.append(m); md.append("") }
+        if let a = afternoon { md.append("## Afternoon"); md.append(a); md.append("") }
+        if let e = evening { md.append("## Evening"); md.append(e); md.append("") }
+        md.append("## App Usage")
+        md.append(topApps)
+
+        return ConsolidatedSummary(
+            fullMarkdown: md.joined(separator: "\n"),
+            morning: morning,
+            afternoon: afternoon,
+            evening: evening,
+            learnings: nil,
+            inProgress: nil,
+            memoryUpdatesJSON: nil
+        )
+    }
+
+    // MARK: - Phase 3: Consolidate (LLM)
 
     /// Send gathered data to LLM for summarization.
     private func phase3Consolidate(
@@ -372,14 +443,21 @@ final class DreamEngine {
     private func callLLM(prompt: String) async throws -> String {
         let provider = UserDefaults.standard.string(forKey: "llmProvider") ?? "local"
 
+        let response: String
         switch provider {
         case "claude":
-            return try await callClaude(prompt: prompt)
+            response = try await callClaude(prompt: prompt)
         case "openai":
-            return try await callOpenAI(prompt: prompt)
+            response = try await callOpenAI(prompt: prompt)
         default:
-            return try await callOllama(prompt: prompt)
+            response = try await callOllama(prompt: prompt)
         }
+
+        guard !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw DreamError.llmFailed("LLM returned empty response. Check your API key or model.")
+        }
+
+        return response
     }
 
     /// Call local Ollama instance.
@@ -793,8 +871,7 @@ final class DreamEngine {
         }
 
         // Behavioral patterns (rule-based, no LLM)
-        let analyticsEngine = AnalyticsEngine(database: database)
-        let patterns = analyticsEngine.generatePatternSummary(days: 7)
+        let patterns = AnalyticsEngine(database: database).generatePatternSummary(days: 7)
         if !patterns.isEmpty {
             lines.append(patterns)
         }
@@ -857,8 +934,11 @@ final class DreamEngine {
     /// Delete raw recording events that have been processed into summaries.
     /// Keeps the last 24 hours as buffer, deletes everything older.
     /// Summaries and memory files are kept forever.
+    /// Prune events according to user's retention setting, not a hardcoded value.
     private func pruneProcessedEvents() {
-        try? database.deleteEventsOlderThan(days: 1)
+        let retentionSetting = UserDefaults.standard.string(forKey: "dataRetention") ?? "unlimited"
+        guard retentionSetting != "unlimited", let days = Int(retentionSetting) else { return }
+        try? database.deleteEventsOlderThan(days: days)
     }
 
     // MARK: - Scheduling

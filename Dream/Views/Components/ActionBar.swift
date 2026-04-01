@@ -113,10 +113,10 @@ struct ActionBar: View {
             }
         }
 
-        // Apply user's max character setting
+        // Apply user's max character setting — truncate silently, don't add noise to output
         let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
         let finalText = (maxChars > 0 && text.count > maxChars)
-            ? String(text.prefix(maxChars)) + "\n\n[Truncated at \(maxChars) chars. Change in Settings → Export.]"
+            ? String(text.prefix(maxChars))
             : text
 
         NSPasteboard.general.clearContents()
