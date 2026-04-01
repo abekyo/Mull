@@ -151,6 +151,14 @@ enum LiveContextGenerator {
             lines.append("")
         }
 
+        // What user mainly did today (rule-based inference)
+        let timeEngine = TimeBlockEngine(database: database)
+        let dayAnalysis = timeEngine.analyzDay(for: Date())
+        if !dayAnalysis.mainActivities.isEmpty {
+            lines.append(dayAnalysis.asText())
+            lines.append("")
+        }
+
         // Behavioral patterns
         let patterns = analytics.generatePatternSummary(days: 7)
         if !patterns.isEmpty {

@@ -209,6 +209,158 @@ struct TimeBlock: Identifiable {
     }
 }
 
+// MARK: - Daily Summary (rule-based "what you mainly did")
+
+struct DailyActivity {
+    let mainActivities: [ActivitySummary]  // Top 3 by time
+    let otherActivities: [ActivitySummary] // Everything else
+    let totalDuration: TimeInterval
+    let appBreakdown: [(app: String, duration: TimeInterval, percentage: Double)]
+
+    /// Generate plain text for AI or UI.
+    func asText() -> String {
+        var lines: [String] = []
+
+        lines.append("What you mainly did today:")
+        for activity in mainActivities {
+            lines.append("- \(activity.label) (\(activity.durationFormatted), \(activity.app))")
+        }
+
+        if !otherActivities.isEmpty {
+            lines.append("")
+            lines.append("Also:")
+            for activity in otherActivities {
+                lines.append("- \(activity.label) (\(activity.durationFormatted), \(activity.app))")
+            }
+        }
+
+        lines.append("")
+        lines.append("App usage:")
+        for (app, _, pct) in appBreakdown.prefix(6) {
+            lines.append("- \(app): \(String(format: "%.0f", pct))%")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+}
+
+struct ActivitySummary: Identifiable {
+    let id = UUID()
+    let label: String
+    let app: String
+    let totalDuration: TimeInterval
+    let eventCount: Int
+    let blocks: [TimeBlock]
+
+    var durationFormatted: String {
+        let minutes = Int(totalDuration / 60)
+        if minutes < 1 { return "<1m" }
+        if minutes < 60 { return "\(minutes)m" }
+        let h = minutes / 60
+        let m = minutes % 60
+        return m > 0 ? "\(h)h \(m)m" : "\(h)h"
+    }
+
+    var color: Color { blocks.first?.color ?? .secondary }
+}
+
+extension TimeBlockEngine {
+
+    /// Analyze a day's blocks and extract "what you mainly did" + supporting facts.
+    func analyzDay(for date: Date) -> DailyActivity {
+        let blocks = generateBlocks(for: date)
+        guard !blocks.isEmpty else {
+            return DailyActivity(mainActivities: [], otherActivities: [], totalDuration: 0, appBreakdown: [])
+        }
+
+        // Step 1: Group blocks by project/task (same label = same task)
+        var taskGroups: [String: [TimeBlock]] = [:]
+        for block in blocks {
+            let key = normalizeTaskKey(block)
+            taskGroups[key, default: []].append(block)
+        }
+
+        // Step 2: Create ActivitySummary per group, sorted by total duration
+        var activities = taskGroups.map { key, blocks -> ActivitySummary in
+            let totalDuration = blocks.reduce(0.0) { $0 + $1.duration }
+            let totalEvents = blocks.reduce(0) { $0 + $1.eventCount }
+            let primaryApp = mostCommonApp(in: blocks)
+            let label = bestLabel(for: blocks, key: key)
+
+            return ActivitySummary(
+                label: label,
+                app: primaryApp,
+                totalDuration: totalDuration,
+                eventCount: totalEvents,
+                blocks: blocks
+            )
+        }
+        .sorted { $0.totalDuration > $1.totalDuration }
+
+        // Step 3: Split into main (top 3) vs other
+        let main = Array(activities.prefix(3))
+        let other = Array(activities.dropFirst(3).prefix(5))
+
+        // Step 4: App breakdown
+        var appDurations: [String: TimeInterval] = [:]
+        for block in blocks {
+            appDurations[block.app, default: 0] += block.duration
+        }
+        let totalDuration = blocks.reduce(0.0) { $0 + $1.duration }
+        let appBreakdown = appDurations
+            .sorted { $0.value > $1.value }
+            .map { (app: $0.key, duration: $0.value, percentage: $0.value / max(totalDuration, 1) * 100) }
+
+        return DailyActivity(
+            mainActivities: main,
+            otherActivities: other,
+            totalDuration: totalDuration,
+            appBreakdown: appBreakdown
+        )
+    }
+
+    /// Normalize block into a task key for grouping.
+    /// Same project across Xcode + Code + Terminal = same task.
+    private func normalizeTaskKey(_ block: TimeBlock) -> String {
+        let label = block.label.isEmpty ? block.app : block.label
+
+        // Extract project name from common patterns
+        // "PantryApp — ViewController.swift" → "PantryApp"
+        // "Dream — DreamEngine.swift" → "Dream"
+        let separators = [" — ", " - ", " | "]
+        for sep in separators {
+            let parts = label.components(separatedBy: sep)
+            if parts.count > 1, let first = parts.first {
+                let trimmed = first.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.count > 2 && trimmed.count < 30 {
+                    return trimmed.lowercased()
+                }
+            }
+        }
+
+        // Fallback: use the label itself
+        return label.lowercased().prefix(40).description
+    }
+
+    private func mostCommonApp(in blocks: [TimeBlock]) -> String {
+        var counts: [String: TimeInterval] = [:]
+        for block in blocks {
+            counts[block.app, default: 0] += block.duration
+        }
+        return counts.max(by: { $0.value < $1.value })?.key ?? "Unknown"
+    }
+
+    private func bestLabel(for blocks: [TimeBlock], key: String) -> String {
+        // Use the longest block's label (most specific)
+        let sorted = blocks.sorted { $0.duration > $1.duration }
+        if let label = sorted.first?.label, !label.isEmpty, label != sorted.first?.app {
+            return label
+        }
+        // Capitalize key
+        return key.prefix(1).uppercased() + key.dropFirst()
+    }
+}
+
 struct EventSegment {
     let timestamp: Date
     let app: String

@@ -860,6 +860,9 @@ struct TimelineTab: View {
         .frame(maxWidth: .infinity)
         .padding(.bottom, DS.sm)
 
+        // "What you mainly did" — the hero insight
+        mainActivitiesView(for: selectedDate)
+
         // Calendar-style time blocks
         timeBlocksView(for: selectedDate)
 
@@ -942,6 +945,9 @@ struct TimelineTab: View {
         .frame(maxWidth: .infinity)
         .padding(.bottom, DS.sm)
 
+        // "What you mainly did"
+        mainActivitiesView(for: selectedDate)
+
         // Calendar-style time blocks
         timeBlocksView(for: selectedDate)
 
@@ -977,6 +983,121 @@ struct TimelineTab: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 40)
+        }
+    }
+
+    // MARK: - Main Activities ("What you mainly did")
+
+    @ViewBuilder
+    private func mainActivitiesView(for date: Date) -> some View {
+        let engine = TimeBlockEngine(database: appState.database)
+        let analysis = engine.analyzDay(for: date)
+
+        if !analysis.mainActivities.isEmpty {
+            VStack(alignment: .leading, spacing: DS.md) {
+                Text("WHAT YOU MAINLY DID")
+                    .sectionLabel()
+
+                // Main activities — large, prominent
+                ForEach(analysis.mainActivities) { activity in
+                    HStack(spacing: DS.md) {
+                        // Color bar
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(activity.color)
+                            .frame(width: 4, height: 40)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(activity.label)
+                                .font(DS.bodyMedium)
+                                .lineLimit(1)
+
+                            HStack(spacing: DS.sm) {
+                                Text(activity.durationFormatted)
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(Color.accentColor)
+
+                                Text("·")
+                                    .foregroundStyle(.quaternary)
+
+                                Text(activity.app)
+                                    .font(DS.captionFont)
+                                    .foregroundStyle(.tertiary)
+
+                                Text("·")
+                                    .foregroundStyle(.quaternary)
+
+                                Text("\(activity.eventCount) events")
+                                    .font(DS.captionFont)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+
+                        Spacer()
+                    }
+                }
+
+                // Other activities — compact list
+                if !analysis.otherActivities.isEmpty {
+                    Divider()
+
+                    HStack(spacing: DS.sm) {
+                        Text("Also:")
+                            .font(DS.captionFont)
+                            .foregroundStyle(.tertiary)
+
+                        Text(
+                            analysis.otherActivities
+                                .map { "\($0.label) (\($0.durationFormatted))" }
+                                .joined(separator: " · ")
+                        )
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                    }
+                }
+
+                // App breakdown bar
+                Divider()
+
+                HStack(spacing: 0) {
+                    ForEach(Array(analysis.appBreakdown.prefix(5).enumerated()), id: \.offset) { _, item in
+                        let width = max(item.percentage, 3) // Minimum visibility
+                        RoundedRectangle(cornerRadius: 0)
+                            .fill(appColor(item.app).opacity(0.6))
+                            .frame(width: width * 2.5, height: 6)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                HStack(spacing: DS.md) {
+                    ForEach(Array(analysis.appBreakdown.prefix(5).enumerated()), id: \.offset) { _, item in
+                        HStack(spacing: DS.xs) {
+                            Circle()
+                                .fill(appColor(item.app).opacity(0.6))
+                                .frame(width: 5, height: 5)
+                            Text("\(item.app) \(String(format: "%.0f", item.percentage))%")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+            .dreamHeroCard()
+        }
+    }
+
+    private func appColor(_ name: String) -> Color {
+        switch name {
+        case "Xcode": .blue
+        case "Code": .purple
+        case "Cursor": .cyan
+        case "Safari", "Firefox", "Chrome", "Arc": .orange
+        case "Slack", "Discord", "Messages": .green
+        case "Mail": .red
+        case "Finder": .gray
+        case "Terminal", "iTerm2", "Warp", "Ghostty": .mint
+        case "Simulator": .indigo
+        default: .secondary
         }
     }
 
