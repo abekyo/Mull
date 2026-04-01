@@ -2,11 +2,11 @@ import SwiftUI
 
 @main
 struct DreamApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
-    @State private var showOnboarding = false
 
     var body: some Scene {
-        // Menu bar panel — Surface 1 & 2
+        // Menu bar panel (quick access)
         MenuBarExtra {
             MenuBarPanel()
                 .environmentObject(appState)
@@ -28,35 +28,76 @@ struct DreamApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        // Onboarding window — shown ONCE on first launch as a real window
-        Window("Welcome to Dream", id: "onboarding") {
-            OnboardingView(isPresented: $showOnboarding)
-                .environmentObject(appState)
-                .onDisappear {
-                    // After onboarding closes, hide dock icon
-                    NSApp.setActivationPolicy(.accessory)
-                }
-        }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
-
-        // Settings window — Surface 5
-        Settings {
-            SettingsView()
-                .environmentObject(appState)
-        }
-
-        // Full window — Surface 4
-        Window("Dream", id: "main-window") {
+        // Main window (Dock click opens this)
+        WindowGroup {
             FullWindowView()
                 .environmentObject(appState)
         }
         .defaultSize(width: 800, height: 600)
         .keyboardShortcut("d", modifiers: [.command, .shift])
+
+        // Settings
+        Settings {
+            SettingsView()
+                .environmentObject(appState)
+        }
     }
 
     private var menuBarIconName: String {
         if appState.isDreaming { return "moon.stars.fill" }
         return "moon.fill"
+    }
+}
+
+// MARK: - AppDelegate
+
+@MainActor
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var onboardingWindow: NSWindow?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+
+        if !hasCompletedOnboarding {
+            showOnboarding()
+        }
+    }
+
+    /// Clicking the Dock icon when no windows are visible reopens the main window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            // Reopen main window
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        return true
+    }
+
+    func showOnboarding() {
+        let appState = AppState()
+
+        let onboardingView = OnboardingView(isPresented: .constant(true))
+            .environmentObject(appState)
+
+        let hostingController = NSHostingController(rootView: onboardingView)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Welcome to Dream"
+        window.contentViewController = hostingController
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+
+        self.onboardingWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func closeOnboarding() {
+        onboardingWindow?.close()
+        onboardingWindow = nil
     }
 }

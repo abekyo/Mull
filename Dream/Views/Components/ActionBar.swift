@@ -99,18 +99,24 @@ struct ActionBar: View {
     // MARK: - Actions
 
     private func copyContent() {
+        let dreamDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Dream")
         let text: String
-        if let summary = appState.todaySummary {
-            text = summary.content
+
+        // Priority: full.md (richest) → now.md + me.md → live build
+        let fullFile = dreamDir.appendingPathComponent("full.md")
+        if let fullContent = try? String(contentsOf: fullFile, encoding: .utf8), fullContent.count > 50 {
+            text = fullContent
         } else {
-            let meFile = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Dream/me.md")
-            if let meContent = try? String(contentsOf: meFile, encoding: .utf8) {
-                text = meContent
-            } else {
-                // Build live context from raw events
-                text = buildLiveContext()
+            // Combine me.md + now.md
+            var parts: [String] = []
+            for file in ["me.md", "now.md"] {
+                if let content = try? String(contentsOf: dreamDir.appendingPathComponent(file), encoding: .utf8),
+                   !content.isEmpty {
+                    parts.append(content)
+                }
             }
+            text = parts.isEmpty ? buildLiveContext() : parts.joined(separator: "\n\n")
         }
 
         // Apply user's max character setting — truncate silently, don't add noise to output

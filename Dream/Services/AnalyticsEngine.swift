@@ -295,6 +295,15 @@ final class AnalyticsEngine {
         "var", "let", "func", "if", "else", "return", "import", "class",
         "struct", "enum", "case", "self", "true", "false", "nil", "void",
         "int", "string", "bool", "private", "public", "static",
+        // Date/time noise
+        "am", "pm", "at", "01", "02", "03", "04", "05", "06", "07",
+        "08", "09", "10", "11", "12", "13", "14", "15", "16", "17",
+        "18", "19", "20", "21", "22", "23", "24", "25", "26", "27",
+        "28", "29", "30", "31", "2024", "2025", "2026", "2027",
+        // File extension noise
+        "png", "jpg", "jpeg", "gif", "svg", "pdf", "md", "txt",
+        "swift", "ts", "tsx", "js", "json", "html", "css",
+        "screenshot", "img", "image", "file", "folder",
     ]
 }
 

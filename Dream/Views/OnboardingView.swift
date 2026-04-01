@@ -318,6 +318,8 @@ struct OnboardingView: View {
                 appState.hasCompletedOnboarding = true
                 appState.startRecording()
                 isPresented = false
+                // Close the onboarding window
+                (NSApp.delegate as? AppDelegate)?.closeOnboarding()
             } label: {
                 Text("Start Recording")
                     .font(.system(size: 14, weight: .medium))

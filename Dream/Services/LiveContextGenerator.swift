@@ -21,7 +21,9 @@ enum LiveContextGenerator {
         try generateMe(memories: memories, analytics: analytics, timestamp: timestamp)
         try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, timestamp: timestamp)
         try generateFull(database: database, analytics: analytics, timestamp: timestamp)
-        try installToClaudeConfig()
+        // NOTE: Claude Code integration is manual. User runs:
+        //   claude mcp add --transport stdio --scope user dream -- /path/to/DreamMCP
+        // We don't auto-write to ~/.claude.json or ~/.claude/CLAUDE.md — that's invasive.
     }
 
     // MARK: - me.md (~200 tokens) — Who you are
@@ -103,21 +105,26 @@ enum LiveContextGenerator {
         let todayEvents = database.fetchEvents(from: startOfDay, to: Date())
 
         if !todayEvents.isEmpty {
-            // Window titles → what files/pages are open
+            // Window titles → compress typing sequences first, then dedup
+            let rawTitles = todayEvents
+                .filter { $0.eventType == .screenText }
+                .compactMap(\.textContent)
+                .filter { !$0.isEmpty }
+
+            let compressed = compress(rawTitles)
+
             var titleSeen = Set<String>()
             var titleLines: [String] = []
-            for event in todayEvents where event.eventType == .screenText {
-                guard let text = event.textContent, !text.isEmpty else { continue }
-                let key = String(text.prefix(50).lowercased())
+            for title in compressed {
+                let key = String(title.prefix(60).lowercased())
                 guard !titleSeen.contains(key) else { continue }
                 titleSeen.insert(key)
-                titleLines.append("- \(text) (\(event.appName ?? ""))")
+                titleLines.append("- \(title)")
             }
-            // Compress typing sequences
-            let compressed = compress(titleLines)
-            if !compressed.isEmpty {
+
+            if !titleLines.isEmpty {
                 lines.append("Today's files/pages:")
-                lines.append(contentsOf: Array(compressed.prefix(10)))
+                lines.append(contentsOf: Array(titleLines.prefix(10)))
                 lines.append("")
             }
 
@@ -214,131 +221,15 @@ enum LiveContextGenerator {
 
     // MARK: - Auto-install into Claude Code config
 
-    /// Install Dream into Claude Code and Cursor:
-    ///   1. Symlink ~/Dream/ into ~/.claude/dream/
-    ///   2. Add Dream instruction to ~/.claude/CLAUDE.md
-    ///   3. Register DreamMCP server in Claude Code config
-    ///   4. Register DreamMCP server in Cursor config (.cursor/mcp.json)
-    private static func installToClaudeConfig() throws {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let fm = FileManager.default
-
-        // 1. Symlink ~/.claude/dream/ → ~/Dream/
-        let claudeDir = home.appendingPathComponent(".claude")
-        try? fm.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-
-        let dreamLink = claudeDir.appendingPathComponent("dream")
-        if !fm.fileExists(atPath: dreamLink.path) {
-            try? fm.createSymbolicLink(at: dreamLink, withDestinationURL: dreamDir)
-        }
-
-        // 2. CLAUDE.md instruction
-        let claudeMdPath = claudeDir.appendingPathComponent("CLAUDE.md")
-        let dreamInstruction = """
-
-        # Dream — User Context
-        Read ~/.claude/dream/me.md and ~/.claude/dream/now.md for context about who this user is and what they are working on.
-        The Dream MCP server is also available — use get_user_context tool for live data.
-
-        """
-
-        if fm.fileExists(atPath: claudeMdPath.path) {
-            let existing = (try? String(contentsOf: claudeMdPath, encoding: .utf8)) ?? ""
-            if !existing.contains("dream/me.md") {
-                try (existing + "\n" + dreamInstruction).write(to: claudeMdPath, atomically: true, encoding: .utf8)
-            }
-        } else {
-            try dreamInstruction.write(to: claudeMdPath, atomically: true, encoding: .utf8)
-        }
-
-        // 3. Register MCP server in Claude Code
-        // Find the DreamMCP binary (built alongside Dream.app)
-        let mcpBinary = findMCPBinary()
-
-        if let binaryPath = mcpBinary {
-            // Register in ~/.claude.json (user scope — works across all projects)
-            let claudeJsonPath = home.appendingPathComponent(".claude.json")
-            registerMCPServer(at: claudeJsonPath, binaryPath: binaryPath)
-
-            // Also register for Cursor (project-level .mcp.json)
-            // Users can copy this to their project roots
-            let cursorMcpPath = dreamDir.appendingPathComponent("mcp.json")
-            let cursorConfig: [String: Any] = [
-                "mcpServers": [
-                    "dream": [
-                        "command": binaryPath,
-                        "args": [] as [String]
-                    ]
-                ]
-            ]
-            if let data = try? JSONSerialization.data(withJSONObject: cursorConfig, options: .prettyPrinted) {
-                try? data.write(to: cursorMcpPath)
-            }
-        }
-    }
-
-    /// Find the DreamMCP binary. Check common locations.
-    private static func findMCPBinary() -> String? {
-        let fm = FileManager.default
-        let candidates = [
-            // Installed app
-            "/Applications/Dream.app/Contents/MacOS/DreamMCP",
-            // Xcode DerivedData (development)
-            fm.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Developer/Xcode/DerivedData")
-                .path,
-            // Next to Dream app
-            Bundle.main.bundlePath + "/../DreamMCP",
-            // In ~/Dream/
-            fm.homeDirectoryForCurrentUser.appendingPathComponent("Dream/DreamMCP").path,
-        ]
-
-        for path in candidates {
-            if fm.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-
-        // Search DerivedData for built DreamMCP
-        let derivedData = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Developer/Xcode/DerivedData")
-        if let contents = try? fm.contentsOfDirectory(atPath: derivedData.path) {
-            for dir in contents where dir.hasPrefix("Dream-") {
-                let buildPath = derivedData
-                    .appendingPathComponent(dir)
-                    .appendingPathComponent("Build/Products/Debug/DreamMCP")
-                if fm.isExecutableFile(atPath: buildPath.path) {
-                    return buildPath.path
-                }
-            }
-        }
-
-        return nil
-    }
-
-    /// Register DreamMCP in a claude.json config file.
-    private static func registerMCPServer(at configPath: URL, binaryPath: String) {
-        var config: [String: Any] = [:]
-
-        // Read existing config
-        if let data = try? Data(contentsOf: configPath),
-           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            config = existing
-        }
-
-        // Add/update mcpServers.dream
-        var mcpServers = config["mcpServers"] as? [String: Any] ?? [:]
-        mcpServers["dream"] = [
-            "command": binaryPath,
-            "args": [] as [String]
-        ]
-        config["mcpServers"] = mcpServers
-
-        // Write back
-        if let data = try? JSONSerialization.data(withJSONObject: config, options: .prettyPrinted) {
-            try? data.write(to: configPath)
-        }
-    }
+    // Claude Code / Cursor integration is manual (not auto-installed):
+    //
+    // Option 1 — MCP Server (recommended):
+    //   claude mcp add --transport stdio --scope user dream -- /path/to/DreamMCP
+    //
+    // Option 2 — File reference in CLAUDE.md:
+    //   Read ~/Dream/me.md and ~/Dream/now.md for context about who I am.
+    //
+    // Option 3 — Copy & paste from menu bar panel
 
     // MARK: - Helpers
 

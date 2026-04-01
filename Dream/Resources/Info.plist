@@ -19,7 +19,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>Dream uses Accessibility to read on-screen text and record your activity for daily summaries.</string>
 	<key>NSMicrophoneUsageDescription</key>

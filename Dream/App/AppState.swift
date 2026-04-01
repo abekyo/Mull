@@ -78,16 +78,11 @@ final class AppState: ObservableObject {
         // Auto-start recording if onboarding is already done
         // Don't gate on AXIsProcessTrusted — it lies on debug builds.
         // Recording will start and capture what it can.
+        // Always start recording if onboarding is done
         if hasCompletedOnboarding {
             startRecording()
-            NSApp.setActivationPolicy(.accessory)
-        } else {
-            // First launch: show dock icon + open onboarding window
-            NSApp.setActivationPolicy(.regular)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                NSApp.activate(ignoringOtherApps: true)
-            }
         }
+        // Onboarding is handled by AppDelegate.applicationDidFinishLaunching
 
         // Schedule nightly dream + wire up completion callbacks
         dreamEngine.onDreamComplete = { [weak self] summary in
