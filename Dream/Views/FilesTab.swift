@@ -1,8 +1,13 @@
 import SwiftUI
 
-/// Files tab — browse and edit ~/Dream/ markdown files.
-/// AI-native: everything here is readable by AI via MCP or file reference.
-/// User can edit me.md to correct AI's understanding, or add notes/ for extra context.
+/// Files tab — Bear-inspired markdown viewer/editor.
+///
+/// Design principles (from Bear):
+///   - Sidebar recedes. No borders, no cards. Just text.
+///   - Editor is the star. Clean, warm, distraction-free.
+///   - Typography creates hierarchy, not boxes.
+///   - Tools appear on hover, hide when not needed.
+///   - Warm grays, not cold. Comfortable to look at for hours.
 struct FilesTab: View {
     @EnvironmentObject var appState: AppState
     @State private var selectedFile: DreamFile?
@@ -11,68 +16,65 @@ struct FilesTab: View {
     @State private var isDirty = false
     @State private var showNewNote = false
     @State private var newNoteName = ""
+    @State private var isToolbarVisible = false
 
     private let dreamDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Dream")
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
-        } detail: {
+                .frame(minWidth: 180, idealWidth: 210, maxWidth: 260)
+
+            Divider()
+
             editor
+                .frame(minWidth: 400)
         }
         .onAppear { refreshFileTree() }
     }
 
-    // MARK: - Sidebar
+    // MARK: - Sidebar (Bear-style: quiet, text-only)
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("~/Dream/")
-                    .font(DS.bodyMedium)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    refreshFileTree()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 0) {
+            // Quiet header
+            Text("Dream")
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, DS.md)
-            .padding(.vertical, DS.sm)
+                .padding(.horizontal, DS.lg)
+                .padding(.top, DS.md)
+                .padding(.bottom, DS.sm)
 
-            Divider()
-
-            // File tree
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(fileTree) { node in
-                        fileNodeView(node, depth: 0)
+                VStack(alignment: .leading, spacing: 0) {
+                    // Core files (always visible, no folder)
+                    ForEach(coreFiles, id: \.name) { file in
+                        sidebarItem(file: file)
+                    }
+
+                    // Folders
+                    ForEach(folders, id: \.name) { folder in
+                        sidebarFolder(folder)
                     }
                 }
-                .padding(.vertical, DS.xs)
+                .padding(.horizontal, DS.sm)
             }
 
-            Divider()
+            Spacer()
 
-            // New note button
+            // New note — subtle, bottom of sidebar
             Button {
                 showNewNote = true
             } label: {
                 HStack(spacing: DS.sm) {
-                    Image(systemName: "plus.circle.fill")
-                        .foregroundStyle(Color.accentColor)
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .medium))
                     Text("New Note")
-                        .font(DS.bodyFont)
+                        .font(.system(size: 12))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DS.md)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, DS.lg)
                 .padding(.vertical, DS.sm)
             }
             .buttonStyle(.plain)
@@ -80,179 +82,197 @@ struct FilesTab: View {
                 newNoteSheet
             }
         }
+        .background(Color(.controlBackgroundColor).opacity(0.3))
     }
 
-    @ViewBuilder
-    private func fileNodeView(_ node: DreamFileNode, depth: Int) -> some View {
-        if node.isDirectory {
-            DisclosureGroup {
-                ForEach(node.children) { child in
-                    fileNodeView(child, depth: depth + 1)
-                }
-            } label: {
-                HStack(spacing: DS.sm) {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                    Text(node.name)
-                        .font(DS.bodyFont)
+    // MARK: - Sidebar Items
+
+    private func sidebarItem(file: DreamFile) -> some View {
+        let isSelected = selectedFile?.path == file.path
+
+        return Button {
+            selectFile(file)
+        } label: {
+            HStack(spacing: DS.sm) {
+                Circle()
+                    .fill(fileAccent(file.name))
+                    .frame(width: 6, height: 6)
+
+                Text(displayName(file.name))
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                if file.isAutoGenerated {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.3))
+                        .frame(width: 4, height: 4)
                 }
             }
-            .padding(.leading, CGFloat(depth) * DS.lg)
-            .padding(.horizontal, DS.md)
-            .padding(.vertical, 2)
-        } else {
-            Button {
-                selectFile(node.file!)
-            } label: {
-                HStack(spacing: DS.sm) {
-                    Image(systemName: fileIcon(node.name))
-                        .font(.system(size: 11))
-                        .foregroundStyle(fileColor(node.name))
+            .padding(.horizontal, DS.sm)
+            .padding(.vertical, 5)
+            .background(
+                isSelected
+                    ? Color.accentColor.opacity(0.08)
+                    : Color.clear
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+    }
 
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(node.name)
-                            .font(selectedFile?.path == node.file?.path ? DS.bodyMedium : DS.bodyFont)
-                            .foregroundStyle(selectedFile?.path == node.file?.path ? Color.accentColor : .primary)
-
-                        if let size = node.file?.sizeFormatted {
-                            Text(size)
-                                .font(DS.microFont)
-                                .foregroundStyle(.quaternary)
-                        }
-                    }
-
-                    Spacer()
-
-                    if node.file?.isAutoGenerated == true {
-                        Text("auto")
-                            .font(.system(size: 8, weight: .medium))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.accentColor.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 2))
-                            .foregroundStyle(.tertiary)
-                    }
+    private func sidebarFolder(_ folder: DreamFileNode) -> some View {
+        DisclosureGroup {
+            ForEach(folder.children) { child in
+                if let file = child.file {
+                    sidebarItem(file: file)
+                        .padding(.leading, DS.sm)
                 }
-                .padding(.leading, CGFloat(depth) * DS.lg)
-                .padding(.horizontal, DS.md)
-                .padding(.vertical, DS.xs)
-                .background(selectedFile?.path == node.file?.path ? Color.accentColor.opacity(0.08) : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
             }
-            .buttonStyle(.plain)
+        } label: {
+            Text(folder.name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+                .tracking(0.3)
+                .padding(.top, DS.md)
+                .padding(.bottom, DS.xs)
         }
+        .padding(.horizontal, DS.sm)
     }
 
-    private func fileIcon(_ name: String) -> String {
-        switch name {
-        case "me.md": return "person.fill"
-        case "now.md": return "clock.fill"
-        case "full.md": return "brain.head.profile.fill"
-        case "MEMORY.md": return "list.bullet"
-        default:
-            if name.hasSuffix(".md") { return "doc.text.fill" }
-            return "doc.fill"
-        }
-    }
-
-    private func fileColor(_ name: String) -> Color {
-        switch name {
-        case "me.md": return .blue
-        case "now.md": return .green
-        case "full.md": return .purple
-        case "MEMORY.md": return .orange
-        default: return .secondary
-        }
-    }
-
-    // MARK: - Editor
+    // MARK: - Editor (Bear-style: clean, warm, text-first)
 
     private var editor: some View {
         VStack(spacing: 0) {
             if let file = selectedFile {
-                // Editor toolbar
-                HStack {
-                    Image(systemName: fileIcon(file.name))
-                        .foregroundStyle(fileColor(file.name))
-                    Text(file.name)
-                        .font(DS.titleFont)
+                // Floating toolbar — appears on hover (Bear-style)
+                editorToolbar(file: file)
+                    .opacity(isToolbarVisible || isDirty ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.15), value: isToolbarVisible)
 
-                    if file.isAutoGenerated {
-                        Text("Auto-generated by Dream")
-                            .font(DS.captionFont)
-                            .foregroundStyle(.tertiary)
+                // The text
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Title derived from first # heading or filename
+                        Text(editorTitle(file: file))
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.bottom, DS.sm)
+                            .textSelection(.enabled)
+
+                        if file.isAutoGenerated {
+                            HStack(spacing: DS.xs) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 9))
+                                Text("Auto-generated by Dream · updates every 60s")
+                                    .font(.system(size: 11))
+                            }
+                            .foregroundStyle(.quaternary)
+                            .padding(.bottom, DS.md)
+                        }
+
+                        // Editor
+                        TextEditor(text: $editorContent)
+                            .font(.system(size: 14, design: .default))
+                            .scrollContentBackground(.hidden)
+                            .lineSpacing(4)
+                            .frame(minHeight: 400)
+                            .onChange(of: editorContent) { _, _ in
+                                isDirty = true
+                            }
                     }
-
-                    Spacer()
-
-                    if isDirty {
-                        Text("Edited")
-                            .font(DS.captionFont)
-                            .foregroundStyle(.orange)
-                    }
-
-                    Button {
-                        saveFile()
-                    } label: {
-                        Text("Save")
-                            .font(DS.bodyMedium)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.accentColor)
-                    .controlSize(.small)
-                    .disabled(!isDirty)
-                    .keyboardShortcut("s", modifiers: .command)
+                    .padding(.horizontal, DS.xxl)
+                    .padding(.top, DS.xl)
+                    .padding(.bottom, 60)
                 }
-                .padding(.horizontal, DS.xl)
-                .padding(.vertical, DS.sm)
-
-                Divider()
-
-                // Text editor
-                TextEditor(text: $editorContent)
-                    .font(.system(size: 13, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(DS.md)
-                    .onChange(of: editorContent) { _, _ in
-                        isDirty = true
-                    }
+                .onHover { hovering in
+                    isToolbarVisible = hovering
+                }
             } else {
-                // No file selected
-                VStack(spacing: DS.lg) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.quaternary)
-
-                    Text("Select a file to view or edit")
-                        .font(DS.bodyFont)
-                        .foregroundStyle(.tertiary)
-
-                    Text("Files in ~/Dream/ are your AI context.\nEdit me.md to correct what AI knows about you.\nAdd notes/ for extra context AI can read.")
-                        .font(DS.captionFont)
-                        .foregroundStyle(.quaternary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                emptyEditor
             }
         }
+        .background(Color(.textBackgroundColor))
+    }
+
+    private func editorToolbar(file: DreamFile) -> some View {
+        HStack(spacing: DS.md) {
+            Text(file.name)
+                .font(.system(size: 11))
+                .foregroundStyle(.quaternary)
+
+            Text(file.sizeFormatted)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.quaternary)
+
+            Spacer()
+
+            if isDirty {
+                Text("Edited")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange.opacity(0.7))
+            }
+
+            Button {
+                saveFile()
+            } label: {
+                Text("Save")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isDirty ? Color.accentColor : .quaternary)
+            .disabled(!isDirty)
+            .keyboardShortcut("s", modifiers: .command)
+        }
+        .padding(.horizontal, DS.xxl)
+        .padding(.vertical, DS.sm)
+    }
+
+    private var emptyEditor: some View {
+        VStack(spacing: DS.lg) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 32, weight: .thin))
+                .foregroundStyle(.quaternary)
+
+            VStack(spacing: DS.xs) {
+                Text("Select a file")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.tertiary)
+
+                Text("Edit me.md to tell AI who you are.\nCreate notes for extra context.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.quaternary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.textBackgroundColor))
     }
 
     // MARK: - New Note Sheet
 
     private var newNoteSheet: some View {
-        VStack(spacing: DS.lg) {
+        VStack(alignment: .leading, spacing: DS.lg) {
             Text("New Note")
-                .font(DS.titleFont)
+                .font(.system(size: 15, weight: .semibold))
 
-            TextField("Note name (e.g. meeting-notes)", text: $newNoteName)
+            TextField("Name", text: $newNoteName)
                 .textFieldStyle(.roundedBorder)
+                .font(.system(size: 14))
+
+            Text("Saved to ~/Dream/notes/\(sanitizedName).md")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
 
             HStack {
                 Button("Cancel") {
                     showNewNote = false
                     newNoteName = ""
                 }
+                .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
@@ -260,11 +280,71 @@ struct FilesTab: View {
                     createNote()
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(newNoteName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(DS.xl)
-        .frame(width: 320)
+        .frame(width: 300)
+    }
+
+    private var sanitizedName: String {
+        newNoteName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "-")
+            .lowercased()
+    }
+
+    // MARK: - Helpers
+
+    private func displayName(_ name: String) -> String {
+        switch name {
+        case "me.md": return "About Me"
+        case "now.md": return "Current Context"
+        case "full.md": return "Full Context"
+        case "MEMORY.md": return "Memory Index"
+        default: return name.replacingOccurrences(of: ".md", with: "")
+        }
+    }
+
+    private func fileAccent(_ name: String) -> Color {
+        switch name {
+        case "me.md": return .blue
+        case "now.md": return .green
+        case "full.md": return .purple
+        case "MEMORY.md": return .orange
+        default: return .secondary.opacity(0.5)
+        }
+    }
+
+    private func editorTitle(file: DreamFile) -> String {
+        // Extract first # heading from content
+        let firstLine = editorContent.components(separatedBy: "\n").first ?? ""
+        if firstLine.hasPrefix("# ") {
+            return String(firstLine.dropFirst(2))
+        }
+        return displayName(file.name)
+    }
+
+    // MARK: - Data
+
+    private var coreFiles: [DreamFile] {
+        let coreNames = ["me.md", "now.md", "full.md", "MEMORY.md"]
+        return coreNames.compactMap { name in
+            let url = dreamDir.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+            return DreamFile(
+                name: name,
+                url: url,
+                size: attrs?[.size] as? Int64 ?? 0,
+                modified: attrs?[.modificationDate] as? Date ?? Date(),
+                isAutoGenerated: true
+            )
+        }
+    }
+
+    private var folders: [DreamFileNode] {
+        fileTree.filter(\.isDirectory)
     }
 
     // MARK: - File Operations
@@ -274,9 +354,7 @@ struct FilesTab: View {
     }
 
     private func selectFile(_ file: DreamFile) {
-        // Save current if dirty
         if isDirty { saveFile() }
-
         selectedFile = file
         editorContent = (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
         isDirty = false
@@ -289,7 +367,7 @@ struct FilesTab: View {
     }
 
     private func createNote() {
-        let name = newNoteName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = sanitizedName
         guard !name.isEmpty else { return }
 
         let notesDir = dreamDir.appendingPathComponent("notes")
@@ -297,23 +375,18 @@ struct FilesTab: View {
 
         let fileName = name.hasSuffix(".md") ? name : "\(name).md"
         let filePath = notesDir.appendingPathComponent(fileName)
-        let initialContent = "# \(name)\n\n"
+        let content = "# \(newNoteName.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
 
-        try? initialContent.write(to: filePath, atomically: true, encoding: .utf8)
-
+        try? content.write(to: filePath, atomically: true, encoding: .utf8)
         showNewNote = false
         newNoteName = ""
         refreshFileTree()
 
-        // Select the new file
-        let newFile = DreamFile(
-            name: fileName,
-            url: filePath,
-            size: Int64(initialContent.utf8.count),
-            modified: Date(),
+        selectFile(DreamFile(
+            name: fileName, url: filePath,
+            size: Int64(content.utf8.count), modified: Date(),
             isAutoGenerated: false
-        )
-        selectFile(newFile)
+        ))
     }
 
     private func scanDirectory(_ url: URL) -> [DreamFileNode] {
@@ -324,43 +397,43 @@ struct FilesTab: View {
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
+        let coreNames = Set(["me.md", "now.md", "full.md", "MEMORY.md"])
         var nodes: [DreamFileNode] = []
 
-        // Files first, then directories
-        let sorted = contents.sorted { a, b in
-            let aIsDir = (try? a.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            let bIsDir = (try? b.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            if aIsDir != bIsDir { return !aIsDir } // Files before directories
-            return a.lastPathComponent < b.lastPathComponent
-        }
+        let sorted = contents.sorted { $0.lastPathComponent < $1.lastPathComponent }
 
         for item in sorted {
             let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
             let isDir = values?.isDirectory ?? false
+            let name = item.lastPathComponent
+
+            // Skip core files (shown separately at top)
+            if !isDir && coreNames.contains(name) { continue }
 
             if isDir {
                 let children = scanDirectory(item)
+                    .flatMap { node -> [DreamFileNode] in
+                        if node.isDirectory { return node.children }
+                        return [node]
+                    }
                 if !children.isEmpty {
                     nodes.append(DreamFileNode(
-                        name: item.lastPathComponent,
+                        name: name,
                         isDirectory: true,
                         file: nil,
                         children: children
                     ))
                 }
-            } else if item.pathExtension == "md" {
-                let autoGenerated = ["me.md", "now.md", "full.md", "MEMORY.md"]
-                    .contains(item.lastPathComponent)
-
+            } else if name.hasSuffix(".md") {
                 let file = DreamFile(
-                    name: item.lastPathComponent,
+                    name: name,
                     url: item,
                     size: Int64(values?.fileSize ?? 0),
                     modified: values?.contentModificationDate ?? Date(),
-                    isAutoGenerated: autoGenerated
+                    isAutoGenerated: false
                 )
                 nodes.append(DreamFileNode(
-                    name: item.lastPathComponent,
+                    name: name,
                     isDirectory: false,
                     file: file,
                     children: []
@@ -395,5 +468,5 @@ struct DreamFileNode: Identifiable {
     let file: DreamFile?
     let children: [DreamFileNode]
 
-    var id: String { name + (isDirectory ? "/" : "") }
+    var id: String { name + (isDirectory ? "/" : "") + (file?.path ?? "") }
 }
