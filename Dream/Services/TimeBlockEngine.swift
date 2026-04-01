@@ -22,6 +22,10 @@ struct TimeBlockEngine {
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
 
         let events = database.fetchEvents(from: startOfDay, to: min(endOfDay, Date()))
+            .filter { event in
+                guard let app = event.appName else { return true }
+                return !AnalyticsEngine.noiseApps.contains(app)
+            }
         guard !events.isEmpty else { return [] }
 
         // Step 1: Create raw segments (1 per event with app + time)

@@ -247,13 +247,17 @@ final class WhatlyEngine {
     /// Not as polished as LLM output, but works from day one with zero config.
     private func phase3RuleBasedFallback(rawData: GatheredData) -> ConsolidatedSummary {
         func summarizePeriod(_ events: [RecordingEvent]) -> String? {
-            guard !events.isEmpty else { return nil }
+            let filtered = events.filter { e in
+                guard let app = e.appName else { return true }
+                return !AnalyticsEngine.noiseApps.contains(app)
+            }
+            guard !filtered.isEmpty else { return nil }
 
             var lines: [String] = []
 
             // Window titles → what you worked on
             var titleSeen = Set<String>()
-            for event in events where (event.eventType == .screenText || event.eventType == .appSwitch) {
+            for event in filtered where (event.eventType == .screenText || event.eventType == .appSwitch) {
                 let title = event.windowTitle ?? event.textContent ?? ""
                 guard !title.isEmpty else { continue }
                 let key = String(title.prefix(50).lowercased())
@@ -264,7 +268,7 @@ final class WhatlyEngine {
             }
 
             // Clipboard → what you copied
-            let clips = events.filter { $0.eventType == .clipboard }
+            let clips = filtered.filter { $0.eventType == .clipboard }
             for clip in clips.prefix(3) {
                 guard let text = clip.textContent, text.count > 5 else { continue }
                 let clean = String(text.prefix(100)).replacingOccurrences(of: "\n", with: " ")
@@ -278,8 +282,9 @@ final class WhatlyEngine {
         let afternoon = summarizePeriod(rawData.afternoon)
         let evening = summarizePeriod(rawData.evening)
 
-        // App usage summary
+        // App usage summary (filtered)
         let topApps = rawData.appGroups
+            .filter { !AnalyticsEngine.noiseApps.contains($0.key) }
             .sorted { $0.value.count > $1.value.count }
             .prefix(5)
             .map { "\($0.key): \($0.value.count) events" }

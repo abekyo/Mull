@@ -101,10 +101,14 @@ enum LiveContextGenerator {
             lines.append("")
         }
 
-        // Today's activity from live events
+        // Today's activity from live events (excluding noise apps)
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: Date())
         let todayEvents = database.fetchEvents(from: startOfDay, to: Date())
+            .filter { event in
+                guard let app = event.appName else { return true }
+                return !AnalyticsEngine.noiseApps.contains(app)
+            }
 
         if !todayEvents.isEmpty {
             // Window titles → compress typing sequences first, then dedup
@@ -199,6 +203,10 @@ enum LiveContextGenerator {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
         let todayEvents = database.fetchEvents(from: startOfDay, to: Date())
+            .filter { event in
+                guard let app = event.appName else { return true }
+                return !AnalyticsEngine.noiseApps.contains(app)
+            }
 
         let keystrokeEvents = todayEvents.filter { $0.eventType == .keystroke }
         if !keystrokeEvents.isEmpty {
