@@ -14,6 +14,7 @@
 		35FEFDC0378051A9549301EB /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F65E66C82AA9ADCD2BB9940 /* DesignTokens.swift */; };
 		36F4E01C49E96BE4682277B2 /* ActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B333118B4893B3ACC26A48F6 /* ActionBar.swift */; };
 		3C789FEECF52394585CF56E9 /* MenuBarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBBAAF1E805104C572763E27 /* MenuBarPanel.swift */; };
+		411723302DAA0FDE401F5D40 /* FactExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */; };
 		48BB1FFFC3606821A2282668 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD95BF8AE481474F9151CE73 /* DatabaseService.swift */; };
 		493C34447B7D2E57F779096B /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C20674B22EA786364042A02 /* KeychainService.swift */; };
 		4A979E895E773C57F011ED9A /* SummaryContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 479FCCCEEB1D9213BD36FB31 /* SummaryContent.swift */; };
@@ -31,6 +32,7 @@
 		BE7838DE9D6CDB49F0FB887B /* DreamEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F7AA73DC400937F893F26F /* DreamEngine.swift */; };
 		C494A172314468A536023B86 /* AIExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF3828CE5B527D50E297071 /* AIExportSheet.swift */; };
 		C7A2D21E38B6B589F12A1144 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7153E77328B786D13B939D5 /* OnboardingView.swift */; };
+		CBF535540236C9A05326CED4 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC44A43E57DE61F5A4DB68FB /* CalendarService.swift */; };
 		D45D8D1C15272C5ED098F882 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29788F509600637197A5B39D /* Models.swift */; };
 		D5F9E9D76389CF307CB3ACFA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DDA3EA25D7F1EE0A32F63F41 /* Assets.xcassets */; };
 		DB430A797F69E5B85C9AB1A4 /* LiveContextGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 267C246E5EFF2CA867120730 /* LiveContextGenerator.swift */; };
@@ -51,6 +53,7 @@
 		3E3917F871D8C4E5C479E762 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4432343512DB0CF0F9A449CD /* Dream.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dream.entitlements; sourceTree = "<group>"; };
 		479FCCCEEB1D9213BD36FB31 /* SummaryContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryContent.swift; sourceTree = "<group>"; };
+		5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactExtractor.swift; sourceTree = "<group>"; };
 		800206DAA1BB06787FF4E585 /* PrivacyStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyStatusBar.swift; sourceTree = "<group>"; };
 		83286524AA77A525BEAF6BDC /* DreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DreamApp.swift; sourceTree = "<group>"; };
 		8FAE3FD1DCE2396532C6762E /* SearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBar.swift; sourceTree = "<group>"; };
@@ -68,6 +71,7 @@
 		CBBAAF1E805104C572763E27 /* MenuBarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanel.swift; sourceTree = "<group>"; };
 		DDA3EA25D7F1EE0A32F63F41 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DFF6098E4D8A8224B0260FB0 /* PastSummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastSummaryCard.swift; sourceTree = "<group>"; };
+		EC44A43E57DE61F5A4DB68FB /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		EEACE77826C232B268C2E327 /* Dream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dream.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -158,8 +162,10 @@
 			isa = PBXGroup;
 			children = (
 				31CA34B2872C0DD122CEF38D /* AnalyticsEngine.swift */,
+				EC44A43E57DE61F5A4DB68FB /* CalendarService.swift */,
 				BD95BF8AE481474F9151CE73 /* DatabaseService.swift */,
 				99F7AA73DC400937F893F26F /* DreamEngine.swift */,
+				5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */,
 				3C20674B22EA786364042A02 /* KeychainService.swift */,
 				267C246E5EFF2CA867120730 /* LiveContextGenerator.swift */,
 				9435B446CEA02AB71591F629 /* MCPServer.swift */,
@@ -312,10 +318,12 @@
 				36F4E01C49E96BE4682277B2 /* ActionBar.swift in Sources */,
 				5217219F78672F7BC4F909AF /* AnalyticsEngine.swift in Sources */,
 				A5657C4B198A8AEB4277A8FC /* AppState.swift in Sources */,
+				CBF535540236C9A05326CED4 /* CalendarService.swift in Sources */,
 				48BB1FFFC3606821A2282668 /* DatabaseService.swift in Sources */,
 				35FEFDC0378051A9549301EB /* DesignTokens.swift in Sources */,
 				E61D1CC4547F5B3EA821F528 /* DreamApp.swift in Sources */,
 				BE7838DE9D6CDB49F0FB887B /* DreamEngine.swift in Sources */,
+				411723302DAA0FDE401F5D40 /* FactExtractor.swift in Sources */,
 				079C654ADA7CA274C291FD6F /* FullWindowView.swift in Sources */,
 				95D1F8839C950B4AE70EF8DF /* KeychainService.swift in Sources */,
 				DB430A797F69E5B85C9AB1A4 /* LiveContextGenerator.swift in Sources */,

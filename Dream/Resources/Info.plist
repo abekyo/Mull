@@ -22,6 +22,12 @@
 	<false/>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>Dream uses Accessibility to read on-screen text and record your activity for daily summaries.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Dream reads browser URLs to understand what pages you are viewing.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Dream reads your calendar to give AI context about your schedule.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Dream reads your calendar to give AI context about your schedule.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Dream can optionally record audio for meeting transcription.</string>
 </dict>

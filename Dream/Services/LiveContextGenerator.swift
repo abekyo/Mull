@@ -11,6 +11,8 @@ enum LiveContextGenerator {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Dream")
     }()
 
+    static var calendarService: CalendarService?
+
     static func generate(analytics: AnalyticsEngine, database: DatabaseService) throws {
         try FileManager.default.createDirectory(at: dreamDir, withIntermediateDirectories: true)
 
@@ -18,8 +20,8 @@ enum LiveContextGenerator {
         let summaries = database.fetchRecentSummaries(limit: 7)
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
 
-        try generateMe(memories: memories, analytics: analytics, timestamp: timestamp)
-        try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, timestamp: timestamp)
+        try generateMe(memories: memories, analytics: analytics, database: database, timestamp: timestamp)
+        try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendarService, timestamp: timestamp)
         try generateFull(database: database, analytics: analytics, timestamp: timestamp)
         // NOTE: Claude Code integration is manual. User runs:
         //   claude mcp add --transport stdio --scope user dream -- /path/to/DreamMCP
@@ -28,12 +30,12 @@ enum LiveContextGenerator {
 
     // MARK: - me.md (~200 tokens) — Who you are
 
-    private static func generateMe(memories: [MemoryEntry], analytics: AnalyticsEngine, timestamp: String) throws {
+    private static func generateMe(memories: [MemoryEntry], analytics: AnalyticsEngine, database: DatabaseService, timestamp: String) throws {
         var lines: [String] = []
         lines.append("About the user (auto-updated: \(timestamp)):")
         lines.append("")
 
-        // From Dream memories (if they exist)
+        // From Dream memories (if they exist from past LLM runs)
         let userMemories = memories.filter { $0.memoryType == .user }
         if !userMemories.isEmpty {
             for mem in userMemories {
@@ -41,25 +43,11 @@ enum LiveContextGenerator {
             }
         }
 
-        // From analytics (always available, even before first Dream)
-        let lang = analytics.languageMix(days: 30)
-        if lang.japanesePercent > 20 && lang.englishPercent > 20 {
-            lines.append("- Bilingual user (Japanese \(pct(lang.japanesePercent))%, English \(pct(lang.englishPercent))%)")
-        } else if lang.japanesePercent > 50 {
-            lines.append("- Primary language: Japanese")
-        } else if lang.englishPercent > 50 {
-            lines.append("- Primary language: English")
-        }
-
-        if lang.codePercent > 15 {
-            lines.append("- Writes code (\(pct(lang.codePercent))% of input is code)")
-        }
-
-        // Top apps → infer role
-        let apps = analytics.appUsage(days: 7)
-        let topAppNames = apps.prefix(3).map(\.appName)
-        if topAppNames.contains("Xcode") || topAppNames.contains("Code") {
-            lines.append("- Software developer (primary tools: \(topAppNames.joined(separator: ", ")))")
+        // From FactExtractor (rule-based, always available from day one)
+        let extractor = FactExtractor(analytics: analytics, database: database)
+        let factSummary = extractor.generateFactSummary(days: 30)
+        if !factSummary.isEmpty {
+            lines.append(factSummary)
         }
 
         // Preferences from feedback memories
@@ -69,7 +57,7 @@ enum LiveContextGenerator {
         }
 
         if lines.count <= 2 {
-            lines.append("- (Dream is still learning about this user. More data will improve this profile.)")
+            lines.append("- (Dream is still learning. More data will improve this profile.)")
         }
 
         try lines.joined(separator: "\n")
@@ -83,6 +71,7 @@ enum LiveContextGenerator {
         summaries: [DailySummary],
         analytics: AnalyticsEngine,
         database: DatabaseService,
+        calendar: CalendarService?,
         timestamp: String
     ) throws {
         var lines: [String] = []
@@ -99,9 +88,15 @@ enum LiveContextGenerator {
             lines.append("")
         }
 
+        // Calendar events
+        if let schedule = calendarService?.todaySchedule() {
+            lines.append(schedule)
+            lines.append("")
+        }
+
         // Today's activity from live events
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
+        let cal = Calendar.current
+        let startOfDay = cal.startOfDay(for: Date())
         let todayEvents = database.fetchEvents(from: startOfDay, to: Date())
 
         if !todayEvents.isEmpty {

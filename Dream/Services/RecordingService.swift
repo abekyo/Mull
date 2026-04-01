@@ -272,9 +272,60 @@ final class RecordingService {
                 }
             }
 
+            // Append browser URL if this is a browser app
+            let enriched: String
+            if let url = self.getBrowserURL() {
+                enriched = "\(title) | \(url)"
+            } else {
+                enriched = title
+            }
+
             self.currentWindowTitle = title
-            self.recordEvent(type: .screenText, text: title)
+            self.recordEvent(type: .screenText, text: enriched)
         }
+    }
+
+    /// Get the current URL from the active browser tab via AppleScript.
+    /// Works with Safari, Chrome, Firefox, Arc, Brave, Edge.
+    private var lastBrowserURL: String = ""
+
+    private func getBrowserURL() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let bundleID = app.bundleIdentifier else { return nil }
+
+        let script: String?
+
+        switch bundleID {
+        case "com.apple.Safari", "com.apple.SafariTechnologyPreview":
+            script = "tell application \"Safari\" to get URL of current tab of front window"
+
+        case "com.google.Chrome", "com.google.Chrome.canary",
+             "com.brave.Browser", "com.microsoft.edgemac",
+             "company.thebrowser.Browser": // Arc
+            let appName = app.localizedName ?? "Google Chrome"
+            script = "tell application \"\(appName)\" to get URL of active tab of front window"
+
+        case "org.mozilla.firefox":
+            // Firefox doesn't support AppleScript for URL — skip
+            return nil
+
+        default:
+            return nil
+        }
+
+        guard let appleScript = script else { return nil }
+
+        var error: NSDictionary?
+        guard let scriptObj = NSAppleScript(source: appleScript) else { return nil }
+        let result = scriptObj.executeAndReturnError(&error)
+
+        guard error == nil, let url = result.stringValue, !url.isEmpty else { return nil }
+
+        // Skip if same URL as last time
+        guard url != lastBrowserURL else { return nil }
+        lastBrowserURL = url
+
+        return url
     }
 
     private func getActiveWindowTitle() -> String? {

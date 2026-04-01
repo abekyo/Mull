@@ -45,6 +45,7 @@ final class AppState: ObservableObject {
     let recorder: RecordingService
     let dreamEngine: DreamEngine
     let analytics: AnalyticsEngine
+    let calendar: CalendarService
 
     private var refreshTimer: Timer?
     private var lastRefreshDate: Date = Date()
@@ -65,6 +66,7 @@ final class AppState: ObservableObject {
         self.recorder = RecordingService(database: database)
         self.dreamEngine = DreamEngine(database: database)
         self.analytics = AnalyticsEngine(database: database)
+        self.calendar = CalendarService()
 
         // Sync LLM provider from UserDefaults
         if let saved = UserDefaults.standard.string(forKey: "llmProvider"),
@@ -156,6 +158,7 @@ final class AppState: ObservableObject {
         // No LLM needed — pure rule-based from AnalyticsEngine
         if todayEventCount > 0 && Date().timeIntervalSince(lastMeFileUpdate) > 60 {
             lastMeFileUpdate = Date()
+            LiveContextGenerator.calendarService = calendar
             Task.detached { [analytics, database] in
                 try? LiveContextGenerator.generate(analytics: analytics, database: database)
             }
