@@ -837,165 +837,166 @@ struct TimelineTab: View {
     private var detail: some View {
         ScrollView {
             VStack(spacing: DS.lg) {
-                if Calendar.current.isDateInToday(selectedDate) {
-                    todayDetail
-                } else {
-                    pastDayDetail
-                }
+                dayDetail(for: selectedDate)
             }
             .padding(DS.xl)
         }
     }
 
-    // MARK: - Today Detail
+    // MARK: - Day Detail (shared for today + past)
+
+    @ViewBuilder
+    private func dayDetail(for date: Date) -> some View {
+        let isToday = Calendar.current.isDateInToday(date)
+        let summary = isToday ? appState.todaySummary : appState.recentSummaries.first(where: {
+            Calendar.current.isDate($0.date, inSameDayAs: date)
+        })
+
+        // Header
+        VStack(spacing: DS.sm) {
+            Text(isToday ? "TODAY" : date.formatted(.dateTime.weekday(.wide)).uppercased())
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(.tertiary)
+
+            Text(date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                .font(.system(size: 18, weight: .semibold))
+
+            HStack(spacing: DS.lg) {
+                statBadge(value: "\(isToday ? appState.todayEventCount : (summary?.eventCount ?? 0))", label: "events")
+                if let s = summary {
+                    statBadge(value: s.llmProvider, label: "engine")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, DS.md)
+
+        // "Your day" — the hero card
+        mainActivitiesView(for: date)
+
+        // Timeline blocks
+        timeBlocksView(for: date)
+
+        // Summary with copy button
+        if let summary {
+            summaryCard(summary)
+        } else if isToday {
+            noSummaryYetCard
+        }
+    }
 
     @ViewBuilder
     private var todayDetail: some View {
-        // Header
-        VStack(spacing: DS.sm) {
-            Text("TODAY")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1)
-                .foregroundStyle(.tertiary)
-
-            Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-                .font(DS.titleFont)
-
-            HStack(spacing: DS.lg) {
-                statBadge(value: "\(appState.todayEventCount)", label: "events")
-                statBadge(value: appState.todayStorageFormatted, label: "captured")
-                if let summary = appState.todaySummary {
-                    statBadge(value: String(format: "%.0fs", summary.processingSeconds), label: "processed")
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, DS.sm)
-
-        // "What you mainly did" — the hero insight
-        mainActivitiesView(for: selectedDate)
-
-        // Calendar-style time blocks
-        timeBlocksView(for: selectedDate)
-
-        if let summary = appState.todaySummary {
-            // Dream summary
-            VStack(alignment: .leading, spacing: DS.md) {
-                HStack {
-                    Image(systemName: "moon.stars.fill")
-                        .foregroundStyle(Color.accentColor)
-                    Text("Summary")
-                        .font(DS.titleFont)
-                    Spacer()
-                    Text(summary.llmProvider)
-                        .font(DS.microFont)
-                        .foregroundStyle(.tertiary)
-                }
-                SummaryContent(summary: summary)
-            }
-            .dreamCard()
-        } else {
-            // No summary yet — show live data preview
-            VStack(spacing: DS.md) {
-                Image(systemName: "moon.haze")
-                    .font(.system(size: 28))
-                    .foregroundStyle(Color.accentColor.opacity(0.4))
-
-                Text("No summary yet for today")
-                    .font(DS.bodyMedium)
-
-                Text("Press \"Generate Summary\" to create one now,\nor wait for tonight's automatic summary.")
-                    .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-
-                // Show top apps as preview
-                let apps = appState.analytics.appUsage(days: 1)
-                if !apps.isEmpty {
-                    VStack(alignment: .leading, spacing: DS.xs) {
-                        Text("TODAY SO FAR")
-                            .sectionLabel()
-                        ForEach(Array(apps.prefix(5))) { app in
-                            HStack {
-                                Text(app.appName)
-                                    .font(DS.captionFont)
-                                Spacer()
-                                Text(String(format: "%.0f%%", app.percentage))
-                                    .font(DS.microFont)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                    .padding(.top, DS.sm)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .dreamCard()
-        }
-
-        // Raw events preview
-        recentEventsPreview
+        dayDetail(for: selectedDate)
     }
-
-    // MARK: - Past Day Detail
 
     @ViewBuilder
     private var pastDayDetail: some View {
-        let summary = appState.recentSummaries.first(where: {
-            Calendar.current.isDate($0.date, inSameDayAs: selectedDate)
-        })
+        dayDetail(for: selectedDate)
+    }
 
-        VStack(spacing: DS.sm) {
-            Text(selectedDate.formatted(.dateTime.weekday(.wide)).uppercased())
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1)
-                .foregroundStyle(.tertiary)
+    // MARK: - Summary Card (with copy)
 
-            Text(selectedDate.formatted(.dateTime.month(.wide).day().year()))
-                .font(DS.titleFont)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, DS.sm)
+    private func summaryCard(_ summary: DailySummary) -> some View {
+        VStack(alignment: .leading, spacing: DS.md) {
+            HStack {
+                Image(systemName: "moon.stars.fill")
+                    .foregroundStyle(Color.accentColor)
+                Text("Summary")
+                    .font(DS.titleFont)
 
-        // "What you mainly did"
-        mainActivitiesView(for: selectedDate)
+                Spacer()
 
-        // Calendar-style time blocks
-        timeBlocksView(for: selectedDate)
-
-        if let summary {
-            VStack(alignment: .leading, spacing: DS.md) {
-                HStack {
-                    Image(systemName: "moon.stars.fill")
-                        .foregroundStyle(Color.accentColor)
-                    Text("Summary")
-                        .font(DS.titleFont)
-                    Spacer()
-
-                    HStack(spacing: DS.md) {
-                        Label("\(summary.eventCount) events", systemImage: "waveform.path")
-                        Label(String(format: "%.0fs", summary.processingSeconds), systemImage: "clock")
-                        Label(summary.llmProvider, systemImage: "brain")
+                // Copy this summary
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(summary.content, forType: .string)
+                } label: {
+                    HStack(spacing: DS.xs) {
+                        Image(systemName: "doc.on.clipboard")
+                        Text("Copy")
                     }
                     .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
 
-                SummaryContent(summary: summary)
+                // Copy full day (summary + time blocks + activities)
+                Button {
+                    copyFullDay(summary: summary)
+                } label: {
+                    HStack(spacing: DS.xs) {
+                        Image(systemName: "brain.head.profile")
+                        Text("Copy to AI")
+                    }
+                    .font(DS.captionFont)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .dreamCard()
-        } else {
-            VStack(spacing: DS.md) {
-                Image(systemName: "moon.zzz")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.quaternary)
-                Text("No summary for this day")
-                    .font(DS.bodyMedium)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 40)
+
+            SummaryContent(summary: summary)
         }
+        .dreamCard()
+    }
+
+    private var noSummaryYetCard: some View {
+        VStack(spacing: DS.md) {
+            Image(systemName: "moon.haze")
+                .font(.system(size: 24))
+                .foregroundStyle(Color.accentColor.opacity(0.4))
+
+            Text("No summary yet")
+                .font(DS.bodyMedium)
+
+            Button {
+                appState.triggerSummaryNow()
+                refreshAnalysis()
+            } label: {
+                HStack(spacing: DS.sm) {
+                    if appState.isSummarizing {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "sparkles")
+                    }
+                    Text(appState.isSummarizing ? "Generating..." : "Generate Summary")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.accentColor)
+            .disabled(appState.isSummarizing || appState.todayEventCount == 0)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.lg)
+        .dreamCard()
+    }
+
+    /// Copy full day context: activities + timeline + summary
+    private func copyFullDay(summary: DailySummary) {
+        var parts: [String] = []
+
+        let date = summary.date
+        parts.append("# \(date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))")
+        parts.append("")
+
+        // Main activities
+        if let analysis = cachedAnalysis, !analysis.mainActivities.isEmpty {
+            parts.append(analysis.asText())
+            parts.append("")
+        }
+
+        // Summary content
+        parts.append("## Summary")
+        parts.append(summary.content)
+
+        let text = parts.joined(separator: "\n")
+
+        let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
+        let finalText = (maxChars > 0 && text.count > maxChars) ? String(text.prefix(maxChars)) : text
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(finalText, forType: .string)
     }
 
     // MARK: - Main Activities ("What you mainly did")
