@@ -5,7 +5,12 @@ struct WhatlyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
 
+    init() {}
+
     var body: some Scene {
+        // Share AppState with AppDelegate on every body evaluation
+        let _ = { appDelegate.appState = appState }()
+
         // Menu bar panel (quick access)
         MenuBarExtra {
             MenuBarPanel()
@@ -48,6 +53,7 @@ struct WhatlyApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var mainWindow: NSWindow?
     var onboardingWindow: NSWindow?
+    var appState: AppState?
     static var shared: AppDelegate?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -56,9 +62,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
         if !hasCompletedOnboarding {
-            showOnboarding()
+            // Delay to let SwiftUI create AppState first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.showOnboarding()
+            }
         } else {
-            showMainWindow()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.showMainWindow()
+            }
         }
     }
 
@@ -78,7 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let appState = AppState()
+        guard let appState else { return }
         let view = FullWindowView()
             .environmentObject(appState)
 
@@ -104,7 +115,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Onboarding Window
 
     func showOnboarding() {
-        let appState = AppState()
+        guard let appState else { return }
         let view = OnboardingView(isPresented: .constant(true))
             .environmentObject(appState)
 
