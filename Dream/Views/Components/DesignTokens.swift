@@ -66,6 +66,57 @@ enum DS {
 
     static let panelWidth: CGFloat = 420
     static let panelMaxHeight: CGFloat = 440
+
+    // MARK: - App Colors (deterministic from name)
+
+    /// Generate a consistent color for any app name.
+    /// Well-known apps get curated colors. Everything else gets a hash-based color.
+    static func appColor(_ name: String) -> Color {
+        // Curated colors for common apps
+        switch name {
+        case "Xcode": return .blue
+        case "Code", "Visual Studio Code": return .purple
+        case "Cursor": return .cyan
+        case "Safari": return .blue.opacity(0.7)
+        case "Firefox": return .orange
+        case "Chrome", "Google Chrome": return .green
+        case "Arc": return .pink
+        case "Slack": return Color(red: 0.6, green: 0.2, blue: 0.6)
+        case "Discord": return Color(red: 0.35, green: 0.4, blue: 0.9)
+        case "Messages": return .green
+        case "Mail": return .blue
+        case "Finder": return .blue.opacity(0.5)
+        case "Terminal", "iTerm2", "Warp", "Ghostty": return .mint
+        case "Simulator": return .indigo
+        case "Figma": return Color(red: 0.6, green: 0.3, blue: 1.0)
+        case "Notion": return .primary.opacity(0.6)
+        case "Obsidian": return Color(red: 0.5, green: 0.3, blue: 0.8)
+        case "Notes": return .yellow
+        case "Photoshop": return Color(red: 0.0, green: 0.6, blue: 1.0)
+        case "Illustrator": return Color(red: 1.0, green: 0.6, blue: 0.0)
+        case "Preview": return .blue.opacity(0.4)
+        case "Zoom": return Color(red: 0.2, green: 0.5, blue: 1.0)
+        case "Teams": return Color(red: 0.3, green: 0.3, blue: 0.8)
+        default: break
+        }
+
+        // Hash-based color for any unknown app
+        return colorFromHash(name)
+    }
+
+    /// Deterministic color from string hash. Same app name → always same color.
+    private static func colorFromHash(_ string: String) -> Color {
+        var hash: UInt64 = 5381
+        for char in string.utf8 {
+            hash = ((hash << 5) &+ hash) &+ UInt64(char)
+        }
+
+        let hue = Double(hash % 360) / 360.0
+        let saturation = 0.45 + Double((hash >> 8) % 30) / 100.0  // 0.45-0.75
+        let brightness = 0.55 + Double((hash >> 16) % 25) / 100.0  // 0.55-0.80
+
+        return Color(hue: hue, saturation: saturation, brightness: brightness)
+    }
 }
 
 // MARK: - View Extensions

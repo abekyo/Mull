@@ -160,20 +160,7 @@ struct TimeBlock: Identifiable {
         return f.string(from: end)
     }
 
-    var color: Color {
-        switch app {
-        case "Xcode": .blue
-        case "Code": .purple
-        case "Cursor": .cyan
-        case "Safari", "Firefox", "Chrome", "Arc": .orange
-        case "Slack", "Discord", "Messages": .green
-        case "Mail": .red
-        case "Finder": .gray
-        case "Terminal", "iTerm2", "Warp", "Ghostty": .mint
-        case "Simulator": .indigo
-        default: .secondary
-        }
-    }
+    var color: Color { DS.appColor(app) }
 
     init(from segment: EventSegment) {
         self.app = segment.app

@@ -1086,20 +1086,7 @@ struct TimelineTab: View {
         }
     }
 
-    private func appColor(_ name: String) -> Color {
-        switch name {
-        case "Xcode": .blue
-        case "Code": .purple
-        case "Cursor": .cyan
-        case "Safari", "Firefox", "Chrome", "Arc": .orange
-        case "Slack", "Discord", "Messages": .green
-        case "Mail": .red
-        case "Finder": .gray
-        case "Terminal", "iTerm2", "Warp", "Ghostty": .mint
-        case "Simulator": .indigo
-        default: .secondary
-        }
-    }
+    private func appColor(_ name: String) -> Color { DS.appColor(name) }
 
     // MARK: - Time Blocks (Calendar-style)
 
