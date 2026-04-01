@@ -225,10 +225,10 @@ struct LiveTab: View {
         VStack(spacing: DS.xs) {
             Image(systemName: icon)
                 .font(.system(size: 12))
-                .foregroundStyle(active ? color : .quaternary)
+                .foregroundStyle(active ? AnyShapeStyle(color) : AnyShapeStyle(.quaternary))
             Text(label)
                 .font(.system(size: 9))
-                .foregroundStyle(active ? .secondary : .quaternary)
+                .foregroundStyle(active ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
         }
     }
 
@@ -373,19 +373,19 @@ struct InsightsTab: View {
                         .padding(.horizontal, DS.xl)
                 }
 
-                // Analytics grid — equal height rows
+                // Analytics grid — uniform card size
+                let cardHeight: CGFloat = 160
+
                 HStack(alignment: .top, spacing: DS.md) {
-                    activityHeatmap.frame(maxWidth: .infinity)
-                    weekdayChart.frame(maxWidth: .infinity)
+                    activityHeatmap.frame(maxWidth: .infinity, minHeight: cardHeight)
+                    weekdayChart.frame(maxWidth: .infinity, minHeight: cardHeight)
                 }
-                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DS.xl)
 
                 HStack(alignment: .top, spacing: DS.md) {
-                    languageCard.frame(maxWidth: .infinity)
-                    appUsageCard.frame(maxWidth: .infinity)
+                    languageCard.frame(maxWidth: .infinity, minHeight: cardHeight)
+                    appUsageCard.frame(maxWidth: .infinity, minHeight: cardHeight)
                 }
-                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DS.xl)
 
                 // Keywords — full width
