@@ -15,6 +15,7 @@
 		36F4E01C49E96BE4682277B2 /* ActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B333118B4893B3ACC26A48F6 /* ActionBar.swift */; };
 		3C789FEECF52394585CF56E9 /* MenuBarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBBAAF1E805104C572763E27 /* MenuBarPanel.swift */; };
 		411723302DAA0FDE401F5D40 /* FactExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */; };
+		4585D44C543E009F76A92690 /* EmailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB171E92B4F88C6A829B0ED /* EmailService.swift */; };
 		48BB1FFFC3606821A2282668 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD95BF8AE481474F9151CE73 /* DatabaseService.swift */; };
 		493C34447B7D2E57F779096B /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C20674B22EA786364042A02 /* KeychainService.swift */; };
 		4A979E895E773C57F011ED9A /* SummaryContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 479FCCCEEB1D9213BD36FB31 /* SummaryContent.swift */; };
@@ -53,6 +54,7 @@
 		3E3917F871D8C4E5C479E762 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4432343512DB0CF0F9A449CD /* Dream.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dream.entitlements; sourceTree = "<group>"; };
 		479FCCCEEB1D9213BD36FB31 /* SummaryContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryContent.swift; sourceTree = "<group>"; };
+		5BB171E92B4F88C6A829B0ED /* EmailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailService.swift; sourceTree = "<group>"; };
 		5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactExtractor.swift; sourceTree = "<group>"; };
 		800206DAA1BB06787FF4E585 /* PrivacyStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyStatusBar.swift; sourceTree = "<group>"; };
 		83286524AA77A525BEAF6BDC /* DreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DreamApp.swift; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 				EC44A43E57DE61F5A4DB68FB /* CalendarService.swift */,
 				BD95BF8AE481474F9151CE73 /* DatabaseService.swift */,
 				99F7AA73DC400937F893F26F /* DreamEngine.swift */,
+				5BB171E92B4F88C6A829B0ED /* EmailService.swift */,
 				5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */,
 				3C20674B22EA786364042A02 /* KeychainService.swift */,
 				267C246E5EFF2CA867120730 /* LiveContextGenerator.swift */,
@@ -323,6 +326,7 @@
 				35FEFDC0378051A9549301EB /* DesignTokens.swift in Sources */,
 				E61D1CC4547F5B3EA821F528 /* DreamApp.swift in Sources */,
 				BE7838DE9D6CDB49F0FB887B /* DreamEngine.swift in Sources */,
+				4585D44C543E009F76A92690 /* EmailService.swift in Sources */,
 				411723302DAA0FDE401F5D40 /* FactExtractor.swift in Sources */,
 				079C654ADA7CA274C291FD6F /* FullWindowView.swift in Sources */,
 				95D1F8839C950B4AE70EF8DF /* KeychainService.swift in Sources */,

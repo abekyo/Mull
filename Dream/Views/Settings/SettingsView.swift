@@ -286,6 +286,7 @@ struct DataTab: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("dataRetention") private var dataRetention = "unlimited"
     @AppStorage("analyticsOptIn") private var analyticsOptIn = false
+    @AppStorage("emailCaptureEnabled") private var emailCaptureEnabled = false
 
     @State private var eventCount = 0
     @State private var summaryCount = 0
@@ -308,6 +309,17 @@ struct DataTab: View {
                     appState.permissions.openInputMonitoringSettings()
                 }
                 permRow("Clipboard", granted: true, detail: "Always available") {}
+            }
+
+            // Data sources
+            Section("Data Sources") {
+                Toggle("Email (Mail.app)", isOn: $emailCaptureEnabled)
+                    .onChange(of: emailCaptureEnabled) { _, enabled in
+                        appState.email.refreshState()
+                    }
+                Text("Subject and sender only. Email body is never read.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
             }
 
             // Storage overview

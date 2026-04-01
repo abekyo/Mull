@@ -12,6 +12,7 @@ enum LiveContextGenerator {
     }()
 
     static var calendarService: CalendarService?
+    static var emailService: EmailService?
 
     static func generate(analytics: AnalyticsEngine, database: DatabaseService) throws {
         try FileManager.default.createDirectory(at: dreamDir, withIntermediateDirectories: true)
@@ -85,6 +86,12 @@ enum LiveContextGenerator {
             for p in projects {
                 lines.append("- \(p.name): \(p.description)")
             }
+            lines.append("")
+        }
+
+        // Email metadata
+        if let emailSummary = emailService?.recentEmailSummary(hours: 24) {
+            lines.append(emailSummary)
             lines.append("")
         }
 

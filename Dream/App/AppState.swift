@@ -46,6 +46,7 @@ final class AppState: ObservableObject {
     let dreamEngine: DreamEngine
     let analytics: AnalyticsEngine
     let calendar: CalendarService
+    let email: EmailService
 
     private var refreshTimer: Timer?
     private var lastRefreshDate: Date = Date()
@@ -67,6 +68,7 @@ final class AppState: ObservableObject {
         self.dreamEngine = DreamEngine(database: database)
         self.analytics = AnalyticsEngine(database: database)
         self.calendar = CalendarService()
+        self.email = EmailService(database: database)
 
         // Sync LLM provider from UserDefaults
         if let saved = UserDefaults.standard.string(forKey: "llmProvider"),
@@ -159,6 +161,7 @@ final class AppState: ObservableObject {
         if todayEventCount > 0 && Date().timeIntervalSince(lastMeFileUpdate) > 60 {
             lastMeFileUpdate = Date()
             LiveContextGenerator.calendarService = calendar
+            LiveContextGenerator.emailService = email
             Task.detached { [analytics, database] in
                 try? LiveContextGenerator.generate(analytics: analytics, database: database)
             }
@@ -168,10 +171,8 @@ final class AppState: ObservableObject {
     // MARK: - Actions
 
     func startRecording() {
-        // Don't gate on AXIsProcessTrusted() — it lies on Xcode debug builds.
-        // RecordingService.start() has its own guard and will simply fail silently
-        // if Accessibility is truly not available (CGEvent tap creation fails).
         recorder.start()
+        email.start()
         isRecording = true
     }
 
