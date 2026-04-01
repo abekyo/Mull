@@ -108,9 +108,6 @@ struct FullWindowView: View {
 }
 
 // MARK: - Live Tab
-//
-// Purpose: "うわ、全部記録されてる" → 圧倒 → 信頼
-// Dense, fast, impressive. Like a control room dashboard.
 
 struct LiveTab: View {
     @EnvironmentObject var appState: AppState
@@ -119,50 +116,55 @@ struct LiveTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header — recording status + big counter
-            HStack {
-                ZStack {
-                    Circle().fill(DS.recording.opacity(0.12)).frame(width: 24, height: 24)
-                    Circle().fill(DS.recording.opacity(0.25)).frame(width: 14, height: 14)
-                    Circle().fill(appState.isRecording ? DS.recording : DS.error).frame(width: 8, height: 8)
+            // Status bar
+            HStack(spacing: DS.md) {
+                HStack(spacing: DS.sm) {
+                    Circle()
+                        .fill(appState.isRecording ? DS.recording : DS.error)
+                        .frame(width: 8, height: 8)
+                        .shadow(color: appState.isRecording ? DS.recording.opacity(0.5) : .clear, radius: 4)
+                    Text(appState.isRecording ? "Recording" : "Stopped")
+                        .font(DS.bodyMedium)
                 }
-
-                Text(appState.isRecording ? "Recording" : "Stopped")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: DS.xs) {
-                    sourceTag("⌨", .blue)
-                    sourceTag("📋", .orange)
-                    sourceTag("🪟", .green)
-                    sourceTag("📅", .red)
-                }
-                .padding(.leading, DS.sm)
 
                 Spacer()
 
-                Text("\(appState.todayEventCount)")
-                    .font(.system(size: 28, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.accentColor.opacity(0.8))
+                Text("\(appState.todayEventCount) events")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
-                Text("events")
-                    .font(.system(size: 10))
+
+                Text(appState.todayStorageFormatted)
+                    .font(DS.captionFont)
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, DS.xl)
             .padding(.vertical, DS.md)
 
-            Divider().opacity(0.3)
+            // Legend
+            HStack(spacing: DS.lg) {
+                legendDot(color: .blue, label: "Keyboard")
+                legendDot(color: .orange, label: "Clipboard")
+                legendDot(color: .green, label: "Window")
+                legendDot(color: .purple, label: "App")
+            }
+            .font(DS.captionFont)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, DS.xl)
+            .padding(.bottom, DS.sm)
 
-            // Dense event stream
+            Divider()
+
+            // Event stream
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(liveEvents.enumerated()), id: \.offset) { index, event in
-                            DenseEventRow(event: event)
+                            LiveEventRow(event: event)
                                 .id(index)
                         }
                     }
+                    .padding(.vertical, DS.sm)
                 }
                 .onChange(of: liveEvents.count) { _, _ in
                     if let last = liveEvents.indices.last {
@@ -177,57 +179,61 @@ struct LiveTab: View {
         .onDisappear { refreshTimer?.invalidate() }
     }
 
-    private func sourceTag(_ emoji: String, _ color: Color) -> some View {
-        Text(emoji)
-            .font(.system(size: 8))
-            .padding(2)
-            .background(color.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 2))
-    }
-
     private func startRefresh() {
         loadEvents()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in loadEvents() }
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
+            loadEvents()
+        }
     }
 
     private func loadEvents() {
         let start = Calendar.current.startOfDay(for: Date())
         let all = appState.database.fetchEvents(from: start, to: Date())
-        let new = Array(all.suffix(200))
-        if new.count != liveEvents.count { liveEvents = new }
+        liveEvents = Array(all.suffix(150))
+    }
+
+    private func legendDot(color: Color, label: String) -> some View {
+        HStack(spacing: DS.xs) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label)
+        }
     }
 }
 
-struct DenseEventRow: View {
+struct LiveEventRow: View {
     let event: RecordingEvent
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: DS.xs) {
+        HStack(alignment: .top, spacing: DS.sm) {
             Text(timeStr)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.quaternary)
-                .frame(width: 50, alignment: .trailing)
-
-            Circle().fill(typeColor).frame(width: 4, height: 4)
-
-            Text(event.appName ?? "")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(DS.appColor(event.appName ?? ""))
-                .frame(width: 55, alignment: .leading)
-                .lineLimit(1)
-
-            Text(event.textContent ?? "")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(isHovered ? .primary : .secondary)
-                .lineLimit(isHovered ? 5 : 1)
-                .textSelection(.enabled)
+                .foregroundStyle(.quaternary)
+                .frame(width: 48, alignment: .trailing)
+
+            Circle()
+                .fill(typeColor)
+                .frame(width: 5, height: 5)
+                .padding(.top, 5)
+
+            VStack(alignment: .leading, spacing: 0) {
+                if let app = event.appName {
+                    Text(app)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+                Text(event.textContent ?? "")
+                    .font(.system(size: 11))
+                    .foregroundStyle(isHovered ? .primary : .secondary)
+                    .lineLimit(isHovered ? 5 : 1)
+                    .textSelection(.enabled)
+            }
 
             Spacer()
         }
-        .padding(.horizontal, DS.md)
-        .padding(.vertical, 1)
-        .background(isHovered ? Color.primary.opacity(0.04) : Color.clear)
+        .padding(.horizontal, DS.xl)
+        .padding(.vertical, 2)
+        .background(isHovered ? Color.primary.opacity(0.03) : Color.clear)
         .onHover { isHovered = $0 }
     }
 
@@ -247,8 +253,6 @@ struct DenseEventRow: View {
         }
     }
 }
-
-
 
 // MARK: - Insights Tab (the "wow" tab)
 
