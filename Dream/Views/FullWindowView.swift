@@ -108,80 +108,135 @@ struct FullWindowView: View {
 }
 
 // MARK: - Live Tab
+//
+// Not a debug log. An aquarium.
+// You see your digital life flowing by, quietly.
+// The purpose: "I can see exactly what Dream captures. Nothing scary. I trust it."
 
 struct LiveTab: View {
     @EnvironmentObject var appState: AppState
     @State private var liveEvents: [RecordingEvent] = []
     @State private var refreshTimer: Timer?
+    @State private var currentApp: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            // Status bar
-            HStack(spacing: DS.md) {
-                HStack(spacing: DS.sm) {
-                    Circle()
-                        .fill(appState.isRecording ? DS.recording : DS.error)
-                        .frame(width: 8, height: 8)
-                        .shadow(color: appState.isRecording ? DS.recording.opacity(0.5) : .clear, radius: 4)
-                    Text(appState.isRecording ? "Recording" : "Stopped")
-                        .font(DS.bodyMedium)
-                }
+            // Current state — large, calm, centered
+            currentStateHeader
 
-                Spacer()
-
-                Text("\(appState.todayEventCount) events")
-                    .font(DS.captionFont)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-
-                Text(appState.todayStorageFormatted)
-                    .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, DS.xl)
-            .padding(.vertical, DS.md)
-
-            // Legend
-            HStack(spacing: DS.lg) {
-                legendDot(color: .blue, label: "Keyboard")
-                legendDot(color: .orange, label: "Clipboard")
-                legendDot(color: .green, label: "Window")
-                legendDot(color: .purple, label: "App")
-            }
-            .font(DS.captionFont)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, DS.xl)
-            .padding(.bottom, DS.sm)
-
+            // The stream — events gently appear from the bottom
             Divider()
 
-            // Event stream
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
+                    // Breathing space at top
+                    Color.clear.frame(height: DS.xl)
+
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(liveEvents.enumerated()), id: \.offset) { index, event in
-                            LiveEventRow(event: event)
+                            LiveEventBubble(event: event, isLatest: index == liveEvents.count - 1)
                                 .id(index)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
-                    .padding(.vertical, DS.sm)
+                    .padding(.horizontal, DS.xl)
+
+                    // Breathing space at bottom
+                    Color.clear.frame(height: DS.xxl)
+                        .id("bottom")
                 }
                 .onChange(of: liveEvents.count) { _, _ in
-                    if let last = liveEvents.indices.last {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(last, anchor: .bottom)
-                        }
+                    withAnimation(.easeOut(duration: 0.4)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
             }
+
+            // Footer — what Dream sees right now
+            Divider()
+            captureFooter
         }
+        .background(Color(.textBackgroundColor))
         .onAppear { startRefresh() }
         .onDisappear { refreshTimer?.invalidate() }
     }
 
+    // MARK: - Current State (large, calm)
+
+    private var currentStateHeader: some View {
+        VStack(spacing: DS.md) {
+            HStack(spacing: DS.md) {
+                // Recording pulse
+                ZStack {
+                    if appState.isRecording {
+                        Circle()
+                            .fill(DS.recording.opacity(0.15))
+                            .frame(width: 28, height: 28)
+                        Circle()
+                            .fill(DS.recording.opacity(0.3))
+                            .frame(width: 18, height: 18)
+                    }
+                    Circle()
+                        .fill(appState.isRecording ? DS.recording : DS.error)
+                        .frame(width: 10, height: 10)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(appState.isRecording ? "Dream is listening" : "Recording stopped")
+                        .font(DS.titleFont)
+                    Text("Everything you type, copy, and open is being remembered")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                // Stats — quiet, right-aligned
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(appState.todayEventCount)")
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.accentColor)
+                        .monospacedDigit()
+                    Text("events today")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.horizontal, DS.xl)
+        .padding(.vertical, DS.lg)
+    }
+
+    // MARK: - Capture Footer (what's happening right now)
+
+    private var captureFooter: some View {
+        HStack(spacing: DS.xl) {
+            captureType(icon: "keyboard", label: "Keyboard", color: .blue, active: true)
+            captureType(icon: "doc.on.clipboard", label: "Clipboard", color: .orange, active: true)
+            captureType(icon: "macwindow", label: "Windows", color: .green, active: true)
+            captureType(icon: "calendar", label: "Calendar", color: .red, active: true)
+            captureType(icon: "envelope", label: "Email", color: .purple, active: appState.email.isEnabled)
+        }
+        .padding(.horizontal, DS.xl)
+        .padding(.vertical, DS.md)
+    }
+
+    private func captureType(icon: String, label: String, color: Color, active: Bool) -> some View {
+        VStack(spacing: DS.xs) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(active ? color : .quaternary)
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(active ? .secondary : .quaternary)
+        }
+    }
+
+    // MARK: - Data
+
     private func startRefresh() {
         loadEvents()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             loadEvents()
         }
     }
@@ -189,51 +244,68 @@ struct LiveTab: View {
     private func loadEvents() {
         let start = Calendar.current.startOfDay(for: Date())
         let all = appState.database.fetchEvents(from: start, to: Date())
-        liveEvents = Array(all.suffix(150))
-    }
-
-    private func legendDot(color: Color, label: String) -> some View {
-        HStack(spacing: DS.xs) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(label)
+        let new = Array(all.suffix(100))
+        if new.count != liveEvents.count {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                liveEvents = new
+            }
         }
     }
 }
 
-struct LiveEventRow: View {
+// MARK: - Event Bubble (not a log line — a gentle bubble)
+
+struct LiveEventBubble: View {
     let event: RecordingEvent
+    let isLatest: Bool
     @State private var isHovered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: DS.sm) {
+        HStack(alignment: .top, spacing: DS.md) {
+            // Time — whisper quiet
             Text(timeStr)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.quaternary)
-                .frame(width: 48, alignment: .trailing)
+                .foregroundStyle(isLatest ? .tertiary : .quaternary)
+                .frame(width: 52, alignment: .trailing)
 
-            Circle()
-                .fill(typeColor)
-                .frame(width: 5, height: 5)
-                .padding(.top, 5)
+            // Type indicator — soft color bar instead of dot
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(typeColor.opacity(isLatest ? 0.6 : 0.3))
+                .frame(width: 3)
+                .frame(minHeight: 24)
 
-            VStack(alignment: .leading, spacing: 0) {
-                if let app = event.appName {
-                    Text(app)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
+            // Content
+            VStack(alignment: .leading, spacing: 2) {
+                // App name + type in one line
+                HStack(spacing: DS.xs) {
+                    if let app = event.appName {
+                        Text(app)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(isLatest ? .secondary : .tertiary)
+                    }
+                    Text(typeLabel)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.quaternary)
                 }
-                Text(event.textContent ?? "")
-                    .font(.system(size: 11))
-                    .foregroundStyle(isHovered ? .primary : .secondary)
-                    .lineLimit(isHovered ? 5 : 1)
+
+                // The content itself
+                Text(cleanedContent)
+                    .font(.system(size: 13))
+                    .foregroundStyle(isLatest ? .primary : (isHovered ? .primary : .secondary))
+                    .lineLimit(isHovered ? 10 : 2)
                     .textSelection(.enabled)
+                    .lineSpacing(2)
             }
 
             Spacer()
         }
-        .padding(.horizontal, DS.xl)
-        .padding(.vertical, 2)
-        .background(isHovered ? Color.primary.opacity(0.03) : Color.clear)
+        .padding(.vertical, DS.xs)
+        .padding(.trailing, DS.xl)
+        .background(
+            isLatest
+                ? Color.accentColor.opacity(0.03)
+                : (isHovered ? Color.primary.opacity(0.02) : Color.clear)
+        )
         .onHover { isHovered = $0 }
     }
 
@@ -251,6 +323,22 @@ struct LiveEventRow: View {
         case .appSwitch: .purple
         case .audio: .pink
         }
+    }
+
+    private var typeLabel: String {
+        switch event.eventType {
+        case .keystroke: "typed"
+        case .clipboard: "copied"
+        case .screenText: "opened"
+        case .appSwitch: "switched"
+        case .audio: "heard"
+        }
+    }
+
+    private var cleanedContent: String {
+        let raw = event.textContent ?? ""
+        return raw.replacingOccurrences(of: "\\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
