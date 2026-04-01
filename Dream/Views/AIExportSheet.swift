@@ -11,7 +11,7 @@ struct AIExportSheet: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedLayer: ExportContextLayer = .now
+    @State private var selectedLayer: ExportContextLayer = .standard
     @State private var showCopiedConfirmation = false
     @State private var previewText = ""
 
@@ -23,10 +23,10 @@ struct AIExportSheet: View {
             // Header
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("AI に渡す")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text("How much context?")
-                        .font(.system(size: 12))
+                    Text("Copy to AI")
+                        .font(DS.titleFont)
+                    Text("Choose how much context to share")
+                        .font(DS.captionFont)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -59,7 +59,7 @@ struct AIExportSheet: View {
                                 Text(layer.rawValue)
                                     .font(.system(size: 13, weight: selectedLayer == layer ? .medium : .regular))
                                     .foregroundStyle(.primary)
-                                Text(layer.description)
+                                Text(layer.subtitle)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.tertiary)
                             }

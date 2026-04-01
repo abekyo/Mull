@@ -194,12 +194,17 @@ struct MenuBarPanel: View {
             if let summary = appState.todaySummary {
                 SummaryContent(summary: summary)
             } else if appState.isDreaming {
-                HStack(spacing: DS.sm) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(appState.dreamProgress ?? "Dreaming...")
-                        .font(DS.bodyFont)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: DS.xs) {
+                    HStack(spacing: DS.sm) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(appState.dreamProgress ?? "Analyzing your day...")
+                            .font(DS.bodyFont)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("This takes 30-60 seconds")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
                 }
                 .padding(.vertical, DS.sm)
             } else {
@@ -213,41 +218,46 @@ struct MenuBarPanel: View {
 
     private var recordingStatus: some View {
         VStack(alignment: .leading, spacing: DS.sm) {
+            // Recording indicator + count
             HStack(spacing: DS.sm) {
-                // Pulsing recording dot
                 Circle()
                     .fill(appState.isRecording ? DS.recording : DS.recording.opacity(0.3))
                     .frame(width: 8, height: 8)
                     .shadow(color: appState.isRecording ? DS.recording.opacity(0.5) : .clear, radius: 4)
 
-                Text("\(appState.todayEventCount) events")
+                Text("\(appState.todayEventCount)")
                     .font(DS.bodyMedium)
                     .monospacedDigit()
-
-                Text("recorded")
+                Text("events captured")
                     .font(DS.bodyFont)
                     .foregroundStyle(.secondary)
             }
 
+            // Show what's being captured RIGHT NOW (proof it works)
             if appState.todayEventCount > 0 {
-                HStack {
-                    Text("Dream runs at 23:00")
-                        .font(DS.captionFont)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
+                recentActivityPreview
+            }
+
+            // Dream Now or schedule info
+            HStack {
+                let dreamHour = UserDefaults.standard.object(forKey: "dreamTime") as? Int ?? 23
+                let dreamMin = UserDefaults.standard.object(forKey: "dreamTimeMinute") as? Int ?? 0
+                Text("Summary at \(String(format: "%02d:%02d", dreamHour, dreamMin))")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+
+                Spacer()
+
+                if appState.todayEventCount > 10 {
                     Button {
                         appState.triggerDreamNow()
                     } label: {
-                        Text("Dream Now")
+                        Text("Summarize Now")
                             .font(DS.captionFont)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
                 }
-            } else {
-                Text("Dream runs at 23:00")
-                    .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
             }
 
             if let error = appState.dreamProgress, error.hasPrefix("Dream failed") {
@@ -255,6 +265,52 @@ struct MenuBarPanel: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.error)
             }
+        }
+    }
+
+    /// Show last 3 captured items so user can SEE Dream is working.
+    /// This is the "proof of life" that builds trust on day one.
+    private var recentActivityPreview: some View {
+        let events = appState.database.fetchEvents(
+            from: Calendar.current.date(byAdding: .minute, value: -30, to: Date())!,
+            to: Date()
+        ).suffix(3)
+
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                HStack(spacing: DS.xs) {
+                    Circle()
+                        .fill(eventColor(event.eventType))
+                        .frame(width: 4, height: 4)
+                    Text(eventPreview(event))
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.leading, DS.lg) // Indent under the recording dot
+    }
+
+    private func eventColor(_ type: RecordingEvent.EventType) -> Color {
+        switch type {
+        case .keystroke: .blue
+        case .clipboard: .orange
+        case .screenText: .green
+        case .appSwitch: .purple
+        case .audio: .pink
+        }
+    }
+
+    private func eventPreview(_ event: RecordingEvent) -> String {
+        let text = event.textContent ?? ""
+        let clean = String(text.prefix(50)).replacingOccurrences(of: "\n", with: " ")
+        switch event.eventType {
+        case .keystroke: return "Typed: \(clean)"
+        case .clipboard: return "Copied: \(clean)"
+        case .screenText: return clean
+        case .appSwitch: return "→ \(event.appName ?? clean)"
+        case .audio: return "Audio: \(clean)"
         }
     }
 

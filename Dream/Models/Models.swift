@@ -174,41 +174,41 @@ enum AIExportDestination: String, CaseIterable, Identifiable {
 ///   now.md  (~500 tokens) — Current context. "What are you doing?"
 ///   full.md (~1500 tokens) — Everything. "Onboard me completely."
 enum ExportContextLayer: String, CaseIterable, Identifiable {
-    case me = "me.md"
-    case now = "me.md + now.md"
-    case full = "full.md"
+    case profile = "Profile"
+    case standard = "Standard"
+    case full = "Full"
 
     var id: String { rawValue }
 
-    var description: String {
+    var subtitle: String {
         switch self {
-        case .me:   "Who I am, preferences — always safe to include"
-        case .now:  "Plus current projects & this week's activity"
-        case .full: "Complete picture — for onboarding AI to a new task"
+        case .profile: "Identity + preferences"
+        case .standard: "Identity + today's work + patterns"
+        case .full:     "Everything including raw input"
         }
     }
 
     var tokenEstimate: String {
         switch self {
-        case .me:   "~200 tokens"
-        case .now:  "~700 tokens"
-        case .full: "~1,500 tokens"
+        case .profile:  "~200 tokens"
+        case .standard: "~700 tokens"
+        case .full:     "~1,500+ tokens"
         }
     }
 
     var icon: String {
         switch self {
-        case .me:   "person.fill"
-        case .now:  "calendar.badge.clock"
-        case .full: "brain.head.profile.fill"
+        case .profile:  "person.fill"
+        case .standard: "briefcase.fill"
+        case .full:     "brain.head.profile.fill"
         }
     }
 
     var files: [String] {
         switch self {
-        case .me:   ["me.md"]
-        case .now:  ["me.md", "now.md"]
-        case .full: ["full.md"]
+        case .profile:  ["me.md"]
+        case .standard: ["me.md", "now.md"]
+        case .full:     ["full.md"]
         }
     }
 }

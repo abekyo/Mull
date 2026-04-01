@@ -28,7 +28,7 @@ struct ActionBar: View {
             // AI Export — PRIMARY ⌘A (the core value)
             actionButton(
                 id: .ai,
-                label: "AI に渡す",
+                label: "Copy to AI",
                 icon: "brain.head.profile",
                 shortcut: "A",
                 isPrimary: true

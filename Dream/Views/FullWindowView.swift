@@ -56,7 +56,7 @@ struct FullWindowView: View {
                 Button {
                     showAIExport = true
                 } label: {
-                    Label("AI に渡す", systemImage: "brain.head.profile")
+                    Label("Copy to AI", systemImage: "brain.head.profile")
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.borderedProminent)
@@ -131,6 +131,18 @@ struct LiveTab: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
 
+            // Event type legend
+            HStack(spacing: DS.lg) {
+                legendItem(color: .blue, label: "Keyboard")
+                legendItem(color: .orange, label: "Clipboard")
+                legendItem(color: .green, label: "Window")
+                legendItem(color: .purple, label: "App switch")
+            }
+            .font(DS.captionFont)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 20)
+            .padding(.vertical, DS.xs)
+
             Divider()
 
             // Live event stream
@@ -159,6 +171,13 @@ struct LiveTab: View {
         loadEvents()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
             loadEvents()
+        }
+    }
+
+    private func legendItem(color: Color, label: String) -> some View {
+        HStack(spacing: DS.xs) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label)
         }
     }
 

@@ -45,6 +45,7 @@ struct DreamApp: App {
 
     private var menuBarIconName: String {
         if appState.isDreaming { return "moon.stars.fill" }
+        if appState.isPaused { return "moon.zzz" }
         return "moon.fill"
     }
 }
