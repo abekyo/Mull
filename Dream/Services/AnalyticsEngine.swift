@@ -41,6 +41,8 @@ final class AnalyticsEngine {
             // Skip short romaji fragments from keystroke events
             if event.eventType == .keystroke && text.count < 5 &&
                !text.unicodeScalars.contains(where: { $0.value > 127 }) { continue }
+            // Skip long unbroken strings (Japanese clipboard text with no spaces = 1 giant "word")
+            if !text.contains(" ") && text.count > 20 { continue }
             let words = tokenize(text)
             for word in words {
                 let lower = word.lowercased()
@@ -70,9 +72,11 @@ final class AnalyticsEngine {
 
         for event in events {
             guard let text = event.textContent else { continue }
-            // Skip noise
+            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
             if text.contains("auto-updated") || text.hasPrefix("/Users/") { continue }
             if text.hasPrefix("Screenshot ") || text.contains("Validation failed") { continue }
+            // Skip long unbroken Japanese text (would create giant "phrases")
+            if !text.contains(" ") && text.count > 20 { continue }
             let words = tokenize(text)
             // Bigrams
             for i in 0..<max(0, words.count - 1) {
@@ -200,13 +204,12 @@ final class AnalyticsEngine {
     // MARK: - Language Mix
 
     /// Ratio of Japanese / English / Code in typed content.
-    /// Uses clipboard + window titles only (not raw keystrokes, which are romaji).
+    /// Uses clipboard only — the most reliable source for language detection.
+    /// Window titles are mostly English filenames even for Japanese users.
     func languageMix(days: Int = 7) -> LanguageMix {
         let since = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
         let events = database.fetchEvents(from: since, to: Date())
-            // Only clipboard + window titles — these are post-IME, reliable for language detection
-            // Raw keystrokes are romaji and would falsely register as English
-            .filter { $0.eventType == .clipboard || $0.eventType == .screenText }
+            .filter { $0.eventType == .clipboard }
 
         var japaneseChars = 0
         var englishChars = 0
