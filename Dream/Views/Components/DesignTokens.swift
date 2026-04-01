@@ -30,34 +30,43 @@ enum DS {
     static let xl: CGFloat = 24
     static let xxl: CGFloat = 32
 
-    // MARK: - Radius
+    // MARK: - Radius (softer, more organic)
 
-    static let radiusSm: CGFloat = 6
-    static let radiusMd: CGFloat = 10
-    static let radiusLg: CGFloat = 14
+    static let radiusSm: CGFloat = 8
+    static let radiusMd: CGFloat = 12
+    static let radiusLg: CGFloat = 16
 
-    // MARK: - Semantic Colors
+    // MARK: - Semantic Colors (warm, not clinical)
 
-    static let recording = Color.green
-    static let paused = Color.orange
-    static let error = Color.red
+    static let recording = Color(red: 0.35, green: 0.72, blue: 0.55) // Sage green, not neon
+    static let paused = Color(red: 0.88, green: 0.65, blue: 0.35)    // Warm amber
+    static let error = Color(red: 0.85, green: 0.35, blue: 0.35)     // Soft red
 
-    // MARK: - Accent Gradient
+    // MARK: - Gradients (warm tones)
 
     static let accentGradient = LinearGradient(
-        colors: [Color.accentColor, Color.accentColor.opacity(0.7)],
+        colors: [
+            Color(red: 0.58, green: 0.38, blue: 0.58),  // Warm mauve
+            Color(red: 0.50, green: 0.35, blue: 0.65)   // Soft purple
+        ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
     static let warmGradient = LinearGradient(
-        colors: [Color.orange.opacity(0.8), Color.pink.opacity(0.6)],
+        colors: [
+            Color(red: 0.85, green: 0.60, blue: 0.45),  // Terracotta
+            Color(red: 0.75, green: 0.45, blue: 0.55)   // Dusty rose
+        ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
     static let coolGradient = LinearGradient(
-        colors: [Color.blue.opacity(0.6), Color.cyan.opacity(0.4)],
+        colors: [
+            Color(red: 0.45, green: 0.55, blue: 0.70),  // Slate blue
+            Color(red: 0.50, green: 0.65, blue: 0.70)   // Misty teal
+        ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
@@ -105,6 +114,7 @@ enum DS {
     }
 
     /// Deterministic color from string hash. Same app name → always same color.
+    /// Warm bias — saturation is moderate, brightness is high. Feels friendly.
     private static func colorFromHash(_ string: String) -> Color {
         var hash: UInt64 = 5381
         for char in string.utf8 {
@@ -112,8 +122,8 @@ enum DS {
         }
 
         let hue = Double(hash % 360) / 360.0
-        let saturation = 0.45 + Double((hash >> 8) % 30) / 100.0  // 0.45-0.75
-        let brightness = 0.55 + Double((hash >> 16) % 25) / 100.0  // 0.55-0.80
+        let saturation = 0.30 + Double((hash >> 8) % 25) / 100.0  // 0.30-0.55 (softer)
+        let brightness = 0.60 + Double((hash >> 16) % 20) / 100.0  // 0.60-0.80
 
         return Color(hue: hue, saturation: saturation, brightness: brightness)
     }
@@ -122,37 +132,43 @@ enum DS {
 // MARK: - View Extensions
 
 extension View {
-    /// Standard card with subtle shadow and border.
+    /// Standard card — warm shadow, soft edges.
     func dreamCard(isHovered: Bool = false) -> some View {
         self
             .padding(DS.md)
             .background(
                 RoundedRectangle(cornerRadius: DS.radiusMd)
                     .fill(.ultraThinMaterial)
-                    .shadow(color: .black.opacity(isHovered ? 0.08 : 0.04), radius: isHovered ? 8 : 4, y: 2)
+                    .shadow(
+                        color: Color(red: 0.4, green: 0.3, blue: 0.3).opacity(isHovered ? 0.10 : 0.05),
+                        radius: isHovered ? 10 : 5, y: 2
+                    )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.radiusMd)
-                    .strokeBorder(Color.primary.opacity(isHovered ? 0.08 : 0.04), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(isHovered ? 0.06 : 0.03), lineWidth: 0.5)
             )
     }
 
-    /// Primary card — more prominent with accent tint.
+    /// Primary card — accent-tinted warmth.
     func dreamPrimaryCard() -> some View {
         self
             .padding(DS.lg)
             .background(
                 RoundedRectangle(cornerRadius: DS.radiusLg)
                     .fill(.ultraThinMaterial)
-                    .shadow(color: Color.accentColor.opacity(0.1), radius: 8, y: 3)
+                    .shadow(
+                        color: Color.accentColor.opacity(0.08),
+                        radius: 10, y: 3
+                    )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.radiusLg)
-                    .strokeBorder(Color.accentColor.opacity(0.12), lineWidth: 0.5)
+                    .strokeBorder(Color.accentColor.opacity(0.08), lineWidth: 0.5)
             )
     }
 
-    /// Hero card with gradient accent.
+    /// Hero card — the warmest card. Gentle glow.
     func dreamHeroCard() -> some View {
         self
             .padding(DS.xl)
@@ -161,13 +177,16 @@ extension View {
                     RoundedRectangle(cornerRadius: DS.radiusLg)
                         .fill(.ultraThinMaterial)
                     RoundedRectangle(cornerRadius: DS.radiusLg)
-                        .fill(Color.accentColor.opacity(0.04))
+                        .fill(Color.accentColor.opacity(0.03))
                 }
-                .shadow(color: Color.accentColor.opacity(0.12), radius: 12, y: 4)
+                .shadow(
+                    color: Color.accentColor.opacity(0.10),
+                    radius: 14, y: 4
+                )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.radiusLg)
-                    .strokeBorder(Color.accentColor.opacity(0.15), lineWidth: 0.5)
+                    .strokeBorder(Color.accentColor.opacity(0.10), lineWidth: 0.5)
             )
     }
 
