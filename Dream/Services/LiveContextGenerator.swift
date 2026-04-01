@@ -155,11 +155,16 @@ enum LiveContextGenerator {
             lines.append("")
         }
 
-        // What user mainly did today (rule-based inference)
+        // Narrative of today (framed as a story, not a data dump)
         let timeEngine = TimeBlockEngine(database: database)
         let dayAnalysis = timeEngine.analyzDay(for: Date())
         if !dayAnalysis.mainActivities.isEmpty {
-            lines.append(dayAnalysis.asText())
+            let narrator = NarrativeEngine(
+                analysis: dayAnalysis,
+                analytics: analytics,
+                database: database
+            )
+            lines.append(narrator.generateNarrative())
             lines.append("")
         }
 

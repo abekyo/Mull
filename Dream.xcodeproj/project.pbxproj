@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0183799008C4B867EF172E8D /* WhatlyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2402D8B530A337FA2F79BC0 /* WhatlyApp.swift */; };
 		079C654ADA7CA274C291FD6F /* FullWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9316E203B2E0226D3413E6A6 /* FullWindowView.swift */; };
+		082D153E61C29560ADF412DA /* NarrativeEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4CB057DE9911A68849AB8C /* NarrativeEngine.swift */; };
 		08755C5C741316E76D077E52 /* RecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C2E27315622F5378BC1B90 /* RecordingService.swift */; };
 		0E0277418219B9890FECC504 /* TimeBlockEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A1A4A2C0B5BBCBB1826D6A /* TimeBlockEngine.swift */; };
 		19FC921D3804265FA1BE560D /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C20674B22EA786364042A02 /* KeychainService.swift */; };
@@ -77,6 +78,7 @@
 		DDA3EA25D7F1EE0A32F63F41 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DFF6098E4D8A8224B0260FB0 /* PastSummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastSummaryCard.swift; sourceTree = "<group>"; };
 		E7A1A4A2C0B5BBCBB1826D6A /* TimeBlockEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeBlockEngine.swift; sourceTree = "<group>"; };
+		EA4CB057DE9911A68849AB8C /* NarrativeEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NarrativeEngine.swift; sourceTree = "<group>"; };
 		EC44A43E57DE61F5A4DB68FB /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
 		EC720B2145E86E52DE6EE143 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		EEACE77826C232B268C2E327 /* Dream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dream.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -171,6 +173,7 @@
 				3C20674B22EA786364042A02 /* KeychainService.swift */,
 				267C246E5EFF2CA867120730 /* LiveContextGenerator.swift */,
 				9435B446CEA02AB71591F629 /* MCPServer.swift */,
+				EA4CB057DE9911A68849AB8C /* NarrativeEngine.swift */,
 				24809B7EDC35B28FB825718E /* PermissionService.swift */,
 				99C2E27315622F5378BC1B90 /* RecordingService.swift */,
 				E7A1A4A2C0B5BBCBB1826D6A /* TimeBlockEngine.swift */,
@@ -343,6 +346,7 @@
 				33C50DD5353C7CBD079CDB68 /* MCPServer.swift in Sources */,
 				3C789FEECF52394585CF56E9 /* MenuBarPanel.swift in Sources */,
 				D45D8D1C15272C5ED098F882 /* Models.swift in Sources */,
+				082D153E61C29560ADF412DA /* NarrativeEngine.swift in Sources */,
 				C7A2D21E38B6B589F12A1144 /* OnboardingView.swift in Sources */,
 				6763A2D9B1D58EDF4C91ACD6 /* PastSummaryCard.swift in Sources */,
 				6209961C62B5A055E225838E /* PermissionService.swift in Sources */,
