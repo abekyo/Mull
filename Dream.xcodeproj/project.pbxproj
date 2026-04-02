@@ -13,6 +13,7 @@
 		08755C5C741316E76D077E52 /* RecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C2E27315622F5378BC1B90 /* RecordingService.swift */; };
 		0E0277418219B9890FECC504 /* TimeBlockEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A1A4A2C0B5BBCBB1826D6A /* TimeBlockEngine.swift */; };
 		19FC921D3804265FA1BE560D /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C20674B22EA786364042A02 /* KeychainService.swift */; };
+		1C39A39F45DF357AF69294A9 /* InsightPhrases.swift in Sources */ = {isa = PBXBuildFile; fileRef = B89B1895E63FCB09CDF97B36 /* InsightPhrases.swift */; };
 		33C50DD5353C7CBD079CDB68 /* MCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9435B446CEA02AB71591F629 /* MCPServer.swift */; };
 		35FEFDC0378051A9549301EB /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F65E66C82AA9ADCD2BB9940 /* DesignTokens.swift */; };
 		36F4E01C49E96BE4682277B2 /* ActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B333118B4893B3ACC26A48F6 /* ActionBar.swift */; };
@@ -72,6 +73,7 @@
 		B333118B4893B3ACC26A48F6 /* ActionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionBar.swift; sourceTree = "<group>"; };
 		B5684ECC745D0124D5D1224F /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B57B35A3E1651E70333DFF66 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B89B1895E63FCB09CDF97B36 /* InsightPhrases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightPhrases.swift; sourceTree = "<group>"; };
 		BD95BF8AE481474F9151CE73 /* DatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
 		C2402D8B530A337FA2F79BC0 /* WhatlyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatlyApp.swift; sourceTree = "<group>"; };
 		CBBAAF1E805104C572763E27 /* MenuBarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanel.swift; sourceTree = "<group>"; };
@@ -170,6 +172,7 @@
 				BD95BF8AE481474F9151CE73 /* DatabaseService.swift */,
 				5BB171E92B4F88C6A829B0ED /* EmailService.swift */,
 				5BEF1D98ED353BA61AED9794 /* FactExtractor.swift */,
+				B89B1895E63FCB09CDF97B36 /* InsightPhrases.swift */,
 				3C20674B22EA786364042A02 /* KeychainService.swift */,
 				267C246E5EFF2CA867120730 /* LiveContextGenerator.swift */,
 				9435B446CEA02AB71591F629 /* MCPServer.swift */,
@@ -341,6 +344,7 @@
 				411723302DAA0FDE401F5D40 /* FactExtractor.swift in Sources */,
 				F2F84987ED2875CC1528ACAE /* FilesTab.swift in Sources */,
 				079C654ADA7CA274C291FD6F /* FullWindowView.swift in Sources */,
+				1C39A39F45DF357AF69294A9 /* InsightPhrases.swift in Sources */,
 				95D1F8839C950B4AE70EF8DF /* KeychainService.swift in Sources */,
 				DB430A797F69E5B85C9AB1A4 /* LiveContextGenerator.swift in Sources */,
 				33C50DD5353C7CBD079CDB68 /* MCPServer.swift in Sources */,

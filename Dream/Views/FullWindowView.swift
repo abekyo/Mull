@@ -369,6 +369,19 @@ struct InsightsTab: View {
                     }
                 }
             }
+
+            // Barnum-style focus insight
+            let engine = TimeBlockEngine(database: appState.database)
+            let dayAnalysis = engine.analyzDay(for: Date())
+            if let focus = InsightPhrases.focusInsight(
+                mainActivities: dayAnalysis.mainActivities.count,
+                totalDuration: dayAnalysis.totalDuration
+            ) {
+                Text(focus)
+                    .font(DS.captionFont)
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
         }
         .dreamHeroCard()
     }
@@ -480,11 +493,11 @@ struct InsightsTab: View {
             }
             .frame(height: 65)
 
-            let peaks = hourly.sorted { $0.eventCount > $1.eventCount }.prefix(3).map { "\($0.hour):00" }
-            if !peaks.isEmpty {
-                Text("Peak: \(peaks.joined(separator: ", "))")
+            if let insight = InsightPhrases.activityInsight(hourly: hourly) {
+                Text(insight)
                     .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    .italic()
             }
         }
         .dreamCard()
@@ -518,11 +531,11 @@ struct InsightsTab: View {
             }
             .frame(height: 60)
 
-            let busiest = weekday.max(by: { $0.eventCount < $1.eventCount })
-            if let b = busiest {
-                Text("Busiest: \(b.name)")
+            if let insight = InsightPhrases.weekdayInsight(weekday: weekday) {
+                Text(insight)
                     .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    .italic()
             }
         }
         .dreamCard()
@@ -562,6 +575,13 @@ struct InsightsTab: View {
                 langLabel(color: .red, name: "日本語", pct: langMix.japanesePercent)
                 langLabel(color: .blue, name: "English", pct: langMix.englishPercent)
                 langLabel(color: .green, name: "Code", pct: langMix.codePercent)
+            }
+
+            if let insight = InsightPhrases.languageInsight(mix: langMix) {
+                Text(insight)
+                    .font(DS.captionFont)
+                    .foregroundStyle(.secondary)
+                    .italic()
             }
         }
         .dreamCard()
@@ -604,6 +624,13 @@ struct InsightsTab: View {
                 }
                 .frame(height: 18)
             }
+
+            if let insight = InsightPhrases.appUsageInsight(apps: appUsage) {
+                Text(insight)
+                    .font(DS.captionFont)
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
         }
         .dreamCard()
     }
@@ -637,6 +664,14 @@ struct InsightsTab: View {
                         .background(Color.accentColor.opacity(intensity * 0.15 + 0.03))
                         .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
                     }
+                }
+
+                if let insight = InsightPhrases.keywordInsight(keywords: keywords) {
+                    Text(insight)
+                        .font(DS.captionFont)
+                        .foregroundStyle(.secondary)
+                        .italic()
+                        .padding(.top, DS.xs)
                 }
             }
         }
