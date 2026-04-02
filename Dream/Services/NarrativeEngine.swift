@@ -28,6 +28,13 @@ struct NarrativeEngine {
             parts.append(mainStory)
         }
 
+        // Hot reading — comparisons to past data (the "spooky" part)
+        let hotRead = hotReading()
+        if !hotRead.isEmpty {
+            parts.append("")
+            parts.append(hotRead)
+        }
+
         // What you were working with (clipboard insights)
         let clipInsight = clipboardInsight()
         if !clipInsight.isEmpty {
@@ -125,6 +132,98 @@ struct NarrativeEngine {
         }
 
         return sentences.joined(separator: " ")
+    }
+
+    // MARK: - Hot Reading (comparisons to accumulated data)
+
+    /// The fortune teller's secret weapon: using accumulated data to say
+    /// things that feel impossibly specific.
+    ///
+    /// "You spent 40 minutes more coding today than yesterday."
+    /// "This is the first time you've worked on Blow this week."
+    /// "You usually don't work this late."
+    private func hotReading() -> String {
+        var observations: [String] = []
+
+        // Compare today's duration to yesterday
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        let yesterdayEngine = TimeBlockEngine(database: database)
+        let yesterdayAnalysis = yesterdayEngine.analyzDay(for: yesterday)
+
+        if yesterdayAnalysis.totalDuration > 0 && analysis.totalDuration > 0 {
+            let diff = analysis.totalDuration - yesterdayAnalysis.totalDuration
+            let diffMinutes = Int(abs(diff) / 60)
+
+            if diffMinutes > 30 {
+                if diff > 0 {
+                    observations.append("You've been \(diffMinutes) minutes more active today than yesterday.")
+                } else {
+                    observations.append("A lighter day than yesterday — \(diffMinutes) minutes less active so far.")
+                }
+            }
+        }
+
+        // Compare today's top app to yesterday's top app
+        let yesterdayApps = yesterdayAnalysis.appBreakdown
+        let todayApps = analysis.appBreakdown
+        if let todayTop = todayApps.first, let yesterdayTop = yesterdayApps.first {
+            if todayTop.app != yesterdayTop.app {
+                observations.append("Yesterday was a \(yesterdayTop.app) day. Today you've shifted to \(todayTop.app).")
+            }
+        }
+
+        // Detect new projects (appeared today but not in last 7 days)
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date())!
+        let weekEvents = database.fetchEvents(from: weekAgo, to: Calendar.current.startOfDay(for: Date()))
+        let weekTitles = Set(weekEvents.filter { $0.eventType == .screenText }.compactMap(\.textContent))
+
+        for activity in analysis.mainActivities {
+            let label = activity.label.lowercased()
+            let isNew = !weekTitles.contains(where: { $0.lowercased().contains(label.prefix(15)) })
+            if isNew && activity.totalDuration > 300 { // More than 5 minutes
+                observations.append("\(activity.label) is new — you haven't worked on this in the past week.")
+                break // Only mention one new thing
+            }
+        }
+
+        // Detect if today's schedule is busier than usual
+        let todayHour = Calendar.current.component(.hour, from: Date())
+        let todayHourly = analytics.hourlyPattern(days: 1)
+        let weeklyHourly = analytics.hourlyPattern(days: 7)
+
+        if todayHour >= 6 {
+            let todayEventsUpToNow = todayHourly.filter { $0.hour <= todayHour }.reduce(0) { $0 + $1.eventCount }
+            let weeklyAvgUpToNow = weeklyHourly.filter { $0.hour <= todayHour }.reduce(0) { $0 + $1.eventCount } / 7
+
+            if weeklyAvgUpToNow > 0 {
+                let ratio = Double(todayEventsUpToNow) / Double(weeklyAvgUpToNow)
+                if ratio > 1.5 {
+                    observations.append("You're on a more intense pace than your weekly average right now.")
+                } else if ratio < 0.5 && todayEventsUpToNow > 10 {
+                    observations.append("A slower pace than usual today. Taking it easy or in deep thought.")
+                }
+            }
+        }
+
+        // Detect long unbroken focus sessions
+        for activity in analysis.mainActivities {
+            if activity.totalDuration > 7200 { // 2+ hours
+                let hours = Int(activity.totalDuration / 3600)
+                observations.append("You've been in \(activity.label) for over \(hours) hours straight. That's deep work.")
+                break
+            }
+        }
+
+        // Detect late/early activity
+        if let firstEvent = analysis.mainActivities.first?.blocks.first {
+            let startHour = Calendar.current.component(.hour, from: firstEvent.start)
+            if startHour < 6 {
+                observations.append("You started before 6 AM today. Earlier than most days.")
+            }
+        }
+
+        guard !observations.isEmpty else { return "" }
+        return observations.prefix(3).joined(separator: " ")
     }
 
     // MARK: - Clipboard Insight
