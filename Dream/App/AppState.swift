@@ -286,8 +286,12 @@ final class AppState: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(finalText, forType: .string)
 
-        // Notify user
-        sendNotification(title: "Copied to clipboard", body: "\(finalText.count) chars · Paste into any AI")
+        // Notify — make it feel like a moment, not a file transfer
+        let wordCount = finalText.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
+        sendNotification(
+            title: "Your context is ready",
+            body: "Paste into any AI — it will understand \(wordCount) words about your day."
+        )
     }
 
     /// Open the main Dream window from anywhere via ⌘+Shift+D

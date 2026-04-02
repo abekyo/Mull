@@ -18,32 +18,40 @@ struct ColdReadService {
         var apps: [String] = []
         var schedule: [String] = []
 
-        // 1. Running apps → what kind of user they are
         let runningApps = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
             .compactMap(\.localizedName)
-
         apps = runningApps
+        let runningSet = Set(runningApps)
+
         let devApps = Set(["Xcode", "Code", "Visual Studio Code", "Cursor", "IntelliJ IDEA",
                            "Android Studio", "Terminal", "iTerm2", "Warp", "Ghostty", "Zed"])
         let designApps = Set(["Figma", "Sketch", "Photoshop", "Illustrator", "Canva"])
-        let commApps = Set(["Slack", "Discord", "Teams", "Zoom"])
+        let commApps = Set(["Slack", "Discord", "Teams", "Zoom", "Messages"])
 
-        let devOverlap = Set(runningApps).intersection(devApps)
-        let designOverlap = Set(runningApps).intersection(designApps)
-        let commOverlap = Set(runningApps).intersection(commApps)
+        let devOverlap = runningSet.intersection(devApps)
+        let designOverlap = runningSet.intersection(designApps)
+        let commOverlap = runningSet.intersection(commApps)
 
-        if devOverlap.count >= 1 {
-            facts.append("You're a developer — \(devOverlap.sorted().joined(separator: ", ")) is open right now")
-        }
-        if designOverlap.count >= 1 {
-            facts.append("You work with design — \(designOverlap.sorted().joined(separator: ", ")) is open")
-        }
-        if commOverlap.count >= 1 {
-            facts.append("You use \(commOverlap.sorted().joined(separator: ", ")) for communication")
+        // 1. DEDUCTIVE observations — not "what's open" but "what that means"
+        if devOverlap.count >= 2 {
+            facts.append("You have \(devOverlap.sorted().joined(separator: " and ")) open at the same time — switching between projects or languages.")
+        } else if devOverlap.count == 1 {
+            facts.append("You're in \(devOverlap.first!) right now — building something.")
         }
 
-        // 2. Current window → what they're doing RIGHT NOW
+        if !designOverlap.isEmpty && !devOverlap.isEmpty {
+            facts.append("Design tools AND code editors open — you're turning designs into code.")
+        }
+
+        // What's NOT running is as interesting as what IS
+        if commOverlap.isEmpty && devOverlap.count >= 1 {
+            facts.append("No Slack, no Discord, no Zoom. You're in deep focus mode right now.")
+        } else if commOverlap.count >= 2 {
+            facts.append("Multiple communication tools active — collaborative session.")
+        }
+
+        // 2. Current window → DEDUCE what they're doing, not just state it
         if let frontApp = NSWorkspace.shared.frontmostApplication {
             let appName = frontApp.localizedName ?? ""
             let pid = frontApp.processIdentifier
@@ -54,18 +62,36 @@ struct ColdReadService {
                 var titleRef: CFTypeRef?
                 AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef)
                 if let title = titleRef as? String, !title.isEmpty {
-                    facts.append("Right now you're looking at: \(title) (\(appName))")
+                    // Deduce what they're doing from the window title
+                    if title.contains(".swift") || title.contains(".ts") || title.contains(".py") {
+                        let fileName = title.components(separatedBy: " ").first(where: { $0.contains(".") }) ?? title
+                        facts.append("You're editing \(fileName) — in the middle of something.")
+                    } else if title.contains("Stack Overflow") || title.contains("Google") {
+                        facts.append("Researching something right now — \"\(String(title.prefix(50)))\"")
+                    } else if title.lowercased().contains("pull request") || title.contains("PR #") {
+                        facts.append("Reviewing a pull request right now.")
+                    } else {
+                        facts.append("You're looking at: \(String(title.prefix(60))) (\(appName))")
+                    }
                 }
             }
         }
 
-        // 3. Clipboard → last thing they were working with
+        // 3. Clipboard → deduce INTENT, not just content
         if let clipText = NSPasteboard.general.string(forType: .string), !clipText.isEmpty {
             let preview = String(clipText.prefix(80)).replacingOccurrences(of: "\n", with: " ")
-            facts.append("Last thing you copied: \"\(preview)\"")
+            if clipText.contains("func ") || clipText.contains("class ") || clipText.contains("import ") {
+                facts.append("You have code on your clipboard — probably moving something between files.")
+            } else if clipText.contains("http") {
+                facts.append("A URL on your clipboard: \"\(preview)\"")
+            } else if clipText.count > 50 {
+                facts.append("Your clipboard has a long text: \"\(preview)\" — writing or editing something.")
+            } else {
+                facts.append("Last thing you copied: \"\(preview)\"")
+            }
         }
 
-        // 4. Calendar → today's schedule
+        // 4. Calendar → upcoming context
         let store = EKEventStore()
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
@@ -78,50 +104,34 @@ struct ColdReadService {
         if !events.isEmpty {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            for event in events.prefix(3) {
-                let time = formatter.string(from: event.startDate)
-                let title = event.title ?? "Meeting"
-                schedule.append("\(time) \(title)")
 
-                // Is there a meeting soon?
-                let minutesUntil = Int(event.startDate.timeIntervalSince(Date()) / 60)
-                if minutesUntil > 0 && minutesUntil < 60 {
-                    facts.append("You have \"\(title)\" in \(minutesUntil) minutes")
+            // Find the NEXT meeting
+            let upcoming = events.filter { $0.startDate > Date() }
+            if let next = upcoming.first {
+                let minutesUntil = Int(next.startDate.timeIntervalSince(Date()) / 60)
+                if minutesUntil < 30 {
+                    facts.append("You have \"\(next.title ?? "a meeting")\" in \(minutesUntil) minutes — wrapping up current work?")
+                } else if minutesUntil < 60 {
+                    facts.append("\"\(next.title ?? "Meeting")\" is coming up at \(formatter.string(from: next.startDate)).")
                 }
             }
 
-            if !schedule.isEmpty {
-                facts.append("Your schedule today: \(schedule.joined(separator: " → "))")
+            // How busy is today?
+            if events.count >= 4 {
+                facts.append("Busy day — \(events.count) meetings scheduled. Not much maker time.")
+            } else if events.count == 0 {
+                facts.append("No meetings today. Full day for deep work.")
             }
+
+            schedule = events.prefix(3).map { "\(formatter.string(from: $0.startDate)) \($0.title ?? "Meeting")" }
+        } else {
+            facts.append("Clear calendar today — no meetings pulling you away.")
         }
 
-        // 5. System info
-        let locale = Locale.current
-        if let lang = locale.language.languageCode?.identifier {
-            if lang == "ja" {
-                facts.append("Your system is set to Japanese")
-            }
-        }
-
+        // 5. System → personalize
         let userName = NSFullUserName()
-        if !userName.isEmpty {
-            facts.append("Hello, \(userName)")
-        }
-
-        // 6. Installed apps (quick check for dev tools)
-        let fm = FileManager.default
-        let appsDir = "/Applications"
-        if let installed = try? fm.contentsOfDirectory(atPath: appsDir) {
-            let hasXcode = installed.contains("Xcode.app")
-            let hasVSCode = installed.contains("Visual Studio Code.app")
-            let hasFigma = installed.contains("Figma.app")
-
-            if hasXcode && hasVSCode {
-                facts.append("You have both Xcode and VS Code installed — multi-editor workflow")
-            }
-            if hasFigma {
-                facts.append("Figma is installed — you work with design")
-            }
+        if !userName.isEmpty && userName.count < 30 {
+            facts.insert("Hello, \(userName).", at: 0)
         }
 
         return ColdReading(

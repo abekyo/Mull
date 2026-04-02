@@ -238,7 +238,7 @@ struct MenuBarPanel: View {
                     HStack(spacing: DS.sm) {
                         ProgressView()
                             .controlSize(.small)
-                        Text(appState.whatlyProgress ?? "Analyzing your day...")
+                        Text(appState.whatlyProgress ?? "Finding your patterns...")
                             .font(DS.bodyFont)
                             .foregroundStyle(.secondary)
                     }
@@ -395,7 +395,7 @@ struct MenuBarPanel: View {
             VStack(spacing: DS.xs) {
                 Text("Whatly is recording")
                     .font(DS.titleFont)
-                Text("Your first summary will be ready tonight at 23:00.")
+                Text("Your first summary arrives tonight. You'll see patterns you didn't know you had.")
                     .font(DS.bodyFont)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

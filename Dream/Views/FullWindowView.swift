@@ -343,7 +343,8 @@ struct InsightsTab: View {
                         .font(DS.titleFont)
 
                     if facts.isEmpty {
-                        Text("Whatly is still learning about you...")
+                        // Day 1: seed from cold read instead of showing nothing
+                        Text("Watch the patterns emerge — first insights build within hours.")
                             .font(DS.captionFont)
                             .foregroundStyle(.tertiary)
                     }
