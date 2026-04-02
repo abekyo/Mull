@@ -87,15 +87,24 @@ struct TimeBlockEngine {
     }
 
     /// Generate a human-readable label for a time block.
+    /// Priority: project name > file name > window title > clipboard > app name
     private func generateLabel(for block: TimeBlock) -> String {
-        // Use the most common window title as the label
         if let topTitle = block.topWindowTitle {
-            // Clean up the title
-            let cleaned = cleanTitle(topTitle, app: block.app)
-            return cleaned
+            let parsed = parseWindowTitle(topTitle, app: block.app)
+            // Prefer "Project — File" format if both exist
+            if let project = parsed.project, let file = parsed.file {
+                return "\(project) — \(file)"
+            }
+            if let project = parsed.project {
+                return project
+            }
+            if let file = parsed.file {
+                return file
+            }
+            // Fallback to cleaned title
+            return parsed.display
         }
 
-        // Fallback: use clipboard content if meaningful
         if let clip = block.topClipboard, clip.count > 5 {
             return String(clip.prefix(60))
         }
@@ -103,25 +112,83 @@ struct TimeBlockEngine {
         return block.app
     }
 
-    private func cleanTitle(_ title: String, app: String) -> String {
-        var clean = title
+    struct ParsedTitle {
+        var project: String?  // e.g. "PantryApp", "notes-site"
+        var file: String?     // e.g. "ViewController.swift"
+        var display: String   // cleaned display string
+    }
 
-        // Remove app name from title
+    /// Parse window titles from common app formats:
+    ///   VS Code: "filename.swift — ProjectName"
+    ///   VS Code + Claude: "Chat title — ProjectName"
+    ///   Xcode: "ProjectName — filename.swift — Xcode"
+    ///   Browser: "Page Title — Site Name"
+    private func parseWindowTitle(_ title: String, app: String) -> ParsedTitle {
         let separators = [" — ", " - ", " | "]
+
         for sep in separators {
-            let parts = clean.components(separatedBy: sep)
-            if parts.count > 1 {
-                let filtered = parts.filter {
-                    $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != app.lowercased()
-                }
-                if let best = filtered.first {
-                    clean = best.trimmingCharacters(in: .whitespacesAndNewlines)
-                    break
+            let parts = title.components(separatedBy: sep)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && $0.lowercased() != app.lowercased() }
+
+            guard parts.count >= 2 else { continue }
+
+            // Detect which part is the project and which is the file/task
+            var project: String?
+            var file: String?
+
+            for part in parts {
+                if isFileName(part) {
+                    file = part
+                } else if isProjectName(part) {
+                    project = project ?? part // Keep the first project-like name
                 }
             }
+
+            // VS Code pattern: last part (after —) is usually the project
+            if project == nil {
+                let lastPart = parts.last!
+                if isProjectName(lastPart) {
+                    project = lastPart
+                }
+            }
+
+            // If we only found one meaningful part, use it
+            if project == nil && file == nil {
+                // Take the last part as project (VS Code convention)
+                project = parts.last
+            }
+
+            return ParsedTitle(project: project, file: file, display: parts.joined(separator: " — "))
         }
 
-        return String(clean.prefix(80))
+        // No separator found — single-part title
+        if isFileName(title) {
+            return ParsedTitle(project: nil, file: title, display: title)
+        }
+        return ParsedTitle(project: nil, file: nil, display: String(title.prefix(80)))
+    }
+
+    /// Looks like a file: has extension with 1-5 char suffix
+    private func isFileName(_ str: String) -> Bool {
+        let parts = str.split(separator: ".")
+        guard parts.count >= 2 else { return false }
+        let ext = parts.last!
+        return ext.count <= 5 && ext.allSatisfy(\.isLetter)
+    }
+
+    /// Looks like a project name: short, no spaces (or camelCase/kebab-case), no extension
+    private func isProjectName(_ str: String) -> Bool {
+        let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Too long → probably a sentence/chat message
+        guard trimmed.count <= 40 else { return false }
+        // Has file extension → it's a file, not a project
+        if isFileName(trimmed) { return false }
+        // Contains question marks or exclamation → it's a chat message
+        if trimmed.contains("?") || trimmed.contains("？") || trimmed.contains("!") || trimmed.contains("！") { return false }
+        // Very long with spaces → probably a sentence
+        if trimmed.contains(" ") && trimmed.count > 25 { return false }
+        return true
     }
 }
 
@@ -313,11 +380,16 @@ extension TimeBlockEngine {
     /// Normalize block into a task key for grouping.
     /// Same project across Xcode + Code + Terminal = same task.
     private func normalizeTaskKey(_ block: TimeBlock) -> String {
-        let label = block.label.isEmpty ? block.app : block.label
+        // If we have a parsed title with a project, use that
+        if let topTitle = block.topWindowTitle {
+            let parsed = parseWindowTitle(topTitle, app: block.app)
+            if let project = parsed.project {
+                return project.lowercased()
+            }
+        }
 
-        // Extract project name from common patterns
-        // "PantryApp — ViewController.swift" → "PantryApp"
-        // "Dream — WhatlyEngine.swift" → "Whatly"
+        // Otherwise extract from label
+        let label = block.label.isEmpty ? block.app : block.label
         let separators = [" — ", " - ", " | "]
         for sep in separators {
             let parts = label.components(separatedBy: sep)
@@ -329,7 +401,6 @@ extension TimeBlockEngine {
             }
         }
 
-        // Fallback: use the label itself
         return label.lowercased().prefix(40).description
     }
 
@@ -342,12 +413,23 @@ extension TimeBlockEngine {
     }
 
     private func bestLabel(for blocks: [TimeBlock], key: String) -> String {
-        // Use the longest block's label (most specific)
+        // Find the most specific label from the longest block
         let sorted = blocks.sorted { $0.duration > $1.duration }
-        if let label = sorted.first?.label, !label.isEmpty, label != sorted.first?.app {
-            return label
+        for block in sorted {
+            if let title = block.topWindowTitle {
+                let parsed = parseWindowTitle(title, app: block.app)
+                // Prefer "Project — File" if both exist
+                if let project = parsed.project, let file = parsed.file {
+                    return "\(project) — \(file)"
+                }
+                if let project = parsed.project {
+                    return project
+                }
+            }
+            if let label = sorted.first?.label, !label.isEmpty, label != sorted.first?.app {
+                return label
+            }
         }
-        // Capitalize key
         return key.prefix(1).uppercased() + key.dropFirst()
     }
 }
