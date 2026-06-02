@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "Dream",
+    name: "mull",
     platforms: [
         .macOS(.v14)
     ],
@@ -11,14 +11,22 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "Dream",
+            name: "mull",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
-            path: "Dream",
+            path: "mull",
             resources: [
                 .process("Resources")
             ]
+        ),
+        .testTarget(
+            name: "MullTests",
+            dependencies: [
+                "mull",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
+            path: "Tests"
         ),
     ]
 )

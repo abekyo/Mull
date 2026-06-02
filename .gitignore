@@ -25,4 +25,8 @@ Package.resolved
 *~
 
 # Xcodegen (regeneratable)
-# Dream.xcodeproj is generated from project.yml
+# Mull.xcodeproj is generated from project.yml
+Mull.xcodeproj/
+
+# Claude Code local state
+.claude/

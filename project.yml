@@ -1,6 +1,6 @@
-name: Dream
+name: Mull
 options:
-  bundleIdPrefix: com.dream
+  bundleIdPrefix: com.mull
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
@@ -11,26 +11,26 @@ packages:
     from: "6.24.0"
 
 targets:
-  Dream:
+  Mull:
     type: application
     platform: macOS
     sources:
-      - Dream
+      - Mull
     resources:
-      - Dream/Resources
+      - Mull/Resources
     dependencies:
       - package: GRDB
     info:
-      path: Dream/Resources/Info.plist
+      path: Mull/Resources/Info.plist
       properties:
         LSUIElement: false
-        NSAccessibilityUsageDescription: "Dream uses Accessibility to read on-screen text and record your activity for daily summaries."
-        NSMicrophoneUsageDescription: "Dream can optionally record audio for meeting transcription."
-        NSCalendarsUsageDescription: "Dream reads your calendar to give AI context about your schedule."
-        NSCalendarsFullAccessUsageDescription: "Dream reads your calendar to give AI context about your schedule."
-        NSAppleEventsUsageDescription: "Dream reads browser URLs to understand what pages you are viewing."
+        NSAccessibilityUsageDescription: "Mull uses Accessibility to read on-screen text and record your activity for daily summaries."
+        NSMicrophoneUsageDescription: "Mull can optionally record audio for meeting transcription."
+        NSCalendarsUsageDescription: "Mull reads your calendar to give AI context about your schedule."
+        NSCalendarsFullAccessUsageDescription: "Mull reads your calendar to give AI context about your schedule."
+        NSAppleEventsUsageDescription: "Mull reads browser URLs to understand what pages you are viewing."
     entitlements:
-      path: Dream/Resources/Dream.entitlements
+      path: Mull/Resources/Mull.entitlements
       properties:
         com.apple.security.app-sandbox: false
         com.apple.security.automation.apple-events: true
@@ -40,8 +40,9 @@ targets:
         com.apple.security.files.bookmarks.app-scope: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.whatly.app
-        PRODUCT_NAME: Whatly
+        PRODUCT_BUNDLE_IDENTIFIER: com.mull.app
+        PRODUCT_NAME: Mull
+        PRODUCT_MODULE_NAME: mull
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -50,21 +51,45 @@ targets:
         ENABLE_HARDENED_RUNTIME: false
         GENERATE_INFOPLIST_FILE: true
 
-  WhatlyMCP:
+  MullTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+    dependencies:
+      - target: Mull
+      - package: GRDB
+    settings:
+      base:
+        PRODUCT_NAME: MullTests
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: true
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Mull.app/Contents/MacOS/Mull"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+  MullMCP:
     type: tool
     platform: macOS
     sources:
-      - WhatlyMCP
-      - Dream/Services/MCPServer.swift
-      - Dream/Services/DatabaseService.swift
-      - Dream/Services/AnalyticsEngine.swift
-      - Dream/Services/KeychainService.swift
-      - Dream/Models/Models.swift
+      - MullMCP
+      - Mull/Services/MCPServer.swift
+      - Mull/Services/DatabaseService.swift
+      - Mull/Services/AnalyticsEngine.swift
+      - Mull/Services/KeychainService.swift
+      - Mull/Services/BehaviorPatternEngine.swift
+      - Mull/Services/TimeBlockEngine.swift
+      - Mull/Services/CalendarService.swift
+      - Mull/Services/KnowledgeExtractor.swift
+      - Mull/Services/SensitiveText.swift
+      - Mull/Services/TestInput.swift
+      - Mull/Views/Components/DesignTokens.swift
+      - Mull/Models/Models.swift
     dependencies:
       - package: GRDB
     settings:
       base:
-        PRODUCT_NAME: WhatlyMCP
+        PRODUCT_NAME: MullMCP
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
         GENERATE_INFOPLIST_FILE: true

@@ -1,27 +1,35 @@
-# Whatly
+# mull
 
-**Know what you did.**
+**It thinks about you, so you don't have to.**
 
-Whatly silently records your computer activity and makes it available as structured context for AI assistants. You never explain yourself again — AI already knows who you are, what you're working on, and what you did today.
+mull is an always-on engine that quietly mulls over your computer activity — what you read, write, copy, and work on — and keeps a living understanding of who you are and what you're doing. You never mull over your own life to explain it to an AI again; mull already did the thinking, and hands the result to any AI assistant as structured context.
 
-## The Problem
+## Two things mull does
+
+**1. It zeroes out the 2-minute self-explanation.**
 
 Every time you ask AI for help, you start from zero:
 
 > "I'm a Swift developer working on a health app called PantryApp. I'm doing a Storyboard refactor, currently on Phase 5. I also have a web project for a real estate company in Yokohama, and I have a meeting in 17 minutes..."
 
-**Whatly eliminates this entirely.** AI just knows.
+Two minutes, ten times a day, is ~10 hours a month spent explaining yourself to a machine. **mull eliminates it entirely.** AI just knows — instantly.
+
+**2. It mulls over your life 24/7, so you don't have to.**
+
+The deeper job isn't logging — it's *deliberation*. mull continuously reflects on your activity in the background: what you keep returning to, what you're stuck on, how your attention actually moves. You experience the result as instant ("AI just knows"), but the work behind it is slow, ongoing thinking that you've offloaded. Because mull understands you, it — and the AI reading it — can see what you'll likely need next.
+
+> You stop mulling over your own life. mull does it for you, continuously.
 
 ## How It Works
 
 ```
 You work normally
     ↓
-Whatly silently records (keystrokes, clipboard, window titles, browser URLs, calendar)
+mull silently records (keystrokes, clipboard, window titles, browser URLs, calendar)
     ↓
 Every 60 seconds: me.md / now.md / full.md auto-generated (no LLM needed)
     ↓
-Every night: Whatly Engine summarizes your day (LLM or rule-based fallback)
+Every night: mull Engine mulls over your day (LLM or rule-based fallback)
     ↓
 AI reads your context via MCP Server, file reference, or copy/paste
     ↓
@@ -30,7 +38,7 @@ AI knows you. You explain nothing.
 
 ## What AI Sees
 
-From a single day of recording, Whatly generates this:
+From a single day of recording, mull generates this:
 
 ```
 About the user:
@@ -82,42 +90,42 @@ With this data, AI can say:
 
 ```bash
 # Clone
-git clone https://github.com/yourname/whatly.git
-cd whatly
+git clone https://github.com/yourname/mull.git
+cd mull
 
 # Generate Xcode project
 brew install xcodegen   # if not installed
 xcodegen generate
 
 # Open and build
-open Whatly.xcodeproj
-# Select "Whatly" scheme → ⌘R
+open mull.xcodeproj
+# Select "mull" scheme → ⌘R
 ```
 
 ### Permissions
 
-Whatly needs two macOS permissions:
+mull needs two macOS permissions:
 
 | Permission | What it does | How to grant |
 |-----------|-------------|-------------|
-| **Accessibility** | Read window titles | System Settings → Privacy & Security → Accessibility → Add Whatly |
-| **Input Monitoring** | Record keystrokes | System Settings → Privacy & Security → Input Monitoring → Add Whatly |
+| **Accessibility** | Read window titles | System Settings → Privacy & Security → Accessibility → Add mull |
+| **Input Monitoring** | Record keystrokes | System Settings → Privacy & Security → Input Monitoring → Add mull |
 
-> **Xcode development note:** When running from Xcode, add **Xcode** to Input Monitoring instead of Dream (Whatly runs as Xcode's child process).
+> **Xcode development note:** When running from Xcode, add **Xcode** to Input Monitoring instead of mull (mull runs as Xcode's child process).
 
 Clipboard monitoring requires no permission.
 
 ## Architecture
 
 ```
-Whatly/
+mull/
 ├── App/
-│   ├── WhatlyApp.swift              — Menu bar + Dock + Onboarding
+│   ├── MullApp.swift              — Menu bar + Dock + Onboarding
 │   └── AppState.swift              — Central state, timers, notifications
 ├── Services/
 │   ├── RecordingService.swift      — CGEvent tap + clipboard + window titles + browser URLs
 │   ├── DatabaseService.swift       — SQLite (GRDB) + FTS5 + DatabasePool
-│   ├── WhatlyEngine.swift           — 3-gate trigger + 4-phase LLM consolidation
+│   ├── MullEngine.swift           — 3-gate trigger + 4-phase LLM consolidation
 │   ├── AnalyticsEngine.swift       — Keyword frequency, app usage, work rhythm
 │   ├── FactExtractor.swift         — Rule-based identity/role/project inference
 │   ├── LiveContextGenerator.swift  — Generates me.md/now.md/full.md every 60s
@@ -131,27 +139,27 @@ Whatly/
 │   ├── FullWindowView.swift        — Live / Insights / Timeline dashboard
 │   ├── OnboardingView.swift        — Permission setup with step-by-step guide
 │   └── Components/                 — DesignTokens, ActionBar, SearchBar, etc.
-└── WhatlyMCP/
+└── MullMCP/
     └── main.swift                  — Standalone MCP server binary
 ```
 
 ## 3-Layer Context System
 
-Whatly generates three files with different token budgets:
+mull generates three files with different token budgets:
 
 | File | Size | Contains | Use when |
 |------|------|---------|----------|
-| `~/Whatly/me.md` | ~200 tokens | Identity, skills, preferences | Always safe to include |
-| `~/Whatly/now.md` | ~500 tokens | Current projects, today's activity, calendar, patterns | Task is related to current work |
-| `~/Whatly/full.md` | ~1,500+ tokens | Everything + raw keystrokes + clipboard | Onboarding AI to a new task |
+| `~/mull/me.md` | ~200 tokens | Identity, skills, preferences | Always safe to include |
+| `~/mull/now.md` | ~500 tokens | Current projects, today's activity, calendar, patterns | Task is related to current work |
+| `~/mull/full.md` | ~1,500+ tokens | Everything + raw keystrokes + clipboard | Onboarding AI to a new task |
 
 ## AI Integration
 
 ### Option 1: MCP Server (recommended)
 
 ```bash
-# Build the WhatlyMCP target in Xcode first, then:
-claude mcp add --transport stdio --scope user dream -- /path/to/WhatlyMCP
+# Build the MullMCP target in Xcode first, then:
+claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
 ```
 
 AI can then call `get_user_context`, `search_history`, and `get_patterns` tools automatically.
@@ -161,22 +169,22 @@ AI can then call `get_user_context`, `search_history`, and `get_patterns` tools 
 Add to any project's `CLAUDE.md`:
 
 ```markdown
-Read ~/Whatly/me.md and ~/Whatly/now.md for context about who I am.
+Read ~/mull/me.md and ~/mull/now.md for context about who I am.
 ```
 
 ### Option 3: Copy & Paste
 
 Click the moon icon (☽) in the menu bar → "Copy to AI" → paste into any AI chat.
 
-## Whatly Engine
+## mull Engine
 
-Nightly (default 23:00), Whatly consolidates the day's data:
+Nightly (default 23:00), mull consolidates the day's data:
 
 ### 3-Gate Trigger
 
 1. **Time Gate** — 24 hours since last run
 2. **Data Gate** — Enough new events recorded
-3. **Lock Gate** — No other Whatly process running
+3. **Lock Gate** — No other mull process running
 
 ### 4-Phase Processing
 
@@ -185,11 +193,11 @@ Nightly (default 23:00), Whatly consolidates the day's data:
 3. **Consolidate** — LLM generates summary + memory updates
 4. **Prune** — Keep MEMORY.md under 200 lines / 25KB
 
-If no LLM is configured (no Ollama, no API key), Whatly falls back to **rule-based summaries** — window titles + clipboard + app usage, formatted as markdown. No configuration needed.
+If no LLM is configured (no Ollama, no API key), mull falls back to **rule-based summaries** — window titles + clipboard + app usage, formatted as markdown. No configuration needed.
 
 ## Recording
 
-Whatly captures:
+mull captures:
 
 | Signal | Method | Why |
 |--------|--------|-----|
@@ -200,11 +208,11 @@ Whatly captures:
 | App switches | NSWorkspace notification | Time allocation per app |
 | Calendar | EventKit | Today's schedule + upcoming meetings |
 
-**Privacy:** All data stays on your Mac. No cloud. No telemetry by default. Database at `~/Library/Application Support/Whatly/whatly.sqlite`.
+**Privacy:** All data stays on your Mac. No cloud. No telemetry by default. Database at `~/Library/Application Support/mull/mull.sqlite`.
 
 ## Analytics (Rule-Based, No LLM)
 
-Whatly detects behavioral patterns without any LLM:
+mull detects behavioral patterns without any LLM:
 
 - **Top keywords** — what words appear most in your typing/clipboard
 - **App usage** — time allocation across tools
@@ -216,19 +224,19 @@ Whatly detects behavioral patterns without any LLM:
 
 Three tabs:
 
-- **General** — Whatly schedule, output size limit, export destinations
+- **General** — mull schedule, output size limit, export destinations
 - **AI** — LLM provider (Ollama / Claude API / OpenAI API) + connection test
 - **Data** — Permission status, storage stats, retention policy, cleanup
 
 ## Origin
 
-Whatly's architecture is inspired by Claude Code's `autoDream` system (the memory consolidation engine leaked via npm sourcemap on March 31, 2026). The 3-gate trigger, 4-phase consolidation, and memory file format are adapted from that design.
+mull's memory pipeline — a 3-gate trigger, 4-phase consolidation, and plain-markdown memory files — follows the well-established pattern for how AI agents consolidate long-term memory: capture continuously, consolidate on a gated schedule, summarize, then prune. mull applies that pattern to **computer activity** instead of chat history.
 
-Key differences:
-- Whatly captures **computer activity** (not conversation transcripts)
-- Whatly generates **portable markdown files** (not internal database entries)
-- Whatly works **without any LLM** via rule-based analytics and fact extraction
-- Whatly exposes data via **MCP Server** for any AI assistant to query
+How it differs from conversation-based AI memory (ChatGPT Memory, Mem0):
+- mull captures **computer activity** (not conversation transcripts)
+- mull generates **portable markdown files** (not internal database entries or an API)
+- mull works **without any LLM** via rule-based analytics and fact extraction
+- mull exposes data via **MCP Server** for any AI assistant to query
 
 ## Tech Stack
 
