@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The mull window — a notebook, not a dashboard.
 ///
@@ -28,9 +29,11 @@ struct FullWindowView: View {
     @State private var selection: SidebarItem? = .home
     @State private var fileTree: [mullFileNode] = []
     @State private var editorContent: String = ""
+    @State private var savedContent: String = ""   // baseline last loaded/saved (Round-trip ref)
     @State private var isDirty = false
     @State private var searchQuery = ""
     @State private var autoRefreshTimer: Timer?
+    @State private var autosaveTimer: Timer?
 
     // Dialog state
     @State private var showNewFile = false
@@ -71,6 +74,7 @@ struct FullWindowView: View {
                 Spacer()
                 sidebarButton(icon: "arrow.clockwise", help: "Refresh") { refreshFileTree() }
                 sidebarButton(icon: "folder", help: "Reveal ~/mull in Finder") { NSWorkspace.shared.open(mullDir) }
+                sidebarButton(icon: "gearshape", help: "Settings (⌘,)") { openSettingsWindow() }
             }
             .padding(.horizontal, DS.md)
             .padding(.vertical, DS.sm)
@@ -116,47 +120,46 @@ struct FullWindowView: View {
                     Label("Chat", systemImage: "bubble.left.and.text.bubble.right").tag(SidebarItem.chat)
                 }
 
-                // ── Your files: the ~/mull folder, editable ──
+                // ── Your files: the ~/mull vault — arbitrary nesting, editable,
+                //    and openable in Obsidian/Finder (it's just a folder of md). ──
                 Section {
-                    // Core context, always present
+                    // Core context, pinned at the top.
                     ForEach(contextFiles, id: \.path) { file in
                         fileRow(file).tag(SidebarItem.file(file))
                     }
-                    // Real folders — collapsible, with a folder icon + count
-                    folderDisclosure("Daily", files: dailySummaryFiles)
-                    folderDisclosure("Memory", files: memoryFolderFiles)
-                    folderDisclosure("Notes", files: userNoteFiles)
-                } header: {
-                    HStack {
-                        Text("Files")
-                        Spacer()
-                        Menu {
-                            Button { startNew(.note) } label: { Label("New Note", systemImage: "doc.badge.plus") }
-                            Button { startNew(.folder) } label: { Label("New Folder", systemImage: "folder.badge.plus") }
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(DS.moon)
-                        }
-                        .buttonStyle(.plain)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                        .help("New note or folder")
+                    // The rest of the vault: nested folders + notes, recursively.
+                    // A recursive View struct (NOT OutlineGroup) so leaf rows inside
+                    // folders stay selectable in the List — OutlineGroup's selection
+                    // model doesn't honor per-row .tag the way DisclosureGroup does.
+                    ForEach(fileTree) { node in
+                        VaultNode(node: node) { file in fileRow(file) }
                     }
-                }
+                } header: { filesHeader }
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            // Drag files/folders from Finder onto the vault to import them.
+            .dropDestination(for: URL.self) { urls, _ in importURLs(urls); return true }
         }
         .background(DS.canvas)
     }
 
+    /// Open the macOS Settings window. The app is a menu-bar app whose main window
+    /// is a custom NSWindow (outside the SwiftUI scene), so we open Settings via the
+    /// AppKit action rather than SettingsLink/openSettings (which need the App scene env).
+    private func openSettingsWindow() {
+        AppDelegate.shared?.showSettings()
+    }
+
     private func sidebarButton(icon: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(DS.captionFont)
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(DS.inkDim)
         .help(help)
     }
 
@@ -202,6 +205,87 @@ struct FullWindowView: View {
                 }
             }
         }
+    }
+
+    private var filesHeader: some View {
+        HStack {
+            Text("Files")
+            Spacer()
+            Menu {
+                Button { startNew(.note) } label: { Label("New Note", systemImage: "doc.badge.plus") }
+                Button { startNew(.folder) } label: { Label("New Folder", systemImage: "folder.badge.plus") }
+                Divider()
+                Button { importFiles() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+                Button { exportVault() } label: { Label("Export Vault (.zip)…", systemImage: "square.and.arrow.up") }
+                Button { revealVault() } label: { Label("Reveal in Finder", systemImage: "folder") }
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DS.moon)
+            }
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("New · import · export · reveal")
+        }
+    }
+
+    // MARK: - Vault actions (it's just a folder of md — Obsidian/Finder open it too)
+
+    /// Reveal the whole ~/mull vault in Finder — the bridge to Obsidian/Bear/etc.
+    private func revealVault() {
+        NSWorkspace.shared.activateFileViewerSelecting([mullDir])
+    }
+
+    /// Import files/folders into the vault (copied under notes/, names de-duped).
+    private func importFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Import"
+        if panel.runModal() == .OK { importURLs(panel.urls) }
+    }
+
+    private func importURLs(_ urls: [URL]) {
+        let fm = FileManager.default
+        let dest = mullDir.appendingPathComponent("notes")
+        try? fm.createDirectory(at: dest, withIntermediateDirectories: true)
+        for url in urls {
+            let target = uniqueURL(dest.appendingPathComponent(url.lastPathComponent))
+            try? fm.copyItem(at: url, to: target)
+        }
+        refreshFileTree()
+    }
+
+    private func uniqueURL(_ url: URL) -> URL {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return url }
+        let ext = url.pathExtension
+        let base = url.deletingPathExtension().lastPathComponent
+        let dir = url.deletingLastPathComponent()
+        var i = 1
+        while true {
+            let name = ext.isEmpty ? "\(base)-\(i)" : "\(base)-\(i).\(ext)"
+            let candidate = dir.appendingPathComponent(name)
+            if !fm.fileExists(atPath: candidate.path) { return candidate }
+            i += 1
+        }
+    }
+
+    /// Export the whole vault as a .zip (via ditto), then reveal it in Finder.
+    private func exportVault() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "mull-vault.zip"
+        panel.allowedContentTypes = [.zip]
+        guard panel.runModal() == .OK, let dest = panel.url else { return }
+        try? FileManager.default.removeItem(at: dest)
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        p.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", mullDir.path, dest.path]
+        try? p.run()
+        p.waitUntilExit()
+        NSWorkspace.shared.activateFileViewerSelecting([dest])
     }
 
     // MARK: - Detail
@@ -298,24 +382,29 @@ struct FullWindowView: View {
             Divider()
 
             if file.isAutoGenerated {
-                // Read-only view with live refresh
+                // Read-only: render the display layer (表示層), measure-capped & centered.
                 ScrollView {
-                    Text(editorContent)
-                        .font(.system(size: 14))
-                        .lineSpacing(4)
+                    MarkdownView(editorContent)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, DS.lg)
-                        .padding(.top, DS.md)
+                        .frame(maxWidth: DS.readMeasure, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, DS.readMargin)
+                        .padding(.top, DS.lg)
+                        .padding(.bottom, 160)
                 }
             } else {
+                // Editable: plain text (原則6 — bytes are never normalised), but with
+                // the reading surface's typography and a capped measure for comfort.
                 TextEditor(text: $editorContent)
-                    .font(.system(size: 14))
+                    .font(DS.readFont)
+                    .foregroundStyle(DS.ink)
                     .scrollContentBackground(.hidden)
-                    .lineSpacing(4)
-                    .padding(.horizontal, DS.lg)
-                    .padding(.top, DS.md)
-                    .onChange(of: editorContent) { _, _ in isDirty = true }
+                    .lineSpacing(DS.readLineSpacing)
+                    .frame(maxWidth: DS.readMeasure)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, DS.readMargin)
+                    .padding(.top, DS.lg)
+                    .onChange(of: editorContent) { _, _ in editorChanged() }
             }
         }
         .background(DS.canvas)
@@ -324,6 +413,7 @@ struct FullWindowView: View {
             startAutoRefreshIfNeeded(file)
         }
         .onDisappear {
+            if isDirty { saveCurrentFile() }   // never lose an edit on close
             stopAutoRefresh()
         }
         .onChange(of: selection) { _, newVal in
@@ -358,7 +448,20 @@ struct FullWindowView: View {
     private func loadFile(_ file: mullFile) {
         if isDirty { saveCurrentFile() }
         editorContent = displayContent(of: file)
+        savedContent = editorContent   // baseline: a freshly loaded file is never dirty
         isDirty = false
+    }
+
+    /// The editor changed. Dirty is measured against the loaded baseline (so the
+    /// programmatic load assignment doesn't count), and we schedule a debounced
+    /// autosave so data is never lost — Crane MD principle 5 (速度と信頼が美意識).
+    private func editorChanged() {
+        isDirty = (editorContent != savedContent)
+        autosaveTimer?.invalidate()
+        guard isDirty else { return }
+        autosaveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
+            saveCurrentFile()
+        }
     }
 
     /// Content to show in the editor. Auto-generated files (me.md, MEMORY.md, …)
@@ -370,8 +473,19 @@ struct FullWindowView: View {
     }
 
     private func saveCurrentFile() {
+        autosaveTimer?.invalidate()
         guard case .file(let file) = selection else { return }
+        // 原則6 (Round-trip safety) — two guards:
+        // 1. Auto-generated files carry Curator markers we STRIP for display; writing
+        //    the stripped buffer back would destroy them. They're read-only. Refuse.
+        guard !file.isAutoGenerated else { isDirty = false; return }
+        // 2. No-op write guard: if the buffer is byte-identical to disk, don't touch
+        //    the file at all — no mtime churn, no chance of altering bytes the user
+        //    never edited. A load→save with no change is a true no-op.
+        let onDisk = try? String(contentsOf: file.url, encoding: .utf8)
+        guard onDisk != editorContent else { savedContent = editorContent; isDirty = false; return }
         try? editorContent.write(to: file.url, atomically: true, encoding: .utf8)
+        savedContent = editorContent
         isDirty = false
     }
 
@@ -471,10 +585,23 @@ struct FullWindowView: View {
     // MARK: - File Discovery
 
     private var contextFiles: [mullFile] {
-        ["me.md", "now.md", "MEMORY.md"].compactMap { name in
-            let url = mullDir.appendingPathComponent(name)
-            return makeFile(url: url, autoGenerated: true)
+        // me.md is mull's read-only guess. me.pinned.md sits right under it and IS
+        // editable — it's how you correct/lock facts mull got wrong. mull places its
+        // non-comment lines at the top of me.md and never overwrites them.
+        _ = Curator.pinnedFacts()   // scaffold me.pinned.md on first run so it's findable
+        var files: [mullFile] = []
+        if let me = makeFile(url: mullDir.appendingPathComponent("me.md"), autoGenerated: true) {
+            files.append(me)
         }
+        if let pinned = makeFile(url: mullDir.appendingPathComponent(Curator.pinnedFileName), autoGenerated: false) {
+            files.append(pinned)
+        }
+        for name in ["now.md", "MEMORY.md"] {
+            if let f = makeFile(url: mullDir.appendingPathComponent(name), autoGenerated: true) {
+                files.append(f)
+            }
+        }
+        return files
     }
 
     private var dailySummaryFiles: [mullFile] {
@@ -526,19 +653,37 @@ struct FullWindowView: View {
     }
 
     private func refreshFileTree() {
-        // Trigger re-evaluation of computed properties by updating fileTree
-        let dailyDir = mullDir.appendingPathComponent("daily")
-        let memoryDir = mullDir.appendingPathComponent("memory")
-        let notesDir = mullDir.appendingPathComponent("notes")
-        var nodes: [mullFileNode] = []
-        for dir in [dailyDir, memoryDir, notesDir] {
-            let files = findMarkdownFiles(in: dir, autoGenerated: dir != notesDir)
-            if !files.isEmpty {
-                nodes.append(mullFileNode(name: dir.lastPathComponent, isDirectory: true, file: nil,
-                    children: files.map { mullFileNode(name: $0.name, isDirectory: false, file: $0, children: []) }))
+        fileTree = buildTree(mullDir, isRoot: true)
+    }
+
+    /// Walk the vault recursively: folders (with their nested children) then md
+    /// files. At the root, the pinned context files are skipped (shown above).
+    private func buildTree(_ dir: URL, isRoot: Bool = false) -> [mullFileNode] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]) else { return [] }
+
+        var folders: [mullFileNode] = []
+        var files: [mullFileNode] = []
+        let pinned: Set<String> = ["me.md", "now.md", "MEMORY.md"]
+        for url in entries {
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            if isDir {
+                folders.append(mullFileNode(name: url.lastPathComponent, isDirectory: true,
+                                            file: nil, children: buildTree(url)))
+            } else if url.pathExtension == "md" {
+                if isRoot && pinned.contains(url.lastPathComponent) { continue }
+                let auto = url.path.contains("/daily/") || url.path.contains("/memory/")
+                if let f = makeFile(url: url, autoGenerated: auto) {
+                    files.append(mullFileNode(name: f.name, isDirectory: false, file: f, children: []))
+                }
             }
         }
-        fileTree = nodes
+        folders.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        files.sort { ($0.file?.modified ?? .distantPast) > ($1.file?.modified ?? .distantPast) }
+        return folders + files
     }
 
     // MARK: - Helpers
@@ -552,6 +697,7 @@ struct FullWindowView: View {
     private func displayName(_ file: mullFile) -> String {
         switch file.name {
         case "me.md": return "About Me"
+        case Curator.pinnedFileName: return "About Me — your edits"
         case "now.md": return "Current Context"
         case "MEMORY.md": return "Memory Index"
         default:
@@ -567,6 +713,7 @@ struct FullWindowView: View {
     private func fileAccent(_ file: mullFile) -> Color {
         switch file.name {
         case "me.md": return .blue
+        case Curator.pinnedFileName: return DS.moon
         case "now.md": return DS.recording
         case "MEMORY.md": return DS.paused
         default:
@@ -785,4 +932,29 @@ struct mullFileNode: Identifiable {
     let file: mullFile?
     let children: [mullFileNode]
     var id: String { name + (isDirectory ? "/" : "") + (file?.path ?? "") }
+}
+
+/// One row of the vault tree. A recursive View *struct* (a concrete type can refer
+/// to itself, unlike an opaque `some View` function) so folders nest to any depth.
+/// The leaf's `.tag` is on a concrete row, so List selection works inside folders —
+/// which OutlineGroup did not.
+private struct VaultNode<Row: View>: View {
+    let node: mullFileNode
+    let rowFor: (mullFile) -> Row
+
+    var body: some View {
+        if let file = node.file {
+            rowFor(file).tag(FullWindowView.SidebarItem.file(file))
+        } else {
+            DisclosureGroup {
+                ForEach(node.children) { child in
+                    VaultNode(node: child, rowFor: rowFor)
+                }
+            } label: {
+                Label(node.name, systemImage: "folder.fill")
+                    .font(DS.bodyFont)
+                    .foregroundStyle(DS.moon.opacity(0.75))
+            }
+        }
+    }
 }

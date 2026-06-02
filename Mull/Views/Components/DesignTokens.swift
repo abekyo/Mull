@@ -40,6 +40,19 @@ enum DS {
     static let labelFont = Font.system(size: 11, weight: .medium)
     static let labelTracking: CGFloat = 0.5
 
+    // MARK: - Reading surface (editor + rendered markdown)
+    //
+    // Borrowed from Crane MD §4: a reading/writing surface breathes more than the
+    // dense dashboard. Generous measure, ~1.5 line-height, 1行目 = title. These are
+    // the ONLY large type sizes — they belong to the editor, not the chrome.
+    static let readTitleFont = Font.system(size: 22, weight: .bold)      // 1行目 / # heading
+    static let readH2Font = Font.system(size: 17, weight: .semibold)     // ##
+    static let readH3Font = Font.system(size: 15, weight: .semibold)     // ###
+    static let readFont = Font.system(size: 15)                          // body — read & write
+    static let readLineSpacing: CGFloat = 7                              // ≈1.46 line-height at 15pt
+    static let readMeasure: CGFloat = 680                                // max line length (40–75 chars)
+    static let readMargin: CGFloat = 24                                  // = xl; wider than dashboard
+
     // MARK: - Spacing (4px grid)
 
     static let xs: CGFloat = 4

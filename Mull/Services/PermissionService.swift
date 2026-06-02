@@ -53,15 +53,29 @@ final class PermissionService: ObservableObject {
         accessibilityGranted = AXIsProcessTrusted() || accessibilityAPIEnabled()
     }
 
-    /// Empirical probe: is the Accessibility API actually usable right now?
+    /// Empirical probe: is CROSS-APP Accessibility actually usable right now?
+    /// Must read a DIFFERENT app — reading our own process's AX never requires the
+    /// permission, so probing self (often frontmost right after launch) would
+    /// false-positive and wrongly suppress the grant prompt. This is exactly what
+    /// made window-title capture silently stay dead.
     private func accessibilityAPIEnabled() -> Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        var value: CFTypeRef?
-        let err = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value)
-        // Denied → .apiDisabled / .notImplemented. Granted → .success / .noValue /
-        // .attributeUnsupported (a real read that just had nothing to return).
-        return err != .apiDisabled && err != .notImplemented
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        for app in NSWorkspace.shared.runningApplications
+        where app.activationPolicy == .regular && app.processIdentifier > 0
+            && app.processIdentifier != myPID {
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            var value: CFTypeRef?
+            let err = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value)
+            switch err {
+            case .success, .noValue, .attributeUnsupported:
+                return true            // the API answered for another app → we have access
+            case .apiDisabled, .notImplemented:
+                return false           // definitively no access
+            default:
+                continue               // inconclusive for this app; try the next
+            }
+        }
+        return false                   // couldn't get a definitive yes → assume not granted
     }
 
     /// Actively trigger the system "grant Accessibility?" dialog (shown once when

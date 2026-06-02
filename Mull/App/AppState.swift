@@ -48,6 +48,7 @@ final class AppState: ObservableObject {
     let calendar: CalendarService
     let email: EmailService
     let proactive: ProactiveEngine
+    let proactiveLoop: ProactiveLoop
     let ingestion: IngestionService
 
     private var refreshTimer: Timer?
@@ -78,6 +79,9 @@ final class AppState: ObservableObject {
         self.calendar = CalendarService()
         self.email = EmailService(database: database)
         self.proactive = ProactiveEngine(database: database, calendar: calendar, analytics: analytics)
+        // The self-driving proactive loop (DIRECTION §7): anchor → select → judge
+        // → write-back → notify, fired on project switches.
+        self.proactiveLoop = ProactiveLoop(database: database)
         // Phase B ingestion — pulls from configured MCP sources. No-op until the
         // user registers a source (no surprise network access).
         self.ingestion = IngestionService.fromConfiguredSources()
@@ -189,6 +193,8 @@ final class AppState: ObservableObject {
         let frontWindow = recorder.currentWindowTitlePublic
         let browserURL = recorder.lastBrowserURLPublic
         proactive.tick(todayEventCount: todayEventCount, currentApp: frontApp, currentWindow: frontWindow, browserURL: browserURL)
+        // Self-driving loop: fires a brief when you switch projects (throttled).
+        proactiveLoop.tick()
 
         // DB reads + file generation on background thread
         let db = database
@@ -230,6 +236,15 @@ final class AppState: ObservableObject {
         email.start()
         isRecording = true
         isRecordingDegraded = false
+
+        // Window-title capture (the entity anchor for the selection layer + the
+        // proactive loop) needs Accessibility. If it isn't granted, actively show
+        // the system dialog instead of silently capturing half-dead — otherwise
+        // titles come back nil and the loop has no material. Harmless when already
+        // trusted (the dialog only appears when not).
+        if !permissions.accessibilityGranted {
+            permissions.promptAccessibility()
+        }
     }
 
     func stopRecording() {

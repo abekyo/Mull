@@ -12,6 +12,9 @@ import SwiftUI
 struct MenuBarPanel: View {
     @EnvironmentObject var appState: AppState
     @State private var showCopied = false
+    @State private var captureText = ""
+    @State private var captureSaved = false
+    @FocusState private var captureFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +28,13 @@ struct MenuBarPanel: View {
             statusRow
                 .padding(.horizontal, DS.lg)
                 .padding(.vertical, DS.md)
+
+            Divider()
+
+            // Quick capture — frictionless drop into the vault (Crane MD 摩擦ゼロ捕捉)
+            captureRow
+                .padding(.horizontal, DS.lg)
+                .padding(.vertical, DS.sm)
 
             Divider()
 
@@ -80,6 +90,42 @@ struct MenuBarPanel: View {
             }
         }
         .frame(width: DS.panelWidth)
+    }
+
+    // MARK: - Quick Capture
+
+    /// One focused field. Type a thought, press Return, it's in `09_inbox/captures.md`.
+    /// No file picker, no destination prompt, no save button — capture stays cheap so
+    /// it actually gets used. mull routes it later.
+    private var captureRow: some View {
+        HStack(spacing: DS.sm) {
+            Image(systemName: captureSaved ? "checkmark.circle.fill" : "square.and.pencil")
+                .font(DS.bodyFont)
+                .foregroundStyle(captureSaved ? DS.recording : DS.moon)
+
+            TextField("Capture a thought…", text: $captureText)
+                .textFieldStyle(.plain)
+                .font(DS.bodyFont)
+                .focused($captureFocused)
+                .onSubmit(commitCapture)
+
+            if !captureText.isEmpty {
+                Text("↵")
+                    .font(DS.microFont)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .onAppear { captureFocused = true }
+    }
+
+    private func commitCapture() {
+        guard QuickCapture.append(captureText) else { return }
+        captureText = ""
+        withAnimation(.spring(duration: 0.2)) { captureSaved = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.spring(duration: 0.2)) { captureSaved = false }
+        }
+        captureFocused = true
     }
 
     // MARK: - Status Row

@@ -106,11 +106,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "mull"
+        window.title = ""
         window.contentViewController = controller
-        // Night canvas + a quiet, integrated title bar.
+        // Night canvas + a quiet, integrated title bar with no visible title text.
         window.backgroundColor = NSColor(red: 0.039, green: 0.047, blue: 0.078, alpha: 1)
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.appearance = NSAppearance(named: .darkAqua)
         window.center()
         window.setFrameAutosaveName("MullMainWindow")
@@ -118,6 +119,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
 
         self.mainWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Settings Window
+    //
+    // The SwiftUI `Settings` scene's `showSettingsWindow:` action doesn't reliably
+    // fire for this menu-bar app whose main window is a custom NSWindow. So we host
+    // SettingsView in our own NSWindow, exactly like the main window.
+    var settingsWindow: NSWindow?
+
+    func showSettings() {
+        if let existing = settingsWindow {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        guard let appState else { return }
+        let view = SettingsView()
+            .environmentObject(appState)
+            .preferredColorScheme(.dark)
+        let controller = NSHostingController(rootView: view)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Settings"
+        window.contentViewController = controller
+        window.backgroundColor = NSColor(red: 0.039, green: 0.047, blue: 0.078, alpha: 1)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        self.settingsWindow = window
         NSApp.activate(ignoringOtherApps: true)
     }
 

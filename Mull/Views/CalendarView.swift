@@ -104,12 +104,11 @@ struct CalendarWeekView: View {
         VStack(spacing: 0) {
             dayHeader
             Divider()
+            dayTwoColumnHeaders   // SCHEDULED | ACTIVITY
+            Divider()
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    HStack(alignment: .top, spacing: 0) {
-                        timeLabels
-                        dayColumn(date: selectedDay)
-                    }
+                    dayTimeline
                 }
                 .onAppear {
                     loadDay()
@@ -118,6 +117,85 @@ struct CalendarWeekView: View {
                 }
             }
         }
+    }
+
+    /// Column headers: real calendar (left) vs what mull observed you doing (right).
+    private var dayTwoColumnHeaders: some View {
+        HStack(spacing: 0) {
+            Spacer().frame(width: timeColumnWidth)
+            columnHeader("SCHEDULED", icon: "calendar")
+            columnHeader("ACTIVITY", icon: "waveform")
+        }
+        .padding(.vertical, DS.xs)
+    }
+
+    private func columnHeader(_ title: String, icon: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 9))
+            Text(title).font(DS.miniFont).tracking(1.2)
+        }
+        .foregroundStyle(DS.inkFaint)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Hour gutter + two parallel timelines on the same time axis:
+    /// left = real EventKit events, right = mull's captured activity blocks.
+    private var dayTimeline: some View {
+        let dayKey = Calendar.current.startOfDay(for: selectedDay)
+        let blocks = weekBlocks[dayKey] ?? []
+        let events = weekEvents[dayKey] ?? []
+        let isToday = Calendar.current.isDateInToday(selectedDay)
+        return HStack(alignment: .top, spacing: 0) {
+            timeLabels
+            timelineColumn(isToday: isToday, isEmpty: events.isEmpty, emptyText: "No events") {
+                GeometryReader { geo in
+                    ForEach(events) { event in
+                        calendarEventView(event: event, width: max(geo.size.width - 6, 12))
+                            .offset(x: 3, y: yOffsetForDate(event.start))
+                    }
+                }
+            }
+            Divider()
+            timelineColumn(isToday: isToday, isEmpty: blocks.isEmpty, emptyText: "No activity recorded") {
+                GeometryReader { geo in
+                    ForEach(blocks) { block in
+                        blockView(block: block, width: max(geo.size.width - 6, 12))
+                            .offset(x: 3, y: yOffset(for: block))
+                    }
+                }
+            }
+        }
+    }
+
+    /// One timeline column: hour grid lines + positioned content + now-line + empty hint.
+    private func timelineColumn<Content: View>(
+        isToday: Bool, isEmpty: Bool, emptyText: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let totalHeight = CGFloat(hourEnd - hourStart) * hourHeight
+        return ZStack(alignment: .topLeading) {
+            if isToday { Rectangle().fill(DS.moon.opacity(0.03)) }
+            VStack(spacing: 0) {
+                ForEach(hourStart..<hourEnd, id: \.self) { _ in
+                    Color.clear.frame(height: hourHeight)
+                        .overlay(alignment: .top) {
+                            Rectangle().fill(DS.hairline).frame(height: 0.5)
+                        }
+                }
+            }
+            content()
+            if isToday { nowIndicator }
+            if isEmpty {
+                Text(emptyText)
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, hourHeight * 9)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: totalHeight)
+        .clipped()
     }
 
     private var dayHeader: some View {
