@@ -49,15 +49,22 @@ enum Curator {
 
     /// Merge agent blocks into `relativePath`, preserving pinned/human content, and
     /// write the result. The ONLY sanctioned writer for curated files.
+    ///
+    /// `managedPrefixes`: id-prefixes this caller exclusively owns (e.g. the 60s
+    /// me.md pass owns `["fact:", "mem:", "pref:"]`). For those prefixes, an
+    /// existing agent block that is NOT in `agentBlocks` is stale — mull stopped
+    /// emitting it — and is pruned, so a re-classified fact (e.g. "Bilingual" →
+    /// "Primary language") never leaves a contradicting leftover. Pass `[]` to
+    /// keep the old never-prune behaviour (MEMORY.md and others).
     @discardableResult
-    static func curate(relativePath: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock]) -> Bool {
+    static func curate(relativePath: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock], managedPrefixes: [String] = []) -> Bool {
         let existing = MullDirectory.read(relativePath) ?? ""
-        let merged = merge(existing: existing, header: header, pinnedContent: pinnedContent, agentBlocks: agentBlocks)
+        let merged = merge(existing: existing, header: header, pinnedContent: pinnedContent, agentBlocks: agentBlocks, managedPrefixes: managedPrefixes)
         return MullDirectory.write(merged, to: relativePath)
     }
 
     /// Pure merge (no I/O) so it can be unit-tested.
-    static func merge(existing: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock]) -> String {
+    static func merge(existing: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock], managedPrefixes: [String] = []) -> String {
         let pinnedID = "pinned-facts"
         var (_, existingBlocks) = ContextBlockFile.parse(existing)
 
@@ -101,7 +108,49 @@ enum Curator {
             }
         }
 
+        // 4. Within the prefixes this caller manages, prune mull's own stale
+        //    blocks (no longer emitted) and drop a bare block subsumed by a
+        //    richer one. Human/pinned blocks are never touched.
+        if !managedPrefixes.isEmpty {
+            let candidateIDs = Set(agentBlocks.map(\.id))
+            result.removeAll { b in
+                b.source == .agent
+                    && managedPrefixes.contains(where: { b.id.hasPrefix($0) })
+                    && !candidateIDs.contains(b.id)
+            }
+            result = dropSubsumedAgentBlocks(result)
+        }
+
         return ContextBlockFile.serialize(header: header, blocks: result)
+    }
+
+    /// Drop an agent block whose text is a word-boundary prefix of another
+    /// block's text — keep the richer one (e.g. "- Software developer" is
+    /// removed in favour of "- Software developer (primary tools: …)"). Never
+    /// drops a human/pinned block.
+    private static func dropSubsumedAgentBlocks(_ blocks: [ContextBlock]) -> [ContextBlock] {
+        func body(_ s: String) -> String {
+            var t = s
+            if t.hasPrefix("- ") { t = String(t.dropFirst(2)) }
+            return t.trimmingCharacters(in: .whitespaces)
+        }
+        let bodies = blocks.map { body($0.content) }
+        var keep: [ContextBlock] = []
+        for (i, block) in blocks.enumerated() {
+            if block.source == .agent, !bodies[i].isEmpty {
+                let a = bodies[i]
+                var subsumed = false
+                for (j, b) in bodies.enumerated() where j != i {
+                    if b.count > a.count, b.hasPrefix(a) {
+                        let next = b[b.index(b.startIndex, offsetBy: a.count)]
+                        if next == " " || next == "(" { subsumed = true; break }
+                    }
+                }
+                if subsumed { continue }
+            }
+            keep.append(block)
+        }
+        return keep
     }
 
     // MARK: - Agent block builders (shared id conventions)

@@ -59,6 +59,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
 
+        // Nocturne: the whole app lives on the night canvas, regardless of the
+        // system light/dark setting.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
         if !hasCompletedOnboarding {
@@ -92,6 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let appState else { return }
         let view = FullWindowView()
             .environmentObject(appState)
+            .preferredColorScheme(.dark)
 
         let controller = NSHostingController(rootView: view)
 
@@ -103,6 +108,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "mull"
         window.contentViewController = controller
+        // Night canvas + a quiet, integrated title bar.
+        window.backgroundColor = NSColor(red: 0.039, green: 0.047, blue: 0.078, alpha: 1)
+        window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named: .darkAqua)
         window.center()
         window.setFrameAutosaveName("MullMainWindow")
         window.isReleasedWhenClosed = false

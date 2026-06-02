@@ -42,6 +42,8 @@ final class MCPClient {
     private let timeout: TimeInterval
     private var process: Process?
     private var stdin: FileHandle?
+    private var outPipe: Pipe?
+    private var errPipe: Pipe?
     private var reader: LineReader?
     private var nextID = 0
 
@@ -59,6 +61,15 @@ final class MCPClient {
         var data = (try? JSONSerialization.data(withJSONObject: msg)) ?? Data()
         data.append(0x0A) // newline
         return data
+    }
+
+    /// Does a JSON-RPC response id (Int, NSNumber, or String) equal the int id we
+    /// sent? Tolerant of how different servers echo ids back.
+    static func idMatches(_ responseID: Any?, _ sent: Int) -> Bool {
+        if let i = responseID as? Int { return i == sent }
+        if let n = responseID as? NSNumber { return n.intValue == sent }
+        if let s = responseID as? String { return s == String(sent) }
+        return false
     }
 
     /// Extract the concatenated text from an MCP `tools/call` result
@@ -85,10 +96,10 @@ final class MCPClient {
             proc.environment = env
         }
 
-        let inPipe = Pipe(), outPipe = Pipe()
+        let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
         proc.standardInput = inPipe
         proc.standardOutput = outPipe
-        proc.standardError = Pipe() // swallow server logs
+        proc.standardError = errPipe // swallow server logs
 
         do {
             try proc.run()
@@ -98,6 +109,8 @@ final class MCPClient {
 
         self.process = proc
         self.stdin = inPipe.fileHandleForWriting
+        self.outPipe = outPipe
+        self.errPipe = errPipe
         self.reader = LineReader(handle: outPipe.fileHandleForReading)
 
         // initialize → result, then notifications/initialized
@@ -125,8 +138,22 @@ final class MCPClient {
     }
 
     func shutdown() {
+        // Order matters: close stdin + terminate so the child exits, which EOFs
+        // our read end and unblocks the LineReader's detached read; waitUntilExit
+        // reaps the zombie; then we can safely close the (now idle) pipe handles.
+        // Without this, every pull leaked file descriptors, a zombie process, and
+        // a global-queue thread blocked in availableData.
         try? stdin?.close()
-        process?.terminate()
+        if let process, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
+        try? outPipe?.fileHandleForReading.close()
+        try? errPipe?.fileHandleForReading.close()
+        stdin = nil
+        reader = nil
+        outPipe = nil
+        errPipe = nil
         process = nil
     }
 
@@ -151,8 +178,10 @@ final class MCPClient {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { continue } // skip non-JSON / log noise
 
-            // Match our request id; ignore notifications and other ids.
-            if let respID = obj["id"] as? Int, respID == id {
+            // Match our request id; ignore notifications and other ids. JSON-RPC
+            // allows string ids, so don't only match Int (a server echoing "1"
+            // would otherwise never match → every call hangs to timeout).
+            if MCPClient.idMatches(obj["id"], id) {
                 if let err = obj["error"] as? [String: Any] {
                     throw MCPClientError.rpc(err["message"] as? String ?? "unknown")
                 }

@@ -238,25 +238,10 @@ struct FactExtractor {
     // MARK: - Work Patterns
 
     private func extractWorkPatternFacts(days: Int) -> [Fact] {
-        var facts: [Fact] = []
-
-        let peaks = analytics.peakHours(days: days)
-        if !peaks.isEmpty {
-            let peakStr = peaks.map { "\($0):00" }.joined(separator: ", ")
-            facts.append(Fact(.patterns, "Most productive hours: \(peakStr)"))
-        }
-
-        // Only claim a busiest/quietest day once enough weekdays have data —
-        // otherwise "quietest" is just a day that hasn't occurred yet.
-        let weekday = analytics.weekdayPattern(days: 30)
-        let daysWithData = weekday.filter { $0.eventCount > 0 }.count
-        let busiest = weekday.max(by: { $0.eventCount < $1.eventCount })
-        let quietest = weekday.min(by: { $0.eventCount < $1.eventCount })
-        if daysWithData >= 4, let b = busiest, let q = quietest, b.name != q.name, b.eventCount > 0 {
-            facts.append(Fact(.patterns, "Busiest day: \(b.name), quietest: \(q.name)"))
-        }
-
-        return facts
+        // Removed: "Most productive hours" and "Busiest day" were dashboard
+        // analytics, not context — they don't change an AI's answer. (Peak hours
+        // can still drive proactive timing in the Insights UI; just not me.md.)
+        return []
     }
 
     // MARK: - Tool Preferences
@@ -265,11 +250,10 @@ struct FactExtractor {
         let apps = analytics.appUsage(days: days)
         var facts: [Fact] = []
 
-        // Browser preference
+        // Browser preference removed — which browser someone uses doesn't change
+        // an AI's answer to a task. (Kept the browser list to exclude browsers
+        // from the "primary tools" signal below.)
         let browsers = ["Safari", "Firefox", "Chrome", "Google Chrome", "Arc", "Brave Browser", "Edge"]
-        if let primaryBrowser = apps.first(where: { browsers.contains($0.appName) }) {
-            facts.append(Fact(.skills, "Primary browser: \(primaryBrowser.appName)"))
-        }
 
         // Primary work tools — not just "code editors" but whatever they use most
         let workApps = apps

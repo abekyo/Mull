@@ -53,9 +53,11 @@ struct MCPConnector: IngestionConnector {
         return try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .utility).async {
                 let client = MCPClient(config: cfg.server)
+                // Register cleanup BEFORE connect so a failed connect (spawned
+                // process, opened pipes) is still torn down — not leaked.
+                defer { client.shutdown() }
                 do {
                     try client.connect()
-                    defer { client.shutdown() }
                     let text = try client.callTool(cfg.tool, arguments: cfg.arguments)
                     cont.resume(returning: MCPConnector.mapItems(text, source: connectorID))
                 } catch {
@@ -78,7 +80,7 @@ struct MCPConnector: IngestionConnector {
                 let title = obj["title"] as? String ?? obj["subject"] as? String ?? "(untitled)"
                 let summary = obj["summary"] as? String ?? obj["snippet"] as? String ?? ""
                 let id = obj["id"] as? String ?? "\(source):\(stableHash(title + summary))-\(idx)"
-                let ts = (obj["timestamp"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
+                let ts = MCPConnector.parseTimestamp(obj["timestamp"] as? String)
                 return IngestedItem(id: id, timestamp: ts ?? .distantPast,
                                     source: source, title: title, summary: summary)
             }
@@ -89,6 +91,22 @@ struct MCPConnector: IngestionConnector {
                              timestamp: .distantPast, source: source,
                              title: "\(source) pull", summary: trimmed)]
     }
+
+    /// Parse an ISO-8601 timestamp, tolerating fractional seconds (e.g. Gmail's
+    /// `…:00.123Z`). A plain `ISO8601DateFormatter` rejects those, which used to
+    /// collapse valid timestamps to `.distantPast` (wrong order, lost time).
+    static func parseTimestamp(_ s: String?) -> Date? {
+        guard let s, !s.isEmpty else { return nil }
+        if let d = isoFractional.date(from: s) { return d }
+        return isoPlain.date(from: s)
+    }
+
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
 
     /// Deterministic FNV-1a hash (stable across runs, unlike Hasher).
     private static func stableHash(_ s: String) -> String {

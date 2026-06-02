@@ -320,10 +320,16 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v4_lock_acquired_at") { db in
+            try db.alter(table: "mull_lock") { t in
+                t.add(column: "acquiredAt", .datetime)
+            }
+        }
+
         // ── Future migrations go here ──
         // Example:
         //
-        // migrator.registerMigration("v4_add_event_source") { db in
+        // migrator.registerMigration("v5_add_event_source") { db in
         //     try db.alter(table: "recording_events") { t in
         //         t.add(column: "source", .text).defaults(to: "local")
         //     }

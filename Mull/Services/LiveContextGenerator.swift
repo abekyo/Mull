@@ -92,8 +92,12 @@ enum LiveContextGenerator {
         }
 
         let header = "About the user (auto-updated: \(timestamp)).\nPinned/edited blocks are authoritative; agent blocks are rule-based and may be inaccurate — correct them in place or in me.pinned.md."
+        // This pass owns all fact/memory/preference blocks → prune stale ones
+        // (e.g. a previous run's "Bilingual" once the verdict becomes
+        // "Primary language") instead of letting them pile up and contradict.
         Curator.curate(relativePath: "me.md", header: header,
-                       pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks)
+                       pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks,
+                       managedPrefixes: ["fact:", "mem:", "pref:"])
     }
 
     // MARK: - now.md (~500 tokens) — What you're working on
@@ -109,6 +113,32 @@ enum LiveContextGenerator {
         var lines: [String] = []
         lines.append("What the user is currently working on (\(timestamp)):")
         lines.append("")
+
+        // In progress / Resume — the single most useful signal for an AI: what
+        // you're working on right now and where to pick up. Derived from real
+        // activity (window titles → projects), not from stale memories.
+        // App names with no file are just "you had Code focused" — not a project;
+        // keep only entries with a real file, or a non-app project name.
+        let appNames: Set<String> = [
+            "Code", "Visual Studio Code", "Xcode", "Claude", "ChatGPT", "Firefox",
+            "Safari", "Chrome", "Google Chrome", "Arc", "Brave Browser", "Terminal",
+            "iTerm2", "Warp", "Ghostty", "Finder", "Mail", "Slack", "Discord",
+            "Notion", "Notes", "Preview", "Simulator",
+        ]
+        let inProgress = TimeBlockEngine(database: database).projectSnapshots(days: 7)
+            .filter { $0.daysSinceActive <= 2 }
+            .filter { $0.lastFile != nil || !appNames.contains($0.name) }
+        if let current = inProgress.first {
+            lines.append("In progress:")
+            for p in inProgress.prefix(4) {
+                var line = "- \(p.name) (\(p.lastActiveFormatted), \(p.totalDurationFormatted))"
+                if let file = p.lastFile, !file.isEmpty { line += " — last in \(file)" }
+                lines.append(line)
+            }
+            let resume = current.lastFile.map { "\(current.name) — \($0)" } ?? current.name
+            lines.append("Resume point: \(resume)")
+            lines.append("")
+        }
 
         // Active projects from memories
         let projects = memories.filter { $0.memoryType == .project }
@@ -146,7 +176,11 @@ enum LiveContextGenerator {
             let rawTitles = todayEvents
                 .filter { $0.eventType == .screenText }
                 .compactMap(\.textContent)
-                .filter { !$0.isEmpty && !isMullOutput($0) }
+                // Drop mull's own output, private-browsing titles (defense-in-depth
+                // for anything captured before the recorder filtered them), and
+                // synthetic test input.
+                .filter { !$0.isEmpty && !isMullOutput($0)
+                    && !PrivateBrowsing.isPrivate($0) && !TestInput.isLikelyTestInput($0) }
 
             let compressed = compress(rawTitles)
 
@@ -165,20 +199,9 @@ enum LiveContextGenerator {
                 lines.append("")
             }
 
-            // App usage today (filter system processes)
-            let systemApps = Set(["loginwindow", "universalAccessAuthWarn", "SecurityAgent",
-                                   "UserNotificationCenter", "NotificationCenter", "Spotlight",
-                                   "System Settings", "SystemPreferences", "Finder"])
-            let appGroups = Dictionary(grouping: todayEvents) { $0.appName ?? "Unknown" }
-                .filter { !systemApps.contains($0.key) }
-                .sorted { $0.value.count > $1.value.count }
-            if !appGroups.isEmpty {
-                lines.append("App usage today:")
-                for (app, events) in appGroups.prefix(5) {
-                    lines.append("- \(app): \(events.count) events")
-                }
-                lines.append("")
-            }
+            // NOTE: app-usage event counts were intentionally removed — they're
+            // dashboard analytics (for the Insights UI), not context that changes
+            // an AI's answer. now.md carries only signal: who/now/tried/constraints.
         }
 
         // Recent summaries (if mull has run before)
@@ -190,49 +213,11 @@ enum LiveContextGenerator {
             lines.append("")
         }
 
-        // Narrative of today (framed as a story, not a data dump)
-        let timeEngine = TimeBlockEngine(database: database)
-        let dayAnalysis = timeEngine.analyzDay(for: Date())
-        if !dayAnalysis.mainActivities.isEmpty {
-            let narrator = NarrativeEngine(
-                analysis: dayAnalysis,
-                analytics: analytics,
-                database: database
-            )
-            let narrative = narrator.generateNarrative()
-            // The opening line duplicates the "Recent days" preview above,
-            // so skip it when summaries exist to avoid repetition.
-            if !summaries.isEmpty {
-                let withoutOpening = narrative
-                    .components(separatedBy: "\n")
-                    .dropFirst() // Remove the opening line
-                    .joined(separator: "\n")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !withoutOpening.isEmpty {
-                    lines.append(withoutOpening)
-                    lines.append("")
-                }
-            } else {
-                lines.append(narrative)
-                lines.append("")
-            }
-        }
-
-        // Behavioral patterns (analytics)
-        let analyticsPatterns = analytics.generatePatternSummary(days: 7)
-        if !analyticsPatterns.isEmpty {
-            lines.append(analyticsPatterns)
-        }
-
-        // Self-awareness patterns (behavior engine)
-        let behaviorPatterns = BehaviorPatternEngine(database: database).detectPatterns()
-        if !behaviorPatterns.isEmpty {
-            lines.append("")
-            lines.append("Behavioral patterns (things the user can't see about themselves):")
-            for p in behaviorPatterns.prefix(3) {
-                lines.append("- \(p.title): \(p.insight)")
-            }
-        }
+        // NOTE: the day "narrative" ("A focused day…"), the keyword/topic cloud,
+        // and behavior-pattern insights were removed from now.md. They are vague
+        // or analytics-grade — they don't change an AI's next answer, and the
+        // topic cloud surfaced email boilerplate ("ご確認のほど") as "focus topics".
+        // Those belong in the Insights UI, not the AI context.
 
         // References
         let refs = memories.filter { $0.memoryType == .reference }
@@ -256,9 +241,10 @@ enum LiveContextGenerator {
     private static func generateFull(database: DatabaseService, analytics: AnalyticsEngine, timestamp: String) throws {
         var parts: [String] = []
 
-        // me.md + now.md
-        if let me = MullDirectory.read("me.md") { parts.append(me) }
-        if let now = MullDirectory.read("now.md") { parts.append(now) }
+        // me.md + now.md — strip Curator provenance markers; full.md is read by
+        // humans and AIs, not round-tripped by the Curator.
+        if let me = MullDirectory.read("me.md") { parts.append(ContextBlockFile.stripMarkers(me)) }
+        if let now = MullDirectory.read("now.md") { parts.append(ContextBlockFile.stripMarkers(now)) }
 
         // Clipboard grouped by project/context — the "pagpag dish"
         let calendar = Calendar.current

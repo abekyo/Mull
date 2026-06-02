@@ -363,7 +363,7 @@ final class AppState: ObservableObject {
     /// Build context text from mull files. Reads from disk on a background thread.
     private func buildContextText() async -> String {
         await Task.detached {
-            let text: String
+            var text: String
             if let fullContent = MullDirectory.read("full.md"), fullContent.count > 50 {
                 text = fullContent
             } else {
@@ -371,6 +371,8 @@ final class AppState: ObservableObject {
                     .filter { !$0.isEmpty }
                 text = parts.isEmpty ? "" : parts.joined(separator: "\n\n")
             }
+            // Never export Curator provenance markers to an AI/clipboard.
+            text = ContextBlockFile.stripMarkers(text)
 
             let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
             return (maxChars > 0 && text.count > maxChars) ? String(text.prefix(maxChars)) : text

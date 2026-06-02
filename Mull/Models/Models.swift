@@ -155,6 +155,10 @@ struct mullLock: Codable, FetchableRecord, PersistableRecord {
     var id: Int64?
     var lastSummaryAt: Date?
     var holderPID: Int32?
+    /// When the current holder acquired the lock. Staleness is measured from
+    /// THIS, not `lastSummaryAt` (last *success*), so a live, long-running pass
+    /// isn't wrongly reclaimed into a second concurrent run.
+    var acquiredAt: Date?
     var sessionsSinceLast: Int
 
     static let databaseTableName = "mull_lock"

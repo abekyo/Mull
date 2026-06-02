@@ -17,12 +17,50 @@ struct CalendarWeekView: View {
     @State private var weekEvents: [Date: [CalendarEvent]] = [:]
     @State private var popoverBlock: TimeBlock?
 
+    enum CalMode: String, CaseIterable { case week = "Week", month = "Month" }
+    @State private var mode: CalMode = .week
+    @State private var monthOffset: Int = 0
+    @State private var monthData: [Date: (duration: TimeInterval, label: String)] = [:]
+
     private let hourStart = 0
     private let hourEnd = 24
     private let hourHeight: CGFloat = 50
     private let timeColumnWidth: CGFloat = 48
 
     var body: some View {
+        VStack(spacing: 0) {
+            modeBar
+            Divider()
+            if mode == .week {
+                weekContent
+            } else {
+                monthContent
+            }
+        }
+        .onChange(of: weekOffset) { _, _ in loadWeek() }
+        .onChange(of: monthOffset) { _, _ in loadMonth() }
+        .onChange(of: mode) { _, m in if m == .month { loadMonth() } else { loadWeek() } }
+        .popover(item: $popoverBlock) { block in
+            blockDetail(block)
+        }
+    }
+
+    /// Week | Month segmented switch.
+    private var modeBar: some View {
+        HStack {
+            Picker("", selection: $mode) {
+                ForEach(CalMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 160)
+            Spacer()
+        }
+        .padding(.horizontal, DS.xl)
+        .padding(.vertical, DS.sm)
+    }
+
+    private var weekContent: some View {
         VStack(spacing: 0) {
             weekHeader
             Divider()
@@ -35,15 +73,10 @@ struct CalendarWeekView: View {
                 }
                 .onAppear {
                     loadWeek()
-                    // Scroll to current hour - 1 (show context before now)
                     let scrollHour = max(Calendar.current.component(.hour, from: Date()) - 1, 0)
                     proxy.scrollTo(scrollHour, anchor: .top)
                 }
             }
-        }
-        .onChange(of: weekOffset) { _, _ in loadWeek() }
-        .popover(item: $popoverBlock) { block in
-            blockDetail(block)
         }
     }
 
@@ -434,6 +467,161 @@ struct CalendarWeekView: View {
         let f = DateFormatter()
         f.dateFormat = "d"
         return f.string(from: date)
+    }
+}
+
+// MARK: - Month View
+
+extension CalendarWeekView {
+
+    var monthContent: some View {
+        VStack(spacing: 0) {
+            monthHeader
+            Divider()
+            monthWeekdayRow
+            monthGrid
+                .onAppear { loadMonth() }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var monthHeader: some View {
+        HStack {
+            Button { monthOffset -= 1 } label: { Image(systemName: "chevron.left").font(DS.bodyFont) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+            Spacer()
+            Text(monthLabel).font(DS.titleFont)
+            if monthOffset != 0 {
+                Button("Today") { monthOffset = 0 }
+                    .font(DS.captionFont).buttonStyle(.bordered).controlSize(.small)
+                    .padding(.leading, DS.sm)
+            }
+            Spacer()
+            Button { monthOffset += 1 } label: { Image(systemName: "chevron.right").font(DS.bodyFont) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .disabled(monthOffset >= 0)
+        }
+        .padding(.horizontal, DS.xl)
+        .padding(.vertical, DS.sm)
+    }
+
+    private var monthWeekdayRow: some View {
+        HStack(spacing: 0) {
+            ForEach(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], id: \.self) { d in
+                Text(d).font(DS.miniFont).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, DS.xs)
+    }
+
+    private var monthGrid: some View {
+        let days = monthGridDays
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 1), count: 7)
+        return LazyVGrid(columns: cols, spacing: 1) {
+            ForEach(days, id: \.self) { date in
+                monthCell(date)
+            }
+        }
+        .padding(.horizontal, DS.md)
+        .padding(.top, DS.sm)
+    }
+
+    private func monthCell(_ date: Date) -> some View {
+        let cal = Calendar.current
+        let key = cal.startOfDay(for: date)
+        let inMonth = cal.component(.month, from: date) == cal.component(.month, from: displayedMonth)
+        let isToday = cal.isDateInToday(date)
+        let info = monthData[key]
+        let hasActivity = (info?.duration ?? 0) > 60
+
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                if isToday {
+                    Text(dayNum(date)).font(DS.smallMedium).foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(DS.moon))
+                } else {
+                    Text(dayNum(date)).font(DS.smallFont)
+                        .foregroundStyle(inMonth ? DS.ink : DS.inkFaint)
+                }
+                Spacer()
+                if hasActivity { Circle().fill(DS.moon).frame(width: 5, height: 5) }
+            }
+            if hasActivity, let info {
+                Text(info.label).font(DS.miniFont).foregroundStyle(DS.inkDim).lineLimit(1)
+                Text(formatDur(info.duration)).font(DS.tinyFont).foregroundStyle(DS.inkFaint)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(6)
+        .frame(height: 76, alignment: .topLeading)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 6).fill(isToday ? DS.moon.opacity(0.06) : DS.surface))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(DS.hairline, lineWidth: 0.5))
+        .opacity(inMonth ? 1 : 0.45)
+        .onTapGesture { jumpToWeek(of: date) }
+    }
+
+    // MARK: Month data
+
+    var displayedMonth: Date {
+        let cal = Calendar.current
+        let base = cal.date(from: cal.dateComponents([.year, .month], from: Date())) ?? Date()
+        return cal.date(byAdding: .month, value: monthOffset, to: base) ?? base
+    }
+
+    private var monthLabel: String {
+        let f = DateFormatter(); f.dateFormat = "MMMM yyyy"
+        return f.string(from: displayedMonth)
+    }
+
+    /// 42 days (6 weeks) covering the month, starting on the Monday of the first week.
+    private var monthGridDays: [Date] {
+        let cal = Calendar.current
+        let firstOfMonth = displayedMonth
+        let weekday = cal.component(.weekday, from: firstOfMonth)
+        let daysFromMonday = (weekday + 5) % 7
+        guard let start = cal.date(byAdding: .day, value: -daysFromMonday, to: firstOfMonth) else { return [] }
+        return (0..<42).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+    }
+
+    func loadMonth() {
+        let engine = TimeBlockEngine(database: appState.database)
+        let cal = Calendar.current
+        var result: [Date: (duration: TimeInterval, label: String)] = [:]
+        for date in monthGridDays {
+            // Don't compute the future.
+            if cal.startOfDay(for: date) > cal.startOfDay(for: Date()) { continue }
+            let blocks = engine.generateBlocks(for: date)
+            guard !blocks.isEmpty else { continue }
+            let total = blocks.reduce(0.0) { $0 + $1.duration }
+            let main = blocks.max(by: { $0.duration < $1.duration })
+            let label = (main?.label.isEmpty == false ? main?.label : main?.app) ?? ""
+            result[cal.startOfDay(for: date)] = (total, label)
+        }
+        monthData = result
+    }
+
+    private func jumpToWeek(of date: Date) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let target = cal.startOfDay(for: date)
+        let days = cal.dateComponents([.day], from: today, to: target).day ?? 0
+        weekOffset = Int((Double(days) / 7).rounded(.towardZero))
+        mode = .week
+    }
+
+    private func dayNum(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "d"
+        return f.string(from: date)
+    }
+
+    private func formatDur(_ d: TimeInterval) -> String {
+        let m = Int(d / 60)
+        if m < 60 { return "\(m)m" }
+        let h = m / 60, rem = m % 60
+        return rem > 0 ? "\(h)h\(rem)m" : "\(h)h"
     }
 }
 

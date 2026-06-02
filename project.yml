@@ -50,6 +50,12 @@ targets:
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         ENABLE_HARDENED_RUNTIME: false
         GENERATE_INFOPLIST_FILE: true
+        # Stable Development signing so macOS TCC grants (Calendar, Accessibility,
+        # Input Monitoring) persist across rebuilds instead of re-prompting.
+        # Select the cert by SHA-1 hash to avoid team-matching ambiguity; local
+        # macOS dev runs need no provisioning profile.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "B93835093E7812B2DB6A799E9C7101312A4C499E"
 
   MullTests:
     type: bundle.unit-test

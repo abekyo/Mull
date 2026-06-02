@@ -34,14 +34,25 @@ final class CalendarService {
         requestAccess()
     }
 
+    /// Only prompt when the decision hasn't been made yet. On later launches we
+    /// read the existing status instead of calling request again, so a granted
+    /// permission is never re-prompted (when the build's code signature is stable).
     private func requestAccess() {
-        if #available(macOS 14.0, *) {
-            store.requestFullAccessToEvents { granted, _ in
-                self.hasAccess = granted
+        let status = EKEventStore.authorizationStatus(for: .event)
+        switch status {
+        case .notDetermined:
+            if #available(macOS 14.0, *) {
+                store.requestFullAccessToEvents { granted, _ in self.hasAccess = granted }
+            } else {
+                store.requestAccess(to: .event) { granted, _ in self.hasAccess = granted }
             }
-        } else {
-            store.requestAccess(to: .event) { granted, _ in
-                self.hasAccess = granted
+        case .authorized:
+            hasAccess = true
+        default:
+            if #available(macOS 14.0, *) {
+                hasAccess = (status == .fullAccess)
+            } else {
+                hasAccess = false
             }
         }
     }

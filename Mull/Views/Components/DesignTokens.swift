@@ -55,36 +55,60 @@ enum DS {
     static let radiusMd: CGFloat = 12
     static let radiusLg: CGFloat = 16
 
-    // MARK: - Semantic Colors (warm, not clinical)
+    // MARK: - Nocturne — ink on night
+    //
+    // The app is a calm nocturnal surface: mull mulls over your life while you
+    // rest. A near-black indigo canvas, content surfacing in soft moonlight, one
+    // luminous accent. Type-led, lots of air.
 
-    static let recording = Color(red: 0.35, green: 0.72, blue: 0.55) // Sage green, not neon
-    static let paused = Color(red: 0.88, green: 0.65, blue: 0.35)    // Warm amber
-    static let error = Color(red: 0.85, green: 0.35, blue: 0.35)     // Soft red
-    static let nowLine = Color(red: 0.85, green: 0.35, blue: 0.35)   // Calendar now indicator
+    /// The night canvas — everything sits on this. Deep indigo-black.
+    static let canvas = Color(red: 0.039, green: 0.047, blue: 0.078)   // #0A0C14
+    /// A surface lifted off the canvas (cards, sidebar wells).
+    static let surface = Color(red: 0.071, green: 0.082, blue: 0.122)  // #12151F
+    /// A surface on hover / selection.
+    static let surfaceHi = Color(red: 0.105, green: 0.118, blue: 0.165) // #1B1E2A
+    /// Hairline rule — moonlight at low opacity. The structural signature.
+    static let hairline = Color.white.opacity(0.07)
+
+    /// Moonlight indigo — the single accent.
+    static let moon = Color(red: 0.58, green: 0.56, blue: 1.0)         // #948FFF
+    static let moonDim = Color(red: 0.46, green: 0.45, blue: 0.82)
+
+    /// Text tiers (soft white, never pure).
+    static let ink = Color.white.opacity(0.92)
+    static let inkDim = Color.white.opacity(0.60)
+    static let inkFaint = Color.white.opacity(0.38)
+
+    // MARK: - Semantic Colors (luminous on night)
+
+    static let recording = Color(red: 0.45, green: 0.82, blue: 0.66)  // Moonlit sage
+    static let paused = Color(red: 0.93, green: 0.74, blue: 0.45)     // Soft amber
+    static let error = Color(red: 0.95, green: 0.48, blue: 0.50)      // Soft red glow
+    static let nowLine = Color(red: 0.58, green: 0.56, blue: 1.0)     // Moonlight
 
     // MARK: - Event Type Colors
     //
     // Used in LiveTab, HomeTab, InsightsTab for event type indicators.
     // Never use raw .blue/.orange/.green — always go through these.
 
-    static let eventKeystroke = Color.blue
-    static let eventClipboard = Color(red: 0.88, green: 0.65, blue: 0.35)  // Same as paused
-    static let eventWindow = Color(red: 0.35, green: 0.72, blue: 0.55)     // Same as recording
-    static let eventApp = Color.purple
-    static let eventAudio = Color.pink
+    static let eventKeystroke = Color(red: 0.55, green: 0.66, blue: 1.0)   // Cool moonlight blue
+    static let eventClipboard = Color(red: 0.93, green: 0.74, blue: 0.45)  // Same as paused
+    static let eventWindow = Color(red: 0.45, green: 0.82, blue: 0.66)     // Same as recording
+    static let eventApp = Color(red: 0.70, green: 0.58, blue: 1.0)         // Moon violet
+    static let eventAudio = Color(red: 0.95, green: 0.60, blue: 0.78)      // Soft rose
 
     // MARK: - Insight Colors
 
-    static let langJapanese = Color(red: 0.85, green: 0.35, blue: 0.35)    // Same as error
-    static let langEnglish = Color.accentColor
-    static let langCode = Color(red: 0.35, green: 0.72, blue: 0.55)        // Same as recording
+    static let langJapanese = Color(red: 0.95, green: 0.48, blue: 0.50)
+    static let langEnglish = moon
+    static let langCode = Color(red: 0.45, green: 0.82, blue: 0.66)
 
-    // MARK: - Gradients (warm tones)
+    // MARK: - Gradients (moonlight)
 
     static let accentGradient = LinearGradient(
         colors: [
-            Color(red: 0.58, green: 0.38, blue: 0.58),  // Warm mauve
-            Color(red: 0.50, green: 0.35, blue: 0.65)   // Soft purple
+            Color(red: 0.58, green: 0.56, blue: 1.0),   // Moonlight indigo
+            Color(red: 0.42, green: 0.40, blue: 0.78)   // Deeper night violet
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
@@ -150,52 +174,60 @@ enum DS {
 // MARK: - View Extensions
 
 extension View {
-    /// Standard card — warm shadow, soft edges.
+    /// The night canvas behind a whole surface.
+    func nocturneCanvas() -> some View {
+        self.background(DS.canvas.ignoresSafeArea())
+    }
+
+    /// A faint moonlight glow behind a hero element.
+    func moonGlow(_ intensity: Double = 0.16) -> some View {
+        self.background(
+            RadialGradient(
+                colors: [DS.moon.opacity(intensity), .clear],
+                center: .topLeading, startRadius: 0, endRadius: 320
+            )
+            .allowsHitTesting(false)
+        )
+    }
+
+    /// Standard card — a surface lifted off the night with a hairline edge.
     func mullCard(isHovered: Bool = false) -> some View {
         self
             .padding(DS.md)
             .background(
                 RoundedRectangle(cornerRadius: DS.radiusMd)
-                    .fill(.ultraThinMaterial)
-                    .shadow(
-                        color: Color(red: 0.4, green: 0.3, blue: 0.3).opacity(isHovered ? 0.10 : 0.05),
-                        radius: isHovered ? 10 : 5, y: 2
-                    )
+                    .fill(isHovered ? DS.surfaceHi : DS.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.radiusMd)
-                    .strokeBorder(Color.primary.opacity(isHovered ? 0.06 : 0.03), lineWidth: 0.5)
+                    .strokeBorder(isHovered ? DS.moon.opacity(0.22) : DS.hairline, lineWidth: 0.75)
             )
     }
 
-    /// Hero card — the warmest card. Gentle glow.
+    /// Hero card — a surface touched by moonlight.
     func mullHeroCard() -> some View {
         self
             .padding(DS.xl)
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: DS.radiusLg)
-                        .fill(.ultraThinMaterial)
+                        .fill(DS.surface)
                     RoundedRectangle(cornerRadius: DS.radiusLg)
-                        .fill(Color.accentColor.opacity(0.03))
+                        .fill(DS.moon.opacity(0.05))
                 }
-                .shadow(
-                    color: Color.accentColor.opacity(0.10),
-                    radius: 14, y: 4
-                )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: DS.radiusLg)
-                    .strokeBorder(Color.accentColor.opacity(0.10), lineWidth: 0.5)
+                    .strokeBorder(DS.moon.opacity(0.18), lineWidth: 0.75)
             )
     }
 
-    /// Section label style.
+    /// Section label style — letterspaced moonlight, quiet.
     func sectionLabel() -> some View {
         self
             .font(DS.labelFont)
-            .tracking(DS.labelTracking)
-            .foregroundStyle(.secondary)
+            .tracking(1.4)
+            .foregroundStyle(DS.inkFaint)
             .textCase(.uppercase)
     }
 

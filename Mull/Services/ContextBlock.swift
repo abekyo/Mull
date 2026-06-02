@@ -94,18 +94,34 @@ enum ContextBlockFile {
         return dict
     }
 
+    /// Remove provenance marker lines, leaving only readable content. Use when a
+    /// curated file (me.md / MEMORY.md) is embedded into a derived or exported
+    /// artifact (full.md, daily snapshot, AI clipboard) — the markers are internal
+    /// metadata and must not leak into what the user or an AI reads.
+    static func stripMarkers(_ text: String) -> String {
+        text
+            .components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix(markerPrefix) }
+            .joined(separator: "\n")
+    }
+
     static func serialize(header: String, blocks: [ContextBlock]) -> String {
         var out: [String] = []
         if !header.isEmpty {
             out.append(header)
             out.append("")
         }
-        for b in blocks where !b.content.isEmpty {
+        for b in blocks {
+            // Drop vacuous agent blocks, but KEEP an emptied human/pinned block as
+            // a tombstone marker. If the user clears a block's body, that empty
+            // marker records the deletion so the next curate won't treat the fact
+            // as new and re-append it (which silently undid the user's deletion).
+            if b.content.isEmpty && b.source == .agent { continue }
             var marker = "\(markerPrefix) id=\(b.id) src=\(b.source.rawValue)"
             if b.source == .agent, let h = b.agentHash { marker += " hash=\(h)" }
             marker += " -->"
             out.append(marker)
-            out.append(b.content)
+            if !b.content.isEmpty { out.append(b.content) }
         }
         return out.joined(separator: "\n")
     }
@@ -118,6 +134,10 @@ enum ContextBlockFile {
         var out = String(mapped)
         while out.contains("--") { out = out.replacingOccurrences(of: "--", with: "-") }
         out = out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        // Punctuation-only input slugifies to "" — distinct such inputs would all
+        // collapse to the same empty fragment and collide (one block silently
+        // overwriting another). Fall back to a stable per-input hash instead.
+        if out.isEmpty { return "x" + String(ContextBlock.hash(s).prefix(8)) }
         return String(out.prefix(max))
     }
 }

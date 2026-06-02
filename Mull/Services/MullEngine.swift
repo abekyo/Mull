@@ -108,27 +108,34 @@ final class MullEngine {
         // Check if the PID is still alive
         let isAlive = kill(holderPID, 0) == 0
         if isAlive {
-            // Check stale threshold (1 hour)
-            if let lastMull = lock.lastSummaryAt {
-                let hoursSince = Date().timeIntervalSince(lastMull) / 3600
-                return hoursSince > 1.0 // Stale after 1 hour — reclaim
-            }
-            return false
+            // A live holder is only "stale" if it has held the lock implausibly
+            // long (a consolidation never runs this long) — measured from when it
+            // ACQUIRED the lock, not from the last successful summary. Without an
+            // acquire time, assume it's genuinely running and don't reclaim.
+            guard let acquired = lock.acquiredAt else { return false }
+            let hoursHeld = Date().timeIntervalSince(acquired) / 3600
+            return hoursHeld > Self.maxLockHoldHours // reclaim only if absurdly long
         }
         return true // Process is dead — reclaim
     }
+
+    /// A consolidation should finish in minutes; if a live holder has held the
+    /// lock longer than this, treat it as crashed-but-PID-recycled and reclaim.
+    private static let maxLockHoldHours: Double = 2.0
 
     // MARK: - Acquire / Release Lock
 
     private func acquireLock() {
         var lock = database.fetchmullLock() ?? mullLock(sessionsSinceLast: 0)
         lock.holderPID = Int32(ProcessInfo.processInfo.processIdentifier)
+        lock.acquiredAt = Date()
         database.updatemullLock(lock)
     }
 
     private func releaseLock(success: Bool) {
         var lock = database.fetchmullLock() ?? mullLock(sessionsSinceLast: 0)
         lock.holderPID = nil
+        lock.acquiredAt = nil
         if success {
             lock.lastSummaryAt = Date()
             lock.sessionsSinceLast = 0
@@ -581,11 +588,20 @@ final class MullEngine {
     // MARK: - Phase 4: Prune & Index
 
     private func phase4PruneAndIndex(summary: ConsolidatedSummary) throws {
-        // Apply memory updates from LLM
+        // Apply memory updates from LLM. Parse as [[String: Any]] and coerce each
+        // value to String — a single non-string value (number/bool/null) the LLM
+        // emits must not drop the WHOLE batch (which silently no-ops the core
+        // memory pipeline while consolidation reports "success").
         if let updatesJSON = summary.memoryUpdatesJSON,
            let data = updatesJSON.data(using: .utf8),
-           let updates = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
-            for update in updates {
+           let rawUpdates = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            for raw in rawUpdates {
+                var update: [String: String] = [:]
+                for (key, value) in raw {
+                    if let s = value as? String { update[key] = s }
+                    else if let n = value as? NSNumber { update[key] = n.stringValue }
+                    // nested objects / null for a key are skipped, not fatal
+                }
                 applyMemoryUpdate(update)
             }
         }
@@ -597,33 +613,16 @@ final class MullEngine {
     private func applyMemoryUpdate(_ update: [String: String]) {
         guard let action = update["action"],
               let name = update["name"],
-              let description = update["description"] ?? update["name"] as String?,
+              let description = update["description"] ?? name as String?,
               let typeStr = update["type"],
               let type = MemoryEntry.MemoryType(rawValue: typeStr) else { return }
 
         let content = update["content"] ?? description
 
-        switch action {
-        case "create":
-            let fileName = name.lowercased()
-                .replacingOccurrences(of: " ", with: "_")
-                .appending(".md")
-
-            let entry = MemoryEntry(
-                name: name,
-                description: description,
-                memoryType: type,
-                content: content,
-                filePath: "memory/\(fileName)",
-                createdAt: Date(),
-                updatedAt: Date()
-            )
-            database.insertMemory(entry)
-
-            // Write file to disk
-            let filePath = memoryDir.appendingPathComponent(fileName)
-            try? fileManager.createDirectory(at: memoryDir, withIntermediateDirectories: true)
-            let fileContent = """
+        // The on-disk markdown body for a memory (kept identical for create+update
+        // so the file never drifts from the DB row).
+        func memoryFileBody() -> String {
+            """
             ---
             name: \(name)
             description: \(description)
@@ -632,7 +631,34 @@ final class MullEngine {
 
             \(content)
             """
-            try? fileContent.write(to: filePath, atomically: true, encoding: .utf8)
+        }
+
+        switch action {
+        case "create":
+            let fileName = name.lowercased()
+                .replacingOccurrences(of: " ", with: "_")
+                .appending(".md")
+            let filePath = memoryDir.appendingPathComponent(fileName)
+
+            // Write the file FIRST; only record the DB row if it actually
+            // persisted, so MEMORY.md never links to a missing file.
+            try? fileManager.createDirectory(at: memoryDir, withIntermediateDirectories: true)
+            do {
+                try memoryFileBody().write(to: filePath, atomically: true, encoding: .utf8)
+            } catch {
+                print("[mull] memory create: file write failed, skipping DB insert: \(error.localizedDescription)")
+                return
+            }
+
+            database.insertMemory(MemoryEntry(
+                name: name,
+                description: description,
+                memoryType: type,
+                content: content,
+                filePath: "memory/\(fileName)",
+                createdAt: Date(),
+                updatedAt: Date()
+            ))
 
         case "update":
             var memories = database.fetchAllMemories()
@@ -641,20 +667,26 @@ final class MullEngine {
                 memories[idx].description = description
                 memories[idx].updatedAt = Date()
                 database.updateMemory(memories[idx])
+                // Keep the on-disk file in sync (previously only the DB row was
+                // updated → file and DB diverged).
+                let fileName = (memories[idx].filePath as NSString).lastPathComponent
+                try? memoryFileBody().write(
+                    to: memoryDir.appendingPathComponent(fileName),
+                    atomically: true, encoding: .utf8)
             }
 
         case "delete":
-            // Remove from database — stale/contradicted memories should not persist
+            // Delete EXACTLY the one matching memory, keyed by its unique
+            // filePath — not by name. Two memories can share a name, and
+            // `DELETE WHERE name=?` would wipe them all while removing only one
+            // file, orphaning the rest.
             let allMemories = database.fetchAllMemories()
             if let target = allMemories.first(where: { $0.name == name }) {
-                // Delete file on disk
-                let filePath = memoryDir.appendingPathComponent(
-                    target.filePath.replacingOccurrences(of: "memory/", with: "")
-                )
-                try? fileManager.removeItem(at: filePath)
-                // Remove from DB (via raw SQL since GRDB delete needs primary key)
+                let fileName = (target.filePath as NSString).lastPathComponent
+                try? fileManager.removeItem(at: memoryDir.appendingPathComponent(fileName))
                 try? database.dbPool.write { db in
-                    try db.execute(sql: "DELETE FROM memory_entries WHERE name = ?", arguments: [name])
+                    try db.execute(sql: "DELETE FROM memory_entries WHERE filePath = ?",
+                                   arguments: [target.filePath])
                 }
             }
 
@@ -763,8 +795,11 @@ final class MullEngine {
         }
 
         let header = "About the user (auto-updated: \(timestamp)).\nPinned/edited blocks are authoritative; agent blocks are rule-based and may be inaccurate — correct them in place or in me.pinned.md."
+        // Nightly pass owns memory/preference blocks (NOT fact: — those belong to
+        // the 60s pass), so it prunes only stale mem:/pref: and never wipes facts.
         Curator.curate(relativePath: "me.md", header: header,
-                       pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks)
+                       pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks,
+                       managedPrefixes: ["mem:", "pref:"])
     }
 
     /// now.md — "What are you working on?" Current projects + this week.
@@ -927,19 +962,14 @@ final class MullEngine {
         mullTimer?.invalidate()
 
         let calendar = Calendar.current
-        var components = calendar.dateComponents([.year, .month, .day], from: Date())
-        components.hour = hour
-        components.minute = minute
-
-        guard let scheduledDate = calendar.date(from: components) else { return }
-
-        let fireDate: Date
-        if scheduledDate <= Date() {
-            guard let next = calendar.date(byAdding: .day, value: 1, to: scheduledDate) else { return }
-            fireDate = next
-        } else {
-            fireDate = scheduledDate
-        }
+        // nextDate handles DST-nonexistent times (e.g. 02:30 on a spring-forward
+        // day) by rolling to the next valid time, and always returns a real future
+        // date — so scheduling can't silently stop the way `date(from:)` → nil did.
+        var match = DateComponents()
+        match.hour = hour
+        match.minute = minute
+        guard let fireDate = calendar.nextDate(after: Date(), matching: match,
+                                               matchingPolicy: .nextTime) else { return }
 
         let timer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
             guard let self else { return }

@@ -278,6 +278,13 @@ final class RecordingService {
             let newTitle = self.getActiveWindowTitle()
             guard let title = newTitle, !title.isEmpty else { return }
 
+            // Never record private / incognito browser windows. Remember the
+            // title so we don't reprocess it, but drop it from the record entirely.
+            if PrivateBrowsing.isPrivate(title) {
+                self.currentWindowTitle = title
+                return
+            }
+
             // Skip if title hasn't changed meaningfully
             guard title != self.currentWindowTitle else { return }
 
@@ -391,8 +398,12 @@ final class RecordingService {
                   text != self.lastClipboardText else { return }
             self.lastClipboardText = text
 
-            // Skip mull's own output (recording our own output is a feedback loop)
-            if text.contains("mull is recording") ||
+            // Skip mull's own output (recording our own output is a feedback loop).
+            // Includes Curator provenance markers — copying a me.md block would
+            // otherwise feed "hash", "src", "agent" back in as "focus topics".
+            if text.contains("mull:block") ||
+               text.contains("mull:auto") ||
+               text.contains("mull is recording") ||
                text.contains("mull is still learning") ||
                text.contains("auto-updated:") ||
                text.contains("About the user (auto") ||

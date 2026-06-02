@@ -8,6 +8,10 @@ final class IngestionService {
 
     private let connectors: [IngestionConnector]
     private var timer: Timer?
+    /// True while a pull pass is in flight. Guards against the scheduled timer
+    /// and the immediate kickoff (or two timer ticks) overlapping — which would
+    /// race two pulls of the same connector through RawStore.land.
+    @MainActor private var inFlight = false
 
     struct Outcome {
         let connector: String
@@ -30,9 +34,21 @@ final class IngestionService {
 
     var hasConnectors: Bool { !connectors.isEmpty }
 
+    @MainActor private func beginRun() -> Bool {
+        if inFlight { return false }
+        inFlight = true
+        return true
+    }
+
+    @MainActor private func endRun() { inFlight = false }
+
     /// Pull every connector once. Failures are isolated per connector.
+    /// No-op if a previous pass is still running (prevents overlapping pulls).
     @discardableResult
     func runOnce() async -> [Outcome] {
+        guard await beginRun() else { return [] }
+        defer { Task { @MainActor in self.endRun() } }
+
         var outcomes: [Outcome] = []
         for connector in connectors {
             do {

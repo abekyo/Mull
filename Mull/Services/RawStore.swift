@@ -37,30 +37,45 @@ enum RawStore {
             }
     }
 
+    /// Serializes the read-modify-write below. Without it, two overlapping pulls
+    /// of the same connector both read the old file and the second write clobbers
+    /// the first — silently dropping items from the immutable source zone.
+    private static let writeLock = NSLock()
+
+    /// Upper bound on items kept per connector. NDJSON is oldest-first, so when a
+    /// file exceeds this the oldest lines are dropped — bounding both file growth
+    /// and the per-pull decode/rewrite cost (which was O(n) and unbounded).
+    private static let maxItems = 2000
+
     /// Append items not already stored. Returns the newly-added items (deduped).
     @discardableResult
     static func land(_ items: [IngestedItem], connector: String) -> [IngestedItem] {
         guard !items.isEmpty else { return [] }
 
-        var seen = existingIDs(connector: connector)
-        var fresh: [IngestedItem] = []
-        for item in items where !seen.contains(item.id) {
-            seen.insert(item.id)
-            fresh.append(item)
-        }
-        guard !fresh.isEmpty else { return [] }
+        writeLock.lock()
+        defer { writeLock.unlock() }
 
-        let newLines = fresh.compactMap { item -> String? in
-            guard let data = try? encoder.encode(item) else { return nil }
-            return String(data: data, encoding: .utf8)
+        let seen = existingIDs(connector: connector)
+        // Build fresh items and their encoded lines together, so an item that
+        // fails to encode is neither written NOR reported as landed.
+        var fresh: [IngestedItem] = []
+        var newLines: [String] = []
+        var added = Set<String>()
+        for item in items where !seen.contains(item.id) && !added.contains(item.id) {
+            guard let data = try? encoder.encode(item),
+                  let line = String(data: data, encoding: .utf8) else { continue }
+            added.insert(item.id)
+            fresh.append(item)
+            newLines.append(line)
         }
+        guard !newLines.isEmpty else { return [] }
 
         let existing = MullDirectory.read(itemsPath(connector: connector)) ?? ""
-        var combined = existing
-        if !combined.isEmpty && !combined.hasSuffix("\n") { combined += "\n" }
-        combined += newLines.joined(separator: "\n") + "\n"
+        var allLines = existing.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        allLines.append(contentsOf: newLines)
+        if allLines.count > maxItems { allLines = Array(allLines.suffix(maxItems)) }
 
-        _ = MullDirectory.write(combined, to: itemsPath(connector: connector))
+        _ = MullDirectory.write(allLines.joined(separator: "\n") + "\n", to: itemsPath(connector: connector))
         return fresh
     }
 }

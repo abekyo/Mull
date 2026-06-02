@@ -427,6 +427,12 @@ final class AnalyticsEngine {
         "org", "net", "miis", "maths", "industry", "studygroups",
         "category", "tag", "view", "page", "index",
         "該当なし", "インデックス", "クロール", "登録",
+        // Japanese business-email boilerplate — these are politeness formulas,
+        // not topics. Surfacing "ご確認のほど" as a "focus topic" is noise.
+        "ご確認のほど", "ご確認", "よろしくお願いいたします", "よろしくお願いします",
+        "お願いいたします", "お願い致します", "ご返信お願い致します", "ご返信",
+        "お世話になっております", "お世話になります", "ご興味をお持ちいただけましたら",
+        "ご連絡", "ご案内", "拝啓", "敬具", "各位", "ご質問", "その他",
     ]
 }
 

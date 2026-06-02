@@ -63,6 +63,8 @@ struct HomeTab: View {
             if isLoading {
                 loadingSkeleton
             } else {
+                nocturneHero
+
                 if !behaviorPatterns.isEmpty {
                     behaviorSection
                 }
@@ -88,6 +90,109 @@ struct HomeTab: View {
                 }
             }
         }
+    }
+
+    // MARK: - Nocturne Hero
+
+    /// The hero surface: a quiet moonlit reflection — date, what you mostly did,
+    /// recent work as strata bars, and where to resume.
+    private var nocturneHero: some View {
+        let top = Array(projects.prefix(3))
+        let maxDur = max(top.map(\.totalDuration).max() ?? 1, 1)
+        let mainName = top.first?.name
+
+        return VStack(alignment: .leading, spacing: DS.lg) {
+            // Date + moon
+            HStack {
+                Text(Self.heroDate)
+                    .font(.system(size: 12, weight: .medium))
+                    .tracking(1.2)
+                    .textCase(.uppercase)
+                    .foregroundStyle(DS.inkFaint)
+                Spacer()
+                Image(systemName: "moon.stars")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.moon.opacity(0.8))
+            }
+
+            // Headline
+            VStack(alignment: .leading, spacing: DS.xs) {
+                Text("Today")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(DS.ink)
+                Text(mainName.map { "Mostly \($0)." } ?? "A quiet day so far.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(DS.inkDim)
+            }
+
+            // Strata bars
+            if !top.isEmpty {
+                VStack(spacing: DS.sm) {
+                    ForEach(top) { project in
+                        strataRow(project, fraction: project.totalDuration / maxDur)
+                    }
+                }
+                .padding(.top, DS.xs)
+            }
+
+            // Resume
+            if let resume = top.first {
+                HStack(spacing: DS.sm) {
+                    Text("RESUME")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(DS.moon)
+                    Text(resume.lastFile ?? resume.name)
+                        .font(DS.bodyFont)
+                        .foregroundStyle(DS.inkDim)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.top, DS.xs)
+            }
+        }
+        .padding(DS.xl)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusLg)
+                .fill(DS.surface)
+                .moonGlow(0.14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.radiusLg)
+                .strokeBorder(DS.moon.opacity(0.16), lineWidth: 0.75)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: DS.radiusLg))
+    }
+
+    private func strataRow(_ project: ProjectSnapshot, fraction: Double) -> some View {
+        HStack(spacing: DS.md) {
+            Text(project.name)
+                .font(DS.bodyFont)
+                .foregroundStyle(DS.ink)
+                .frame(width: 120, alignment: .leading)
+                .lineLimit(1)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(DS.hairline)
+                        .frame(height: 4)
+                    Capsule().fill(DS.accentGradient)
+                        .frame(width: max(6, geo.size.width * fraction), height: 4)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(height: 8)
+            Text(project.totalDurationFormatted)
+                .font(DS.microFont)
+                .foregroundStyle(DS.inkFaint)
+                .frame(width: 52, alignment: .trailing)
+        }
+    }
+
+    private static var heroDate: String {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, d MMMM"
+        return f.string(from: Date())
     }
 
     // MARK: - Behavior Patterns Section

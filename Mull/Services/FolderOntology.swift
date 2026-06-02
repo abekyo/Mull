@@ -123,11 +123,19 @@ enum FolderOntology {
         }
         header += "\n\n> mull keeps its own blocks below up to date. Edit anything else freely — it won't be overwritten."
 
+        // "Awaiting synthesis" only makes sense if a source actually routes here.
+        // Folders with no connector (e.g. 02_work, 04_career) would otherwise sit
+        // on that placeholder forever; show an honest invite instead.
+        let hasSource = rawConnectors.contains {
+            $0 != "capture" && primaryDestination(forConnector: $0)?.number == folder.number
+        }
+        let placeholder = hasSource ? "_(awaiting synthesis)_"
+            : "_No connected source yet — add notes here, or connect one in Settings._"
         let blocks = folder.sections.map { section in
             ContextBlock(
                 id: "section:\(ContextBlockFile.slug(section))",
                 source: .agent,
-                content: "## \(section)\n\n_(awaiting synthesis)_",
+                content: "## \(section)\n\n\(placeholder)",
                 agentHash: nil
             )
         }
