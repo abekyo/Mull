@@ -336,11 +336,13 @@ final class AnalyticsEngine {
         let lang = languageMix(days: days)
         lines.append("Language mix: Japanese \(String(format: "%.0f", lang.japanesePercent))%, English \(String(format: "%.0f", lang.englishPercent))%, Code \(String(format: "%.0f", lang.codePercent))%")
 
-        // Weekday pattern
+        // Weekday pattern — only report once enough weekdays have data, so a
+        // not-yet-seen day isn't misreported as the "quietest."
         let weekdays = weekdayPattern(days: 30)
+        let daysWithData = weekdays.filter { $0.eventCount > 0 }.count
         let busiestDay = weekdays.max(by: { $0.eventCount < $1.eventCount })
         let quietestDay = weekdays.min(by: { $0.eventCount < $1.eventCount })
-        if let busiest = busiestDay, let quietest = quietestDay {
+        if daysWithData >= 4, let busiest = busiestDay, let quietest = quietestDay, busiest.name != quietest.name {
             lines.append("Busiest day: \(busiest.name), Quietest: \(quietest.name)")
         }
 

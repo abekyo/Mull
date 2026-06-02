@@ -246,10 +246,13 @@ struct FactExtractor {
             facts.append(Fact(.patterns, "Most productive hours: \(peakStr)"))
         }
 
+        // Only claim a busiest/quietest day once enough weekdays have data —
+        // otherwise "quietest" is just a day that hasn't occurred yet.
         let weekday = analytics.weekdayPattern(days: 30)
+        let daysWithData = weekday.filter { $0.eventCount > 0 }.count
         let busiest = weekday.max(by: { $0.eventCount < $1.eventCount })
         let quietest = weekday.min(by: { $0.eventCount < $1.eventCount })
-        if let b = busiest, let q = quietest, b.name != q.name {
+        if daysWithData >= 4, let b = busiest, let q = quietest, b.name != q.name, b.eventCount > 0 {
             facts.append(Fact(.patterns, "Busiest day: \(b.name), quietest: \(q.name)"))
         }
 

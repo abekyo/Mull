@@ -485,6 +485,9 @@ struct DataTab: View {
                     .foregroundStyle(.tertiary)
             }
 
+            // External MCP sources (Phase B ingestion)
+            MCPSourcesSection()
+
             // Storage overview
             Section("Storage") {
                 statRow("Events", value: eventCount.formatted())

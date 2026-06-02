@@ -38,14 +38,22 @@ struct InsightPhrases {
     // MARK: - Weekday Pattern
 
     static func weekdayInsight(weekday: [WeekdayStat]) -> String? {
-        guard let busiest = weekday.max(by: { $0.eventCount < $1.eventCount }),
-              let quietest = weekday.min(by: { $0.eventCount < $1.eventCount }) else { return nil }
+        // Weekday encoding: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat.
+        // Need enough days with data before claiming a weekly rhythm — on a new
+        // install most weekdays legitimately have zero events (no data yet), and
+        // a zero must not be read as "a day off."
+        let daysWithData = weekday.filter { $0.eventCount > 0 }.count
+        guard daysWithData >= 4,
+              let busiest = weekday.max(by: { $0.eventCount < $1.eventCount }),
+              let quietest = weekday.min(by: { $0.eventCount < $1.eventCount }),
+              busiest.eventCount > 0 else { return nil }
 
-        if busiest.weekday >= 6 { // Sat or Sun
+        if busiest.weekday == 1 || busiest.weekday == 7 { // Sun or Sat
             return "Interestingly, you're most active on \(busiest.name) — weekends are your productive time."
         }
 
-        if quietest.weekday <= 5 && quietest.eventCount == 0 {
+        // A genuine zero-event day (any weekday) once there's enough data to tell.
+        if quietest.eventCount == 0 {
             return "You take \(quietest.name) completely off. Clear boundaries between work and rest."
         }
 

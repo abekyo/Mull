@@ -205,11 +205,12 @@ struct NarrativeEngine {
             }
         }
 
-        // Detect long unbroken focus sessions
+        // Detect heavy time invested in one activity (engaged time, summed
+        // across the day's blocks — not necessarily one unbroken session).
         for activity in analysis.mainActivities {
-            if activity.totalDuration > 7200 { // 2+ hours
+            if activity.totalDuration > 7200 { // 2+ hours of engaged time
                 let hours = Int(activity.totalDuration / 3600)
-                observations.append("You've been in \(activity.label) for over \(hours) hours straight. That's deep work.")
+                observations.append("You've spent over \(hours) hours focused on \(activity.label) today.")
                 break
             }
         }

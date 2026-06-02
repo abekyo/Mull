@@ -270,9 +270,9 @@ struct BehaviorPatternEngine {
             return [BehaviorPattern(
                 type: .correlation,
                 title: "Less switching = more output",
-                insight: "On days with fewer than \(avgLowSwitches) app switches, you produce \(multiplier)x more deep work than days with \(avgHighSwitches)+ switches.",
+                insight: "On days with fewer than \(avgLowSwitches) app switches, you log \(multiplier)x more focused work time than days with \(avgHighSwitches)+ switches.",
                 action: "Today, try to stay under \(avgLowSwitches) switches. Close apps you don't need.",
-                evidence: "14-day analysis: low-switch days avg \(Int(lowAvgDuration / 3600))h deep work, high-switch days avg \(Int(highAvgDuration / 3600))h",
+                evidence: "14-day analysis: low-switch days avg \(Int(lowAvgDuration / 3600))h of focused work, high-switch days avg \(Int(highAvgDuration / 3600))h",
                 severity: 0.65,
                 project: nil
             )]

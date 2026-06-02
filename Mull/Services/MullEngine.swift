@@ -9,6 +9,7 @@ final class MullEngine {
     private let fileManager = FileManager.default
     private let llm = LLMClient()
     private lazy var deliberation = DeliberationEngine(database: database, llm: llm)
+    private lazy var synthesis = SynthesisEngine(llm: llm)
 
     // Configurable thresholds
     private let minHoursSinceLast: Double = 24
@@ -195,6 +196,10 @@ final class MullEngine {
             // Best-effort — a failure here never breaks the daily summary, and
             // each project file is upserted via the Curator so user edits survive.
             await deliberation.deliberateActiveProjects()
+
+            // Synthesis tier (Phase C): fill category folder index.md files from
+            // ingested _raw data. Best-effort; no-op when the LLM is off.
+            await synthesis.synthesizeAll()
 
             // Epistemics: grade yesterday's behavior predictions against the log,
             // then place fresh bets. This is how proactivity earns a hit-rate

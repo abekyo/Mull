@@ -195,8 +195,14 @@ final class RecordingService {
 
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
+        // Skip keyboard shortcuts (⌘C, ⌃A, …). They still emit characters
+        // ("c", "a"), which would otherwise be appended to the recorded text and
+        // pollute keyword/language analytics. Shift and Option are genuine text
+        // input (capitals, IME, alt-graph) and are intentionally NOT skipped.
+        let isShortcut = event.flags.contains(.maskCommand) || event.flags.contains(.maskControl)
+
         // Get the characters from this key event
-        if let chars = event.keyboardCharacters, !chars.isEmpty {
+        if !isShortcut, let chars = event.keyboardCharacters, !chars.isEmpty {
             keystrokeBuffer.append(chars)
         }
 
