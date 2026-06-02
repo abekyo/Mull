@@ -104,6 +104,28 @@ final class MCPServer {
                 ]
             ],
             [
+                "name": "whats_active_now",
+                "description": "Get what the user is doing RIGHT NOW — active app, current project/entity, and the most recent meaningful actions (notes, copied text, files). Call this FIRST to anchor any further retrieval on the user's present context. Cheap and current.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [:]
+                ]
+            ],
+            [
+                "name": "search",
+                "description": "Find the few most relevant past events for a need — ranked by relevance, NOT a raw dump. Scope with optional facets. If 'entity' is omitted it is anchored to what the user is working on now. Prefer this over dumping history: ask for exactly what this moment needs.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "query": ["type": "string", "description": "What you're looking for (keywords or a short phrase)"],
+                        "entity": ["type": "string", "description": "Project/entity to scope to. Omit to anchor on the current active project."],
+                        "type": ["type": "string", "enum": ["note", "error", "code", "web", "file", "activity"], "description": "Restrict to one kind of event"],
+                        "days": ["type": "integer", "description": "How many days back to search (default 7)"]
+                    ],
+                    "required": ["query"]
+                ]
+            ],
+            [
                 "name": "get_behavior_patterns",
                 "description": "Detect behavioral patterns the user cannot see about themselves. Returns abandonment risks (projects about to be dropped), peak hour waste (best hours spent on shallow work), focus decline (deep work blocks dropping), avoidance patterns (opening but not engaging), and correlations (e.g. 'less switching = more output'). Use this to give the user genuine self-awareness. Each pattern includes an insight, a concrete action, and the data evidence.",
                 "inputSchema": [
@@ -237,6 +259,16 @@ final class MCPServer {
             let content = getUserContext(level: level)
             respondToolResult(id: id, text: content)
 
+        case "whats_active_now":
+            respondToolResult(id: id, text: CurrentState.current(database: database).summary())
+
+        case "search":
+            let query = args["query"] as? String ?? ""
+            let entity = args["entity"] as? String
+            let type = args["type"] as? String
+            let days = args["days"] as? Int ?? 7
+            respondToolResult(id: id, text: toolSearch(query: query, entity: entity, type: type, days: days))
+
         case "search_history":
             let query = args["query"] as? String ?? ""
             let days = args["days"] as? Int ?? 7
@@ -367,6 +399,27 @@ final class MCPServer {
         }
 
         return parts.joined(separator: "\n\n")
+    }
+
+    /// Selection-layer search (SELECTION-LAYER.md §3-4): relevance-ranked, facet-
+    /// scoped, anchored on the current entity when none is given. Replaces the
+    /// raw-dump model of `search_history`.
+    private func toolSearch(query: String, entity: String?, type: String?, days: Int) -> String {
+        let now = Date()
+        let since = TimeInterval(max(days, 1) * 86_400)
+        let events = database.fetchEvents(from: now.addingTimeInterval(-since), to: now)
+        // Anchor on what the user is doing now when the caller didn't scope an entity.
+        let anchor = entity ?? CurrentState.current(database: database).activeEntity
+        let results = Selection.rank(events: events, query: query, entity: anchor,
+                                     type: type, now: now, since: since, limit: 8)
+        guard !results.isEmpty else {
+            return "No relevant activity for '\(query)'\(anchor.map { " in \($0)" } ?? "")."
+        }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MM/dd HH:mm"
+        var lines = ["Relevant to '\(query)'\(anchor.map { " (anchored on \($0))" } ?? "") — \(results.count):", ""]
+        lines.append(contentsOf: results.map { $0.line(fmt) })
+        return lines.joined(separator: "\n")
     }
 
     private func searchHistory(query: String, days: Int) -> String {

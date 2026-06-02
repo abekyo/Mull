@@ -18,7 +18,6 @@ struct HomeTab: View {
     @State private var projects: [ProjectSnapshot] = []
     @State private var weekDays: [DaySnapshot] = []
     @State private var weekComp: WeekComparison?
-    @State private var briefingItems: [BriefingItem] = []
     @State private var behaviorPatterns: [BehaviorPattern] = []
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var isLoading = true
@@ -69,10 +68,6 @@ struct HomeTab: View {
                     behaviorSection
                 }
 
-                if !briefingItems.isEmpty {
-                    briefingSection
-                }
-
                 if !projects.isEmpty {
                     projectsSection
                 }
@@ -85,7 +80,7 @@ struct HomeTab: View {
                     scheduleSection(schedule)
                 }
 
-                if briefingItems.isEmpty && projects.isEmpty {
+                if projects.isEmpty && behaviorPatterns.isEmpty {
                     emptyState
                 }
             }
@@ -124,6 +119,11 @@ struct HomeTab: View {
                     .font(.system(size: 15))
                     .foregroundStyle(DS.inkDim)
             }
+
+            // Focus line — next meeting / uninterrupted time (folded in from the
+            // old Today's Briefing card). Extracted into its own builder to keep
+            // this VStack within the type-checker's inference budget.
+            focusLineView
 
             // Strata bars
             if !top.isEmpty {
@@ -193,6 +193,34 @@ struct HomeTab: View {
         let f = DateFormatter()
         f.dateFormat = "EEEE, d MMMM"
         return f.string(from: Date())
+    }
+
+    /// The focus-line row, or nothing. Kept as its own ViewBuilder so the hero's
+    /// VStack stays simple enough to type-check.
+    @ViewBuilder private var focusLineView: some View {
+        if let focus = focusLine {
+            HStack(spacing: DS.sm) {
+                Image(systemName: focus.icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.moon.opacity(0.8))
+                    .frame(width: 14)
+                Text(focus.text)
+                    .font(DS.smallFont)
+                    .foregroundStyle(DS.inkDim)
+                Spacer()
+            }
+        }
+    }
+
+    /// Next meeting countdown, or uninterrupted-focus note. The one piece of the
+    /// old Today's Briefing not already covered by the hero's resume point.
+    private var focusLine: (icon: String, text: String)? {
+        if let next = appState.calendar.upcomingEvents(limit: 1).first, next.minutesUntil > 0 {
+            let h = next.minutesUntil / 60, m = next.minutesUntil % 60
+            let t = h > 0 ? "\(h)h\(m > 0 ? " \(m)m" : "")" : "\(m)m"
+            return ("clock", "\(t) until \(next.title)")
+        }
+        return ("bolt", "No meetings today — uninterrupted focus")
     }
 
     // MARK: - Behavior Patterns Section
@@ -275,41 +303,6 @@ struct HomeTab: View {
         }
     }
 
-    // MARK: - Briefing Section
-
-    private var briefingSection: some View {
-        VStack(alignment: .leading, spacing: DS.md) {
-            Text("TODAY'S BRIEFING")
-                .sectionLabel()
-
-            VStack(alignment: .leading, spacing: DS.sm) {
-                ForEach(briefingItems) { item in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .top, spacing: DS.sm) {
-                            Image(systemName: item.icon)
-                                .font(DS.smallFont)
-                                .foregroundStyle(item.emphasis ? Color.accentColor : .secondary)
-                                .frame(width: 18, alignment: .center)
-                                .padding(.top, 1)
-
-                            Text(item.text)
-                                .font(item.emphasis ? DS.bodyMedium : DS.bodyFont)
-                                .foregroundStyle(item.emphasis ? .primary : .secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        if let subtext = item.subtext {
-                            Text(subtext)
-                                .font(DS.captionFont)
-                                .foregroundStyle(.tertiary)
-                                .padding(.leading, DS.xl)
-                        }
-                    }
-                }
-            }
-        }
-        .mullHeroCard()
-    }
 
 
     // MARK: - Projects Section
@@ -803,146 +796,11 @@ struct HomeTab: View {
                 self.weekDays = loadedWeek
                 self.weekComp = loadedComp
                 self.behaviorPatterns = loadedPatterns
-                self.briefingItems = generateBriefing()
                 self.isLoading = false
             }
         }
     }
 
-    // MARK: - Briefing Generation
-
-    private func generateBriefing() -> [BriefingItem] {
-        var items: [BriefingItem] = []
-
-        // 1. Stalled project — the most actionable item first
-        let stalledProjects = projects.filter { $0.daysSinceActive >= 3 }
-        if let stalled = stalledProjects.first {
-            let resumePoint = [stalled.lastFile, stalled.lastClipboard.map { "\"\($0)\"" }]
-                .compactMap { $0 }
-                .joined(separator: " · ")
-
-            items.append(BriefingItem(
-                icon: "exclamationmark.triangle.fill",
-                text: "\(stalled.name) — \(stalled.daysSinceActive) days stalled",
-                subtext: resumePoint.isEmpty ? nil : "Resume: \(resumePoint)",
-                emphasis: true
-            ))
-        }
-
-        // 2. Focus block — how much time before next interruption
-        let upcoming = appState.calendar.upcomingEvents(limit: 1)
-        if let next = upcoming.first {
-            if next.minutesUntil <= 15 {
-                items.append(BriefingItem(
-                    icon: "clock.badge.exclamationmark",
-                    text: "\(next.title) in \(next.minutesUntil)min",
-                    emphasis: true
-                ))
-            } else {
-                let hours = next.minutesUntil / 60
-                let mins = next.minutesUntil % 60
-                let timeStr = hours > 0 ? "\(hours)h\(mins > 0 ? " \(mins)m" : "")" : "\(mins)m"
-
-                // Find what they accomplished in a similar block last time
-                let similarProject = projects.first { proj in
-                    proj.sessions.contains { session in
-                        let sessionMins = Int(session.duration / 60)
-                        return sessionMins >= (next.minutesUntil - 30) && sessionMins <= (next.minutesUntil + 30)
-                    }
-                }
-                let hint = similarProject.map { " Last similar block: finished \($0.name) session." } ?? ""
-
-                items.append(BriefingItem(
-                    icon: "clock",
-                    text: "Focus block: \(timeStr) until \(next.title)",
-                    subtext: hint.isEmpty ? nil : String(hint.dropFirst()),
-                    emphasis: false
-                ))
-            }
-        } else {
-            // No meetings — unlimited focus
-            items.append(BriefingItem(
-                icon: "bolt",
-                text: "No meetings today. Uninterrupted focus available.",
-                emphasis: false
-            ))
-        }
-
-        // 3. Week-over-week comparison — the trend, not the number
-        if let comp = weekComp, comp.lastWeekDuration > 0 {
-            let pct = Int(abs(comp.durationDeltaPercent))
-            if comp.durationDelta > 0 {
-                items.append(BriefingItem(
-                    icon: "arrow.up.right",
-                    text: "Tracking \(pct)% ahead of last week (\(comp.thisWeekHours) vs \(comp.lastWeekHours))",
-                    emphasis: false
-                ))
-            } else if pct >= 10 {
-                items.append(BriefingItem(
-                    icon: "arrow.down.right",
-                    text: "Tracking \(pct)% behind last week (\(comp.thisWeekHours) vs \(comp.lastWeekHours))",
-                    emphasis: true
-                ))
-            }
-        }
-
-        // 4. Deep work alert
-        if let comp = weekComp {
-            let deepDelta = comp.thisWeekDeepBlocks - comp.lastWeekDeepBlocks
-            if comp.thisWeekDeepBlocks == 0 && comp.lastWeekDeepBlocks > 0 {
-                items.append(BriefingItem(
-                    icon: "brain",
-                    text: "No deep work blocks (2h+) this week yet. Last week had \(comp.lastWeekDeepBlocks).",
-                    emphasis: true
-                ))
-            } else if deepDelta < -1 {
-                items.append(BriefingItem(
-                    icon: "brain",
-                    text: "Deep work blocks: \(comp.thisWeekDeepBlocks) (last week: \(comp.lastWeekDeepBlocks))",
-                    subtext: "You're fragmenting more this week.",
-                    emphasis: false
-                ))
-            }
-
-            // Context switch warning
-            if comp.lastWeekContextSwitches > 0 {
-                let switchIncrease = Double(comp.thisWeekContextSwitches - comp.lastWeekContextSwitches)
-                    / Double(comp.lastWeekContextSwitches) * 100
-                if switchIncrease > 30 {
-                    items.append(BriefingItem(
-                        icon: "arrow.triangle.swap",
-                        text: "Context switches up \(Int(switchIncrease))% vs last week",
-                        subtext: "Attention is fragmenting. Consider longer blocks on one project.",
-                        emphasis: false
-                    ))
-                }
-            }
-        }
-
-        // 5. Day-of-week pattern — only if actionable
-        let weekdays = appState.analytics.weekdayPattern(days: 30)
-        let todayWeekday = Calendar.current.component(.weekday, from: Date())
-        if let todayStat = weekdays.first(where: { $0.weekday == todayWeekday }),
-           let busiest = weekdays.max(by: { $0.eventCount < $1.eventCount }),
-           todayStat.weekday == busiest.weekday && busiest.eventCount > 0 {
-            items.append(BriefingItem(
-                icon: "flame",
-                text: "\(todayStat.name) is historically your most productive day. Protect it.",
-                emphasis: false
-            ))
-        }
-
-        // 6. Additional stale projects (max 1 more)
-        if stalledProjects.count > 1, let second = stalledProjects.dropFirst().first {
-            items.append(BriefingItem(
-                icon: "arrow.counterclockwise",
-                text: "\(second.name): \(second.daysSinceActive) days untouched",
-                emphasis: false
-            ))
-        }
-
-        return items
-    }
 
     // MARK: - Loading Skeleton
 

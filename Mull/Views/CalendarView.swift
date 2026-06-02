@@ -481,8 +481,8 @@ extension CalendarWeekView {
             monthWeekdayRow
             monthGrid
                 .onAppear { loadMonth() }
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var monthHeader: some View {
@@ -517,14 +517,24 @@ extension CalendarWeekView {
 
     private var monthGrid: some View {
         let days = monthGridDays
-        let cols = Array(repeating: GridItem(.flexible(), spacing: 1), count: 7)
-        return LazyVGrid(columns: cols, spacing: 1) {
-            ForEach(days, id: \.self) { date in
-                monthCell(date)
+        let weeks = stride(from: 0, to: days.count, by: 7).map {
+            Array(days[$0..<min($0 + 7, days.count)])
+        }
+        // 6 week-rows that divide the available height equally, so the grid grows
+        // and shrinks with the window instead of sitting at a fixed height.
+        return VStack(spacing: 1) {
+            ForEach(weeks.indices, id: \.self) { wi in
+                HStack(spacing: 1) {
+                    ForEach(weeks[wi], id: \.self) { date in
+                        monthCell(date)
+                    }
+                }
+                .frame(maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, DS.md)
-        .padding(.top, DS.sm)
+        .padding(.vertical, DS.sm)
     }
 
     private func monthCell(_ date: Date) -> some View {
@@ -555,8 +565,7 @@ extension CalendarWeekView {
             Spacer(minLength: 0)
         }
         .padding(6)
-        .frame(height: 76, alignment: .topLeading)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 6).fill(isToday ? DS.moon.opacity(0.06) : DS.surface))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(DS.hairline, lineWidth: 0.5))
         .opacity(inMonth ? 1 : 0.45)
