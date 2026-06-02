@@ -6,7 +6,7 @@ import Foundation
 //
 // Run:
 //   swiftc -o /tmp/seleval \
-//     Mull/Services/Entity.swift Mull/Services/Selection.swift \
+//     Mull/Services/Entity.swift Mull/Services/Signal.swift Mull/Services/Selection.swift \
 //     Mull/Services/TestInput.swift Mull/Services/SensitiveText.swift \
 //     eval/selection_eval.swift && /tmp/seleval
 //
@@ -22,6 +22,11 @@ struct RecordingEvent {
     var appName: String?
     var windowTitle: String?
     var textContent: String?
+    // #4 capture-time columns. Left nil here so the eval exercises Selection's
+    // recompute fallback (same path as pre-backfill rows).
+    var entity: String? = nil
+    var contentType: String? = nil
+    var salience: Double? = nil
 }
 
 // MARK: - Case model + builders

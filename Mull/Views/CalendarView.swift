@@ -17,10 +17,13 @@ struct CalendarWeekView: View {
     @State private var weekEvents: [Date: [CalendarEvent]] = [:]
     @State private var popoverBlock: TimeBlock?
 
-    enum CalMode: String, CaseIterable { case week = "Week", month = "Month" }
+    enum CalMode: String, CaseIterable { case day = "Day", week = "Week", month = "Month", year = "Year" }
     @State private var mode: CalMode = .week
+    @State private var dayOffset: Int = 0
     @State private var monthOffset: Int = 0
     @State private var monthData: [Date: (duration: TimeInterval, label: String)] = [:]
+    @State private var yearOffset: Int = 0
+    @State private var yearCounts: [Date: Int] = [:]
 
     private let hourStart = 0
     private let hourEnd = 24
@@ -31,21 +34,31 @@ struct CalendarWeekView: View {
         VStack(spacing: 0) {
             modeBar
             Divider()
-            if mode == .week {
-                weekContent
-            } else {
-                monthContent
+            switch mode {
+            case .day:   dayContent
+            case .week:  weekContent
+            case .month: monthContent
+            case .year:  yearContent
             }
         }
         .onChange(of: weekOffset) { _, _ in loadWeek() }
+        .onChange(of: dayOffset) { _, _ in loadDay() }
         .onChange(of: monthOffset) { _, _ in loadMonth() }
-        .onChange(of: mode) { _, m in if m == .month { loadMonth() } else { loadWeek() } }
+        .onChange(of: yearOffset) { _, _ in loadYear() }
+        .onChange(of: mode) { _, m in
+            switch m {
+            case .day: loadDay()
+            case .week: loadWeek()
+            case .month: loadMonth()
+            case .year: loadYear()
+            }
+        }
         .popover(item: $popoverBlock) { block in
             blockDetail(block)
         }
     }
 
-    /// Week | Month segmented switch.
+    /// Day | Week | Month | Year segmented switch.
     private var modeBar: some View {
         HStack {
             Picker("", selection: $mode) {
@@ -53,7 +66,7 @@ struct CalendarWeekView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 160)
+            .frame(width: 280)
             Spacer()
         }
         .padding(.horizontal, DS.xl)
@@ -78,6 +91,66 @@ struct CalendarWeekView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Day
+
+    private var selectedDay: Date {
+        Calendar.current.date(byAdding: .day, value: dayOffset,
+                              to: Calendar.current.startOfDay(for: Date())) ?? Date()
+    }
+
+    private var dayContent: some View {
+        VStack(spacing: 0) {
+            dayHeader
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    HStack(alignment: .top, spacing: 0) {
+                        timeLabels
+                        dayColumn(date: selectedDay)
+                    }
+                }
+                .onAppear {
+                    loadDay()
+                    let h = max(Calendar.current.component(.hour, from: Date()) - 1, 0)
+                    proxy.scrollTo(h, anchor: .top)
+                }
+            }
+        }
+    }
+
+    private var dayHeader: some View {
+        HStack {
+            Button { dayOffset -= 1 } label: { Image(systemName: "chevron.left").font(DS.bodyFont) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+            Spacer()
+            Text(Self.fullDayLabel(selectedDay)).font(DS.titleFont)
+            if dayOffset != 0 {
+                Button("Today") { dayOffset = 0 }
+                    .font(DS.captionFont).buttonStyle(.bordered).controlSize(.small)
+                    .padding(.leading, DS.sm)
+            }
+            Spacer()
+            Button { dayOffset += 1 } label: { Image(systemName: "chevron.right").font(DS.bodyFont) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .disabled(dayOffset >= 0)
+        }
+        .padding(.horizontal, DS.xl)
+        .padding(.vertical, DS.sm)
+    }
+
+    private func loadDay() {
+        let engine = TimeBlockEngine(database: appState.database)
+        let day = selectedDay
+        let key = Calendar.current.startOfDay(for: day)
+        weekBlocks[key] = engine.generateBlocks(for: day)
+        weekEvents[key] = appState.calendar.events(for: day)
+    }
+
+    private static func fullDayLabel(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "EEEE, d MMMM yyyy"
+        return f.string(from: date)
     }
 
     // MARK: - Week Header
@@ -631,6 +704,138 @@ extension CalendarWeekView {
         if m < 60 { return "\(m)m" }
         let h = m / 60, rem = m % 60
         return rem > 0 ? "\(h)h\(rem)m" : "\(h)h"
+    }
+}
+
+// MARK: - Year View (activity heatmap)
+
+extension CalendarWeekView {
+
+    var yearContent: some View {
+        VStack(spacing: 0) {
+            yearHeader
+            Divider()
+            ScrollView {
+                yearHeatmap
+                    .padding(DS.lg)
+                    .onAppear { loadYear() }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var yearHeader: some View {
+        HStack {
+            Button { yearOffset -= 1 } label: { Image(systemName: "chevron.left").font(DS.bodyFont) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+            Spacer()
+            Text(yearLabel).font(DS.titleFont)
+            if yearOffset != 0 {
+                Button("This year") { yearOffset = 0 }
+                    .font(DS.captionFont).buttonStyle(.bordered).controlSize(.small)
+                    .padding(.leading, DS.sm)
+            }
+            Spacer()
+            Button { yearOffset += 1 } label: { Image(systemName: "chevron.right").font(DS.bodyFont) }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .disabled(yearOffset >= 0)
+        }
+        .padding(.horizontal, DS.xl)
+        .padding(.vertical, DS.sm)
+    }
+
+    /// GitHub-style heatmap: columns = weeks, rows = weekday, intensity = activity.
+    private var yearHeatmap: some View {
+        let maxCount = max(yearCounts.values.max() ?? 1, 1)
+        let rows = Array(repeating: GridItem(.fixed(13), spacing: 3), count: 7)
+        return VStack(alignment: .leading, spacing: DS.sm) {
+            LazyHGrid(rows: rows, spacing: 3) {
+                ForEach(yearGridDays, id: \.self) { date in
+                    yearCell(date, maxCount: maxCount)
+                }
+            }
+            // Legend
+            HStack(spacing: 4) {
+                Text("less").font(DS.tinyFont).foregroundStyle(DS.inkFaint)
+                ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { f in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(heatColor(fraction: f))
+                        .frame(width: 11, height: 11)
+                }
+                Text("more").font(DS.tinyFont).foregroundStyle(DS.inkFaint)
+            }
+        }
+    }
+
+    private func yearCell(_ date: Date, maxCount: Int) -> some View {
+        let cal = Calendar.current
+        let inYear = cal.component(.year, from: date) == cal.component(.year, from: displayedYear)
+        let isFuture = cal.startOfDay(for: date) > cal.startOfDay(for: Date())
+        let count = yearCounts[cal.startOfDay(for: date)] ?? 0
+        let fraction = count == 0 ? 0 : 0.15 + 0.85 * (Double(count) / Double(maxCount))
+        return RoundedRectangle(cornerRadius: 2)
+            .fill(isFuture || !inYear ? Color.clear : heatColor(fraction: fraction))
+            .frame(width: 13, height: 13)
+            .overlay(RoundedRectangle(cornerRadius: 2)
+                .strokeBorder(DS.hairline, lineWidth: inYear && !isFuture ? 0.5 : 0))
+            .help(inYear && !isFuture ? "\(Self.shortDate(date)): \(count) events" : "")
+            .onTapGesture { if inYear && !isFuture { jumpToDay(date) } }
+    }
+
+    private func heatColor(fraction: Double) -> Color {
+        fraction <= 0 ? DS.surfaceHi : DS.moon.opacity(0.15 + 0.75 * fraction)
+    }
+
+    var displayedYear: Date {
+        let cal = Calendar.current
+        let base = cal.date(from: cal.dateComponents([.year], from: Date())) ?? Date()
+        return cal.date(byAdding: .year, value: yearOffset, to: base) ?? base
+    }
+
+    private var yearLabel: String {
+        let f = DateFormatter(); f.dateFormat = "yyyy"
+        return f.string(from: displayedYear)
+    }
+
+    /// Days from the Monday on/before Jan 1 through Dec 31 of the displayed year.
+    private var yearGridDays: [Date] {
+        let cal = Calendar.current
+        let jan1 = displayedYear
+        let weekday = cal.component(.weekday, from: jan1)
+        let daysFromMonday = (weekday + 5) % 7
+        guard let start = cal.date(byAdding: .day, value: -daysFromMonday, to: jan1),
+              let dec31 = cal.date(byAdding: DateComponents(year: 1, day: -1), to: jan1) else { return [] }
+        var days: [Date] = []
+        var d = start
+        while d <= dec31 {
+            days.append(d)
+            guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
+            d = next
+        }
+        return days
+    }
+
+    func loadYear() {
+        let cal = Calendar.current
+        let start = displayedYear
+        let end = min(cal.date(byAdding: .year, value: 1, to: start) ?? start, Date())
+        guard end > start else { yearCounts = [:]; return }
+        let events = appState.database.fetchEvents(from: start, to: end)
+        var counts: [Date: Int] = [:]
+        for e in events { counts[cal.startOfDay(for: e.timestamp), default: 0] += 1 }
+        yearCounts = counts
+    }
+
+    private func jumpToDay(_ date: Date) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        dayOffset = cal.dateComponents([.day], from: today, to: cal.startOfDay(for: date)).day ?? 0
+        mode = .day
+    }
+
+    private static func shortDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        return f.string(from: date)
     }
 }
 

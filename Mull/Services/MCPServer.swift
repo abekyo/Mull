@@ -17,18 +17,16 @@ import Foundation
 ///   mull://today    — raw today's events
 ///
 /// Tools exposed:
+///   whats_active_now — what the user is doing right now (the anchor)
+///   search           — relevance-ranked, facet-scoped retrieval
 ///   get_user_context — get me.md + now.md (for mid-conversation queries)
-///   search_history   — search past events by keyword
-///   get_patterns     — get behavioral analytics
 final class MCPServer {
 
     private let database: DatabaseService
-    private let analytics: AnalyticsEngine
     private let mullDir: URL
 
     init(database: DatabaseService) {
         self.database = database
-        self.analytics = AnalyticsEngine(database: database)
         self.mullDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("mull")
     }
@@ -126,14 +124,6 @@ final class MCPServer {
                 ]
             ],
             [
-                "name": "get_behavior_patterns",
-                "description": "Detect behavioral patterns the user cannot see about themselves. Returns abandonment risks (projects about to be dropped), peak hour waste (best hours spent on shallow work), focus decline (deep work blocks dropping), avoidance patterns (opening but not engaging), and correlations (e.g. 'less switching = more output'). Use this to give the user genuine self-awareness. Each pattern includes an insight, a concrete action, and the data evidence.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [:]
-                ]
-            ],
-            [
                 "name": "get_projects",
                 "description": "Get all detected projects with status, last active date, resume point (last file + last clipboard), session history, and stall detection. Use this when the user asks 'what was I working on?' or 'where did I leave off on X?'",
                 "inputSchema": [
@@ -160,14 +150,6 @@ final class MCPServer {
                 ]
             ],
             [
-                "name": "get_week_comparison",
-                "description": "Compare this week's productivity to last week at the same point. Returns duration delta, deep work blocks count, and context switch changes. Use this when the user asks 'how am I doing this week?' or when you want to calibrate advice.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [:]
-                ]
-            ],
-            [
                 "name": "get_relevant",
                 "description": "Given a context string (file name, project name, topic), find relevant knowledge and past activity. Use this proactively when the user is working on something — it may surface decisions or solutions from their past that apply to the current task.",
                 "inputSchema": [
@@ -179,14 +161,6 @@ final class MCPServer {
                         ]
                     ],
                     "required": ["context"]
-                ]
-            ],
-            [
-                "name": "get_briefing",
-                "description": "Get today's briefing — behavioral pattern alerts, stalled projects, focus block availability, and week-over-week comparison. This is what the user should see first thing in the morning. Prioritizes actionable insights over raw data.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [:]
                 ]
             ],
             [
@@ -205,19 +179,6 @@ final class MCPServer {
                         ]
                     ],
                     "required": ["query"]
-                ]
-            ],
-            [
-                "name": "get_patterns",
-                "description": "Get analytics patterns: most used keywords, peak productivity hours, app usage, language mix.",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "days": [
-                            "type": "integer",
-                            "description": "Analysis period in days (default 7)"
-                        ]
-                    ]
                 ]
             ],
             [
@@ -275,15 +236,6 @@ final class MCPServer {
             let content = searchHistory(query: query, days: days)
             respondToolResult(id: id, text: content)
 
-        case "get_patterns":
-            let days = args["days"] as? Int ?? 7
-            let content = analytics.generatePatternSummary(days: days)
-            respondToolResult(id: id, text: content)
-
-        case "get_behavior_patterns":
-            let content = toolGetBehaviorPatterns()
-            respondToolResult(id: id, text: content)
-
         case "get_projects":
             let days = args["days"] as? Int ?? 14
             let content = toolGetProjects(days: days)
@@ -294,17 +246,9 @@ final class MCPServer {
             let content = toolGetKnowledge(query: query)
             respondToolResult(id: id, text: content)
 
-        case "get_week_comparison":
-            let content = toolGetWeekComparison()
-            respondToolResult(id: id, text: content)
-
         case "get_relevant":
             let context = args["context"] as? String ?? ""
             let content = toolGetRelevant(context: context)
-            respondToolResult(id: id, text: content)
-
-        case "get_briefing":
-            let content = toolGetBriefing()
             respondToolResult(id: id, text: content)
 
         case "write_note":
@@ -407,7 +351,13 @@ final class MCPServer {
     private func toolSearch(query: String, entity: String?, type: String?, days: Int) -> String {
         let now = Date()
         let since = TimeInterval(max(days, 1) * 86_400)
-        let events = database.fetchEvents(from: now.addingTimeInterval(-since), to: now)
+        // FTS narrows ASCII text queries at the index; for a type facet (the query
+        // may be the category, e.g. "crash") or a CJK query (the default tokenizer
+        // doesn't split it) fall back to a recent window so Selection keeps recall.
+        let useFTS = !query.isEmpty && type == nil && query.allSatisfy(\.isASCII)
+        let events = database.fetchCandidates(
+            query: query, since: now.addingTimeInterval(-since),
+            useFTS: useFTS, limit: useFTS ? 80 : 300)
         // Anchor on what the user is doing now when the caller didn't scope an entity.
         let anchor = entity ?? CurrentState.current(database: database).activeEntity
         let results = Selection.rank(events: events, query: query, entity: anchor,
@@ -501,41 +451,6 @@ final class MCPServer {
 
     // MARK: - New Tool Implementations
 
-    private func toolGetBehaviorPatterns() -> String {
-        let patterns = BehaviorPatternEngine(database: database).detectPatterns()
-
-        if patterns.isEmpty {
-            return "No behavioral patterns detected yet. Need at least 5 days of data."
-        }
-
-        var lines: [String] = ["Behavioral patterns detected (\(patterns.count)):"]
-        lines.append("")
-
-        for pattern in patterns {
-            lines.append("## \(pattern.title)")
-            lines.append("Type: \(patternTypeStr(pattern.type)) | Severity: \(String(format: "%.0f", pattern.severity * 100))%")
-            lines.append("Insight: \(pattern.insight)")
-            lines.append("Action: \(pattern.action)")
-            lines.append("Evidence: \(pattern.evidence)")
-            if let project = pattern.project {
-                lines.append("Project: \(project)")
-            }
-            lines.append("")
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
-    private func patternTypeStr(_ type: BehaviorPattern.PatternType) -> String {
-        switch type {
-        case .abandonment: "abandonment_risk"
-        case .peakWaste: "peak_hour_waste"
-        case .focusDecline: "focus_decline"
-        case .avoidance: "avoidance"
-        case .correlation: "correlation"
-        }
-    }
-
     private func toolGetProjects(days: Int) -> String {
         let engine = TimeBlockEngine(database: database)
         let projects = engine.projectSnapshots(days: days)
@@ -612,30 +527,6 @@ final class MCPServer {
         return lines.joined(separator: "\n")
     }
 
-    private func toolGetWeekComparison() -> String {
-        let engine = TimeBlockEngine(database: database)
-        let comp = engine.weekComparison()
-        let week = engine.weekSnapshots()
-
-        var lines: [String] = ["Week comparison:"]
-        lines.append("")
-        lines.append("This week: \(comp.thisWeekHours)")
-        lines.append("Last week (same point): \(comp.lastWeekHours)")
-        lines.append("Delta: \(comp.deltaFormatted) (\(String(format: "%.0f", comp.durationDeltaPercent))%)")
-        lines.append("")
-        lines.append("Deep work blocks (2h+): \(comp.thisWeekDeepBlocks) this week, \(comp.lastWeekDeepBlocks) last week")
-        lines.append("Context switches: \(comp.thisWeekContextSwitches) this week, \(comp.lastWeekContextSwitches) last week")
-        lines.append("")
-        lines.append("Day-by-day:")
-        for day in week {
-            let marker = day.isToday ? " ← today" : ""
-            let project = day.mainProject ?? "-"
-            lines.append("  \(day.dayName) \(day.dayNumber): \(day.durationFormatted.isEmpty ? "-" : day.durationFormatted) (\(project))\(marker)")
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
     private func toolGetRelevant(context: String) -> String {
         var lines: [String] = ["Relevant context for '\(context)':"]
         lines.append("")
@@ -686,56 +577,6 @@ final class MCPServer {
 
         if knowledge.isEmpty && matching.isEmpty && events.isEmpty {
             lines.append("No relevant context found for '\(context)'.")
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
-    private func toolGetBriefing() -> String {
-        var lines: [String] = ["Today's Briefing:"]
-        lines.append("")
-
-        // 1. Behavior patterns (most important)
-        let patterns = BehaviorPatternEngine(database: database).detectPatterns()
-        if !patterns.isEmpty {
-            lines.append("## Behavioral Alerts")
-            for pattern in patterns.prefix(3) {
-                lines.append("⚠️ \(pattern.title)")
-                lines.append("   \(pattern.insight)")
-                lines.append("   → \(pattern.action)")
-                lines.append("")
-            }
-        }
-
-        // 2. Stalled projects
-        let engine = TimeBlockEngine(database: database)
-        let projects = engine.projectSnapshots(days: 14)
-        let stalled = projects.filter { $0.daysSinceActive >= 3 }
-        if !stalled.isEmpty {
-            lines.append("## Stalled Projects")
-            for project in stalled {
-                var line = "- \(project.name) (\(project.daysSinceActive) days)"
-                if let file = project.lastFile { line += " — last: \(file)" }
-                lines.append(line)
-            }
-            lines.append("")
-        }
-
-        // 3. Week comparison
-        let comp = engine.weekComparison()
-        if comp.lastWeekDuration > 0 {
-            lines.append("## Week Status")
-            lines.append("This week: \(comp.thisWeekHours) (last week same point: \(comp.lastWeekHours), delta: \(comp.deltaFormatted))")
-            lines.append("Deep work: \(comp.thisWeekDeepBlocks) blocks (last week: \(comp.lastWeekDeepBlocks))")
-            lines.append("")
-        }
-
-        // 4. Schedule
-        let calendar = CalendarService()
-        if let schedule = calendar.todaySchedule() {
-            lines.append("## Schedule")
-            lines.append(schedule)
-            lines.append("")
         }
 
         return lines.joined(separator: "\n")

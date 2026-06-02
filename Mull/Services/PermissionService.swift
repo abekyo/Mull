@@ -43,10 +43,32 @@ final class PermissionService: ObservableObject {
 
     // MARK: - Accessibility
 
-    /// AXIsProcessTrusted() — can return false on Xcode debug builds even when granted.
-    /// We treat it as "hint" not "truth".
+    /// AXIsProcessTrusted() lies on Xcode debug builds (false even when granted).
+    /// So, like the Input-Monitoring check, we ALSO probe empirically: try to read
+    /// a real AX attribute. When Accessibility is off the API returns `.apiDisabled`;
+    /// any other result means it's actually enabled — the only thing that matters,
+    /// since window-title capture is exactly such a read. Trust either signal (OR)
+    /// so we never report "granted" while titles silently come back nil.
     private func checkAccessibility() {
-        accessibilityGranted = AXIsProcessTrusted()
+        accessibilityGranted = AXIsProcessTrusted() || accessibilityAPIEnabled()
+    }
+
+    /// Empirical probe: is the Accessibility API actually usable right now?
+    private func accessibilityAPIEnabled() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        var value: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value)
+        // Denied → .apiDisabled / .notImplemented. Granted → .success / .noValue /
+        // .attributeUnsupported (a real read that just had nothing to return).
+        return err != .apiDisabled && err != .notImplemented
+    }
+
+    /// Actively trigger the system "grant Accessibility?" dialog (shown once when
+    /// not yet trusted). Lower friction than making the user hunt through Settings.
+    func promptAccessibility() {
+        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
     // MARK: - Input Monitoring

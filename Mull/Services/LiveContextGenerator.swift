@@ -1,10 +1,14 @@
 import Foundation
 
-/// Generates me.md / now.md / full.md from raw event data + analytics.
-/// NO LLM required. Pure rule-based. Runs every 60 seconds.
+/// Maintains the durable context files (me.md / now.md / full.md) every 60s.
 ///
-/// This ensures that "AIがあなたを知っている状態" works from day one,
-/// before the nightly mull has ever run.
+/// These hold only the OWNED layer — pinned facts (the human) and memories
+/// (mull's nightly LLM consolidation), kept current via the Curator. They no
+/// longer bake in rule-based pre-digestion (FactExtractor facts, analytics,
+/// narratives, project inference): that was the lossy "事前消化" DIRECTION §4/§9.1
+/// cuts. Live/current context is assembled at USE-TIME by the agent through the
+/// `whats_active_now` and `search` MCP tools (anchored on the captured, lightly
+/// structured event stream — entity/type/salience), not pre-summarized here.
 enum LiveContextGenerator {
 
     private static var mullDir: URL { MullDirectory.root }
@@ -75,14 +79,12 @@ enum LiveContextGenerator {
                 source: .agent, content: "- \(mem.description)", agentHash: nil))
         }
 
-        // From FactExtractor (rule-based, available from day one). One block per fact,
-        // keyed so updates replace in place instead of duplicating.
-        let extractor = FactExtractor(analytics: analytics, database: database)
-        for fact in extractor.extractFacts(days: 30) {
-            agentBlocks.append(ContextBlock(
-                id: Curator.factBlockID(category: fact.category.rawValue, text: fact.text),
-                source: .agent, content: "- \(fact.text)", agentHash: nil))
-        }
+        // NOTE: rule-based FactExtractor facts (language %, role, busiest day,
+        // inferred projects…) used to be baked in here. Removed (DIRECTION §4/§9.1):
+        // me.md holds only the durable, human/AI-owned layer — pinned facts (you)
+        // and memories (mull's nightly LLM consolidation). Live, current context
+        // is assembled at USE-TIME by the agent via the `whats_active_now` and
+        // `search` MCP tools, not pre-digested by rule-based engines here.
 
         // Preferences from feedback memories
         for mem in memories.filter({ $0.memoryType == .feedback }).prefix(3) {
@@ -91,10 +93,13 @@ enum LiveContextGenerator {
                 source: .agent, content: "- \(mem.description)", agentHash: nil))
         }
 
-        let header = "About the user (auto-updated: \(timestamp)).\nPinned/edited blocks are authoritative; agent blocks are rule-based and may be inaccurate — correct them in place or in me.pinned.md."
-        // This pass owns all fact/memory/preference blocks → prune stale ones
-        // (e.g. a previous run's "Bilingual" once the verdict becomes
-        // "Primary language") instead of letting them pile up and contradict.
+        let header = """
+        About the user (auto-updated: \(timestamp)).
+        Durable facts only — pinned (you) + memories (mull's nightly consolidation). Pinned/edited blocks are authoritative; edit in place or in me.pinned.md.
+        For live/current work, the AI should call the `whats_active_now` and `search` MCP tools rather than expect it here.
+        """
+        // Keep `fact:` in the managed prefixes so any rule-based facts written by
+        // earlier versions get pruned out of me.md (we no longer emit them).
         Curator.curate(relativePath: "me.md", header: header,
                        pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks,
                        managedPrefixes: ["fact:", "mem:", "pref:"])
@@ -114,31 +119,12 @@ enum LiveContextGenerator {
         lines.append("What the user is currently working on (\(timestamp)):")
         lines.append("")
 
-        // In progress / Resume — the single most useful signal for an AI: what
-        // you're working on right now and where to pick up. Derived from real
-        // activity (window titles → projects), not from stale memories.
-        // App names with no file are just "you had Code focused" — not a project;
-        // keep only entries with a real file, or a non-app project name.
-        let appNames: Set<String> = [
-            "Code", "Visual Studio Code", "Xcode", "Claude", "ChatGPT", "Firefox",
-            "Safari", "Chrome", "Google Chrome", "Arc", "Brave Browser", "Terminal",
-            "iTerm2", "Warp", "Ghostty", "Finder", "Mail", "Slack", "Discord",
-            "Notion", "Notes", "Preview", "Simulator",
-        ]
-        let inProgress = TimeBlockEngine(database: database).projectSnapshots(days: 7)
-            .filter { $0.daysSinceActive <= 2 }
-            .filter { $0.lastFile != nil || !appNames.contains($0.name) }
-        if let current = inProgress.first {
-            lines.append("In progress:")
-            for p in inProgress.prefix(4) {
-                var line = "- \(p.name) (\(p.lastActiveFormatted), \(p.totalDurationFormatted))"
-                if let file = p.lastFile, !file.isEmpty { line += " — last in \(file)" }
-                lines.append(line)
-            }
-            let resume = current.lastFile.map { "\(current.name) — \($0)" } ?? current.name
-            lines.append("Resume point: \(resume)")
-            lines.append("")
-        }
+        // Current work-in-progress (what you're doing now, where to resume) is no
+        // longer pre-digested here by rule-based project inference. The AI gets it
+        // at USE-TIME via the `whats_active_now` and `search` MCP tools, anchored on
+        // live state (DIRECTION §4/§9.1). now.md keeps only durable, owned context.
+        lines.append("Current activity: the AI should call the `whats_active_now` / `search` MCP tools.")
+        lines.append("")
 
         // Active projects from memories
         let projects = memories.filter { $0.memoryType == .project }
@@ -162,47 +148,10 @@ enum LiveContextGenerator {
             lines.append("")
         }
 
-        // Today's activity from live events (excluding noise apps)
-        let cal = Calendar.current
-        let startOfDay = cal.startOfDay(for: Date())
-        let todayEvents = database.fetchEvents(from: startOfDay, to: Date())
-            .filter { event in
-                guard let app = event.appName else { return true }
-                return !AnalyticsEngine.noiseApps.contains(app)
-            }
-
-        if !todayEvents.isEmpty {
-            // Window titles → compress typing sequences first, then dedup
-            let rawTitles = todayEvents
-                .filter { $0.eventType == .screenText }
-                .compactMap(\.textContent)
-                // Drop mull's own output, private-browsing titles (defense-in-depth
-                // for anything captured before the recorder filtered them), and
-                // synthetic test input.
-                .filter { !$0.isEmpty && !isMullOutput($0)
-                    && !PrivateBrowsing.isPrivate($0) && !TestInput.isLikelyTestInput($0) }
-
-            let compressed = compress(rawTitles)
-
-            var titleSeen = Set<String>()
-            var titleLines: [String] = []
-            for title in compressed {
-                let key = String(title.prefix(60).lowercased())
-                guard !titleSeen.contains(key) else { continue }
-                titleSeen.insert(key)
-                titleLines.append("- \(title)")
-            }
-
-            if !titleLines.isEmpty {
-                lines.append("Today's files/pages:")
-                lines.append(contentsOf: Array(titleLines.prefix(10)))
-                lines.append("")
-            }
-
-            // NOTE: app-usage event counts were intentionally removed — they're
-            // dashboard analytics (for the Insights UI), not context that changes
-            // an AI's answer. now.md carries only signal: who/now/tried/constraints.
-        }
+        // NOTE: "Today's files/pages" (rule-based digest of window titles) was
+        // removed too — that live activity is exactly what `whats_active_now` /
+        // `search` return on demand, anchored on the current entity. Pre-baking it
+        // here is the duplicate, stale "事前消化" DIRECTION §4 calls to cut.
 
         // Recent summaries (if mull has run before)
         if !summaries.isEmpty {

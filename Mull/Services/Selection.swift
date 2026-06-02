@@ -43,10 +43,12 @@ struct Selection {
                   raw.count >= 2, !TestInput.isLikelyTestInput(raw),
                   !SensitiveText.isSensitive(raw) else { return nil } // never surface secrets
 
-            let evType = classify(event)
+            // Prefer the stored columns (computed once at capture); fall back to
+            // recomputing for rows recorded before #4's backfill.
+            let evType = event.contentType ?? Signal.kind(text: raw, eventType: event.eventType, windowTitle: event.windowTitle)
             if let want = type, want.lowercased() != evType { return nil }
 
-            let evEntity = Entity.from(event.windowTitle ?? raw)
+            let evEntity = event.entity ?? Entity.from(event.windowTitle ?? raw)
             if let anchor = anchorEntity, evEntity?.lowercased() != anchor { return nil }
 
             // Components in [0,1].
@@ -60,7 +62,7 @@ struct Selection {
             // (Synonym recall without literal overlap is the embeddings step, later.)
             if !terms.isEmpty && lexical == 0 && type == nil { return nil }
             let entityBonus = (anchorEntity == nil && evEntity != nil) ? 0.3 : 0
-            let sal = salience(type: evType)
+            let sal = event.salience ?? Signal.salience(for: evType)
 
             // Weighted fusion. Lexical dominates when a query is present; recency
             // and salience keep "what matters now" afloat when it's vague.
@@ -75,34 +77,6 @@ struct Selection {
             .sorted { $0.0 > $1.0 }
             .prefix(limit)
             .map(\.1)
-    }
-
-    // MARK: - Cheap structure (rule-based, not summarization)
-
-    static func classify(_ event: RecordingEvent) -> String {
-        let t = (event.textContent ?? "").lowercased()
-        if t.contains("error") || t.contains("exception") || t.contains("failed")
-            || t.contains("traceback") || t.contains("fatal") { return "error" }
-        if t.contains("http://") || t.contains("https://") { return "web" }
-        // Self-authored note: a Japanese imperative / instruction to oneself.
-        if t.contains("して") || t.contains("ください") || t.contains("したい") { return "note" }
-        if t.contains("func ") || t.contains("{") || t.contains("=>") || t.contains("();") { return "code" }
-        if event.eventType == .screenText, let title = event.windowTitle ?? event.textContent,
-           title.contains(".") { return "file" }
-        if event.eventType == .clipboard { return "note" }
-        return "activity"
-    }
-
-    private static func salience(type: String) -> Double {
-        switch type {
-        case "error": return 0.95
-        case "note": return 0.85
-        case "decision": return 0.85
-        case "file": return 0.45
-        case "code": return 0.45
-        case "web": return 0.30
-        default: return 0.20
-        }
     }
 
     private static func tokens(_ s: String) -> [String] {

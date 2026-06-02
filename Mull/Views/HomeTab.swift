@@ -97,18 +97,12 @@ struct HomeTab: View {
         let mainName = top.first?.name
 
         return VStack(alignment: .leading, spacing: DS.lg) {
-            // Date + moon
-            HStack {
-                Text(Self.heroDate)
-                    .font(.system(size: 12, weight: .medium))
-                    .tracking(1.2)
-                    .textCase(.uppercase)
-                    .foregroundStyle(DS.inkFaint)
-                Spacer()
-                Image(systemName: "moon.stars")
-                    .font(.system(size: 12))
-                    .foregroundStyle(DS.moon.opacity(0.8))
-            }
+            // Date
+            Text(Self.heroDate)
+                .font(.system(size: 12, weight: .medium))
+                .tracking(1.2)
+                .textCase(.uppercase)
+                .foregroundStyle(DS.inkFaint)
 
             // Headline
             VStack(alignment: .leading, spacing: DS.xs) {

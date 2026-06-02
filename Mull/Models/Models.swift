@@ -11,6 +11,12 @@ struct RecordingEvent: Codable, FetchableRecord, PersistableRecord {
     var appName: String?
     var windowTitle: String?
     var textContent: String?
+    // Capture-time enrichment (#4): computed once and stored so the selection
+    // layer filters/ranks by them without recomputing. Nil for rows recorded
+    // before the migration (the reader falls back to recomputing).
+    var entity: String?
+    var contentType: String?
+    var salience: Double?
 
     enum EventType: String, Codable, DatabaseValueConvertible {
         case screenText

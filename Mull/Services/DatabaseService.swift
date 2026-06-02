@@ -326,6 +326,17 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v5_event_signal_columns") { db in
+            // Capture-time enrichment for the selection layer (#4): entity, a
+            // content kind, and a salience score, stored on the row instead of
+            // recomputed per query. Indexed so facet filtering can move to SQL.
+            try db.alter(table: "recording_events") { t in
+                t.add(column: "entity", .text).indexed()
+                t.add(column: "contentType", .text).indexed()
+                t.add(column: "salience", .double)
+            }
+        }
+
         // ── Future migrations go here ──
         // Example:
         //
@@ -493,6 +504,41 @@ final class DatabaseService: Sendable {
             }
         } catch {
             logger.warning("Failed to search summaries: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Candidate fetch for the selection layer (#4): narrows by time and, when
+    /// `useFTS` is set, by full-text match — pushing the heavy reduction into
+    /// SQLite instead of loading the whole window into memory. Entity/type
+    /// faceting and ranking then run in `Selection` over this smaller set (so
+    /// rows recorded before the v5 backfill still match via recompute).
+    /// FTS terms are reduced to alphanumerics, so a query can't break FTS syntax.
+    func fetchCandidates(query: String, since: Date, useFTS: Bool, limit: Int) -> [RecordingEvent] {
+        let terms = query
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 2 }
+        do {
+            return try dbPool.read { db in
+                if useFTS && !terms.isEmpty {
+                    let match = terms.map { "\($0)*" }.joined(separator: " ")
+                    return try RecordingEvent.fetchAll(db, sql: """
+                        SELECT recording_events.*
+                        FROM recording_events
+                        JOIN recording_events_fts ON recording_events.id = recording_events_fts.rowid
+                        WHERE recording_events_fts MATCH ? AND recording_events.timestamp >= ?
+                        ORDER BY rank
+                        LIMIT ?
+                    """, arguments: [match, since, limit])
+                }
+                return try RecordingEvent
+                    .filter(Column("timestamp") >= since)
+                    .order(Column("timestamp").desc)
+                    .limit(limit)
+                    .fetchAll(db)
+            }
+        } catch {
+            logger.warning("fetchCandidates failed: \(error.localizedDescription)")
             return []
         }
     }

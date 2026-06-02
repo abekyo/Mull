@@ -533,12 +533,18 @@ final class RecordingService {
 
         print("[mull] Recording event: \(type.rawValue) — \(cleaned.prefix(60))")
 
+        // Capture-time enrichment (#4): classify once, store on the row, so the
+        // selection layer doesn't recompute kind/salience/entity per query.
+        let signal = Signal.classify(text: cleaned, eventType: type, windowTitle: currentWindowTitle)
         let event = RecordingEvent(
             timestamp: Date(),
             eventType: type,
             appName: currentAppName,
             windowTitle: currentWindowTitle,
-            textContent: cleaned
+            textContent: cleaned,
+            entity: Entity.from(currentWindowTitle ?? cleaned),
+            contentType: signal.type,
+            salience: signal.salience
         )
         database.insertEvent(event)
     }

@@ -141,7 +141,12 @@ struct OnboardingView: View {
                     name: "Accessibility",
                     detail: "Read window titles",
                     granted: appState.permissions.accessibilityGranted,
-                    action: { appState.permissions.openAccessibilitySettings() }
+                    action: {
+                        // Show the system grant dialog first (low friction), then
+                        // open Settings so the user can flip the toggle either way.
+                        appState.permissions.promptAccessibility()
+                        appState.permissions.openAccessibilitySettings()
+                    }
                 )
                 permissionRow(
                     name: "Input Monitoring",

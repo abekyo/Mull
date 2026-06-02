@@ -34,7 +34,17 @@ struct FullWindowView: View {
 
     // Dialog state
     @State private var showNewFile = false
+    @State private var showNewFolder = false
     @State private var dialogName = ""
+
+    private enum NewKind { case note, folder }
+    private func startNew(_ kind: NewKind) {
+        dialogName = ""
+        switch kind {
+        case .note: showNewFile = true
+        case .folder: showNewFolder = true
+        }
+    }
 
     private var mullDir: URL { MullDirectory.root }
 
@@ -49,32 +59,18 @@ struct FullWindowView: View {
         .frame(minWidth: 760, minHeight: 560)
         .onAppear { refreshFileTree() }
         .sheet(isPresented: $showNewFile) { newFileSheet }
+        .sheet(isPresented: $showNewFolder) { newFolderSheet }
     }
 
     // MARK: - Sidebar
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header — moon wordmark
+            // Header — utility actions only (the window title already says "mull").
             HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "moon.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DS.moon)
-                    Text("mull")
-                        .font(.system(size: 14, weight: .medium))
-                        .tracking(0.5)
-                        .foregroundStyle(DS.ink)
-                }
                 Spacer()
-                HStack(spacing: DS.sm) {
-                    sidebarButton(icon: "doc.badge.plus", help: "New Note") {
-                        dialogName = ""
-                        showNewFile = true
-                    }
-                    sidebarButton(icon: "arrow.clockwise", help: "Refresh") { refreshFileTree() }
-                    sidebarButton(icon: "folder", help: "Open in Finder") { NSWorkspace.shared.open(mullDir) }
-                }
+                sidebarButton(icon: "arrow.clockwise", help: "Refresh") { refreshFileTree() }
+                sidebarButton(icon: "folder", help: "Reveal ~/mull in Finder") { NSWorkspace.shared.open(mullDir) }
             }
             .padding(.horizontal, DS.md)
             .padding(.vertical, DS.sm)
@@ -112,59 +108,40 @@ struct FullWindowView: View {
             Divider()
 
             List(selection: $selection) {
-                // Pinned views
-                Section("Pinned") {
-                    Label("Home", systemImage: "house")
-                        .tag(SidebarItem.home)
-
-                    Label("Calendar", systemImage: "calendar")
-                        .tag(SidebarItem.calendar)
-
-                    Label("Live", systemImage: "waveform")
-                        .tag(SidebarItem.live)
-
-                    Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
-                        .tag(SidebarItem.chat)
+                // ── The app: primary surfaces ──
+                Section {
+                    Label("Home", systemImage: "house").tag(SidebarItem.home)
+                    Label("Calendar", systemImage: "calendar").tag(SidebarItem.calendar)
+                    Label("Live", systemImage: "waveform").tag(SidebarItem.live)
+                    Label("Chat", systemImage: "bubble.left.and.text.bubble.right").tag(SidebarItem.chat)
                 }
 
-                // Context files
-                Section("Context") {
+                // ── Your files: the ~/mull folder, editable ──
+                Section {
+                    // Core context, always present
                     ForEach(contextFiles, id: \.path) { file in
-                        sidebarRow(file: file)
-                            .tag(SidebarItem.file(file))
+                        fileRow(file).tag(SidebarItem.file(file))
                     }
-                }
-
-                // Daily summaries
-                let dailyFiles = dailySummaryFiles
-                if !dailyFiles.isEmpty {
-                    Section("Daily") {
-                        ForEach(dailyFiles, id: \.path) { file in
-                            sidebarRow(file: file)
-                                .tag(SidebarItem.file(file))
+                    // Real folders — collapsible, with a folder icon + count
+                    folderDisclosure("Daily", files: dailySummaryFiles)
+                    folderDisclosure("Memory", files: memoryFolderFiles)
+                    folderDisclosure("Notes", files: userNoteFiles)
+                } header: {
+                    HStack {
+                        Text("Files")
+                        Spacer()
+                        Menu {
+                            Button { startNew(.note) } label: { Label("New Note", systemImage: "doc.badge.plus") }
+                            Button { startNew(.folder) } label: { Label("New Folder", systemImage: "folder.badge.plus") }
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(DS.moon)
                         }
-                    }
-                }
-
-                // Memory files
-                let memoryFiles = memoryFolderFiles
-                if !memoryFiles.isEmpty {
-                    Section("Memory") {
-                        ForEach(memoryFiles, id: \.path) { file in
-                            sidebarRow(file: file)
-                                .tag(SidebarItem.file(file))
-                        }
-                    }
-                }
-
-                // User notes
-                let notes = userNoteFiles
-                if !notes.isEmpty {
-                    Section("Notes") {
-                        ForEach(notes, id: \.path) { file in
-                            sidebarRow(file: file)
-                                .tag(SidebarItem.file(file))
-                        }
+                        .buttonStyle(.plain)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("New note or folder")
                     }
                 }
             }
@@ -183,25 +160,48 @@ struct FullWindowView: View {
         .help(help)
     }
 
-    private func sidebarRow(file: mullFile) -> some View {
-        HStack(spacing: DS.sm) {
-            Circle()
-                .fill(fileAccent(file))
-                .frame(width: 6, height: 6)
-
-            Text(displayName(file))
-                .font(DS.bodyFont)
-                .lineLimit(1)
-
-            Spacer()
-
-            if file.isAutoGenerated {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.3))
-                    .frame(width: 4, height: 4)
+    /// A file row — a document icon + name, with an "auto" mark for mull-generated files.
+    private func fileRow(_ file: mullFile) -> some View {
+        Label {
+            HStack(spacing: DS.sm) {
+                Text(displayName(file))
+                    .font(DS.bodyFont)
+                    .lineLimit(1)
+                Spacer()
+                if file.isAutoGenerated {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 8))
+                        .foregroundStyle(DS.moon.opacity(0.55))
+                        .help("Auto-generated by mull")
+                }
             }
+        } icon: {
+            Image(systemName: "doc.text")
+                .foregroundStyle(fileAccent(file))
         }
         .contextMenu { fileContextMenu(file: file) }
+    }
+
+    /// A real, collapsible folder row — folder icon + name + item count.
+    @ViewBuilder
+    private func folderDisclosure(_ name: String, files: [mullFile]) -> some View {
+        if !files.isEmpty {
+            DisclosureGroup {
+                ForEach(files, id: \.path) { file in
+                    fileRow(file).tag(SidebarItem.file(file))
+                }
+            } label: {
+                HStack(spacing: DS.sm) {
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(DS.moon.opacity(0.7))
+                    Text(name).font(DS.bodyFont)
+                    Spacer()
+                    Text("\(files.count)")
+                        .font(DS.miniFont)
+                        .foregroundStyle(DS.inkFaint)
+                }
+            }
+        }
     }
 
     // MARK: - Detail
@@ -413,6 +413,38 @@ struct FullWindowView: View {
         refreshFileTree()
         let file = mullFile(name: fileName, url: filePath, size: Int64(content.utf8.count), modified: Date(), isAutoGenerated: false)
         selection = .file(file)
+    }
+
+    private var newFolderSheet: some View {
+        VStack(alignment: .leading, spacing: DS.md) {
+            Text("New Folder").font(DS.titleFont)
+            TextField("folder name", text: $dialogName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { createFolder() }
+            Text("~/mull/notes/\(sanitized(dialogName))/")
+                .font(DS.captionFont)
+                .foregroundStyle(.tertiary)
+            HStack {
+                Button("Cancel") { showNewFolder = false }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Create") { createFolder() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(dialogName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(DS.xl)
+        .frame(width: 300)
+    }
+
+    private func createFolder() {
+        let name = sanitized(dialogName)
+        guard !name.isEmpty else { return }
+        let dir = mullDir.appendingPathComponent("notes").appendingPathComponent(name)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        showNewFolder = false
+        dialogName = ""
+        refreshFileTree()
     }
 
     // MARK: - Context Menu
