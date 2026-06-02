@@ -15,6 +15,14 @@ struct TimeBlockEngine {
 
     let database: DatabaseService
 
+    /// Maximum seconds a single inter-event gap can contribute to a block's
+    /// `activeDuration`. Events are dense during real activity (keystrokes flush
+    /// every ~3s, window titles poll every 5s), so a gap longer than this almost
+    /// always means the user paused — only this much of it counts as engaged
+    /// time. Blocks still *merge* across gaps up to 180s for a clean timeline;
+    /// this cap only governs the activity total, not the visual span.
+    static let activeGapCap: TimeInterval = 90
+
     /// Generate time blocks for a given day.
     func generateBlocks(for date: Date) -> [TimeBlock] {
         let calendar = Calendar.current
@@ -52,12 +60,14 @@ struct TimeBlockEngine {
                 if segment.app == block.app && gap < 180 {
                     block.end = segment.timestamp
                     block.eventCount += 1
+                    block.activeDuration += min(gap, Self.activeGapCap)
                     block.addContext(segment)
                     currentBlock = block
                 } else if gap < 180 {
                     // Different app but tiny gap → still extend (multitasking)
                     block.end = segment.timestamp
                     block.eventCount += 1
+                    block.activeDuration += min(gap, Self.activeGapCap)
                     block.addContext(segment)
                     block.isMultiApp = true
                     currentBlock = block
@@ -201,6 +211,13 @@ struct TimeBlock: Identifiable {
     var label: String = ""
     var isMultiApp = false
 
+    /// Engaged time, in seconds — the sum of inter-event gaps with each gap
+    /// capped (see `TimeBlockEngine.activeGapCap`). Unlike `duration` (raw
+    /// wall-clock `end − start`, used for the calendar geometry), this excludes
+    /// long idle pauses so "deep work" counts and "what you mainly did" totals
+    /// reflect real activity, not time the user stepped away mid-block.
+    var activeDuration: TimeInterval = 0
+
     // Context accumulation
     private var windowTitles: [String: Int] = [:]
     private var clipboardTexts: [String] = []
@@ -339,7 +356,7 @@ extension TimeBlockEngine {
 
         // Step 2: Create ActivitySummary per group, sorted by total duration
         var activities = taskGroups.map { key, blocks -> ActivitySummary in
-            let totalDuration = blocks.reduce(0.0) { $0 + $1.duration }
+            let totalDuration = blocks.reduce(0.0) { $0 + $1.activeDuration }
             let totalEvents = blocks.reduce(0) { $0 + $1.eventCount }
             let primaryApp = mostCommonApp(in: blocks)
             let label = bestLabel(for: blocks, key: key)
@@ -358,12 +375,12 @@ extension TimeBlockEngine {
         let main = Array(activities.prefix(3))
         let other = Array(activities.dropFirst(3).prefix(5))
 
-        // Step 4: App breakdown
+        // Step 4: App breakdown (engaged time, not wall-clock)
         var appDurations: [String: TimeInterval] = [:]
         for block in blocks {
-            appDurations[block.app, default: 0] += block.duration
+            appDurations[block.app, default: 0] += block.activeDuration
         }
-        let totalDuration = blocks.reduce(0.0) { $0 + $1.duration }
+        let totalDuration = blocks.reduce(0.0) { $0 + $1.activeDuration }
         let appBreakdown = appDurations
             .sorted { $0.value > $1.value }
             .map { (app: $0.key, duration: $0.value, percentage: $0.value / max(totalDuration, 1) * 100) }

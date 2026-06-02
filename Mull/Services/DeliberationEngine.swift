@@ -1,7 +1,7 @@
 import Foundation
 
 /// The "deliberate" tier: a periodic LLM pass that organizes each active
-/// project into its own briefing file at `~/mull/projects/<slug>.md`.
+/// project into its own briefing file at `~/mull/03_projects/<slug>.md`.
 ///
 /// This is the autonomous-agent layer from Direction v2. The always-on 60s
 /// rule-based tier keeps me.md/now.md/full.md fresh for free; this slower,
@@ -112,13 +112,13 @@ final class DeliberationEngine {
 
     // MARK: - Writing (provenance-safe)
 
-    /// Upsert the agent block into `~/mull/projects/<slug>.md` through the Curator
+    /// Upsert the agent block into `~/mull/03_projects/<slug>.md` through the Curator
     /// — the one sanctioned writer for curated files. User prose at the top of the
     /// file is preserved as the header, and if the user edits the deliberation
     /// block directly, the Curator's hash check promotes it to `.human` and stops
     /// overwriting it. Returns the relative path on success.
     private func writeProjectFile(name: String, body: String) -> String? {
-        let path = "projects/\(slug(name)).md"
+        let path = "03_projects/\(slug(name)).md"
         let existing = MullDirectory.read(path) ?? ""
         let (existingHeader, _) = ContextBlockFile.parse(existing)
         let header = existingHeader.isEmpty ? "# \(name)" : existingHeader

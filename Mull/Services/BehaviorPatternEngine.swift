@@ -241,8 +241,8 @@ struct BehaviorPatternEngine {
             guard switches > 0 else { continue }
 
             let blocks = engine.generateBlocks(for: date)
-            let deepBlocks = blocks.filter { $0.duration >= 7200 }.count
-            let totalDuration = blocks.reduce(0.0) { $0 + $1.duration }
+            let deepBlocks = blocks.filter { $0.activeDuration >= 7200 }.count
+            let totalDuration = blocks.reduce(0.0) { $0 + $1.activeDuration }
 
             days.append(DayMetrics(switches: switches, deepBlocks: deepBlocks, totalDuration: totalDuration))
         }

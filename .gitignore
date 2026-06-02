@@ -25,8 +25,8 @@ Package.resolved
 *~
 
 # Xcodegen (regeneratable)
-# Mull.xcodeproj is generated from project.yml
-Mull.xcodeproj/
+# Mull.xcodeproj is generated from project.yml (glob also catches stray "Mull 2.xcodeproj")
+Mull*.xcodeproj/
 
 # Claude Code local state
 .claude/

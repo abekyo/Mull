@@ -96,9 +96,10 @@ final class ChatViewModel: ObservableObject {
     private func projectFiles() -> [String] {
         let fm = FileManager.default
         let root = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("mull/projects", isDirectory: true)
+            .appendingPathComponent("mull/03_projects", isDirectory: true)
         guard let names = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
-        return names.filter { $0.hasSuffix(".md") }.sorted().map { "projects/\($0)" }
+        return names.filter { $0.hasSuffix(".md") && $0 != "index.md" }
+            .sorted().map { "03_projects/\($0)" }
     }
 }
 

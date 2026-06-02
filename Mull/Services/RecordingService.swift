@@ -226,6 +226,12 @@ final class RecordingService {
             queue: .main
         ) { [weak self] _ in
             guard let self, !self.isPaused else { return }
+            // Flush any pending keystrokes BEFORE the current-app pointer moves,
+            // so text typed in the app being left is attributed to that app —
+            // not stamped with the app just switched to. (recordEvent reads the
+            // live currentAppName/currentWindowTitle, which updateCurrentApp is
+            // about to overwrite.)
+            self.flushKeystrokeBuffer()
             self.recordAppSession()
             let prevApp = self.currentAppName
             self.updateCurrentApp()

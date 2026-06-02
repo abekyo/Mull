@@ -48,6 +48,7 @@ final class AppState: ObservableObject {
     let calendar: CalendarService
     let email: EmailService
     let proactive: ProactiveEngine
+    let ingestion: IngestionService
 
     private var refreshTimer: Timer?
     private var lastRefreshDate: Date = Date()
@@ -55,6 +56,7 @@ final class AppState: ObservableObject {
 
     deinit {
         refreshTimer?.invalidate()
+        ingestion.stop()
         mullEngine.cancelSchedule()
         if let monitor = globalShortcutMonitor {
             NSEvent.removeMonitor(monitor)
@@ -66,6 +68,8 @@ final class AppState: ObservableObject {
     init() {
         // Validate ~/mull directory before anything else
         MullDirectory.setup()
+        // Scaffold the v3 folder ontology (idempotent, non-destructive).
+        FolderOntology.scaffold()
 
         self.database = DatabaseService()
         self.recorder = RecordingService(database: database)
@@ -74,6 +78,9 @@ final class AppState: ObservableObject {
         self.calendar = CalendarService()
         self.email = EmailService(database: database)
         self.proactive = ProactiveEngine(database: database, calendar: calendar, analytics: analytics)
+        // Phase B ingestion — pulls from configured MCP sources. No-op until the
+        // user registers a source (no surprise network access).
+        self.ingestion = IngestionService.fromConfiguredSources()
 
         // Sync LLM provider from UserDefaults
         if let saved = UserDefaults.standard.string(forKey: "llmProvider"),
@@ -83,6 +90,9 @@ final class AppState: ObservableObject {
 
         loadTodaySummary()
         loadRecentSummaries()
+
+        // Pull from configured sources every 30 min (no-op if none configured).
+        ingestion.schedule(every: 1800)
 
         // Auto-start recording if onboarding is already done
         // Don't gate on AXIsProcessTrusted — it lies on debug builds.
