@@ -292,7 +292,7 @@ enum LiveContextGenerator {
         let todayEvents = database.fetchEvents(from: startOfDay, to: Date())
             .filter { event in
                 guard let app = event.appName else { return true }
-                return !AnalyticsEngine.noiseApps.contains(app)
+                return !AnalyticsEngine.isNoiseApp(app)
             }
 
         let clipEvents = todayEvents.filter { $0.eventType == .clipboard }

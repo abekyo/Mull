@@ -257,7 +257,7 @@ final class ChatViewModel: ObservableObject {
     private nonisolated static func dayDigest(for date: Date, title: String,
                                               database: DatabaseService) -> String? {
         let activity = TimeBlockEngine(database: database).analyzDay(for: date)
-        let main = activity.mainActivities.filter { !AnalyticsEngine.noiseApps.contains($0.app) }
+        let main = activity.mainActivities.filter { !AnalyticsEngine.isNoiseApp($0.app) }
         guard activity.totalDuration > 60, !main.isEmpty else { return nil }
         var lines = ["**\(title)**", ""]
         for a in main.prefix(5) {

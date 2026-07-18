@@ -32,7 +32,7 @@ final class AnalyticsEngine {
 
         for event in textEvents {
             guard let text = event.textContent else { continue }
-            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
+            guard let app = event.appName, !Self.isNoiseApp(app) else { continue }
             // Skip synthetic test/QA input (also cleans data recorded before the
             // recording-gate filter existed).
             if TestInput.isLikelyTestInput(text) { continue }
@@ -85,7 +85,7 @@ final class AnalyticsEngine {
 
         for event in events {
             guard let text = event.textContent else { continue }
-            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
+            guard let app = event.appName, !Self.isNoiseApp(app) else { continue }
             if TestInput.isLikelyTestInput(text) { continue }
             if text.contains("auto-updated") || text.hasPrefix("/Users/") { continue }
             if text.contains("http://") || text.contains("https://") { continue }
@@ -138,11 +138,23 @@ final class AnalyticsEngine {
     // MARK: - App Usage Patterns
 
     /// Apps to exclude from analytics output.
+    ///
+    /// Matched case-insensitively via `isNoiseApp`. `appName` comes from
+    /// `NSRunningApplication.localizedName`, which is "Mull" (project.yml sets
+    /// PRODUCT_NAME: Mull) — a case-sensitive `Set.contains("mull")` never
+    /// matched it, so mull's own activity was being counted in the user's
+    /// analytics. The list previously held "mull" twice, which a Set silently
+    /// deduped, hiding the fact that the capitalized name was never covered.
     static let noiseApps: Set<String> = [
-        "mull", "mull", "UserNotificationCenter", "NotificationCenter",
-        "SecurityAgent", "loginwindow", "universalAccessAuthWarn",
-        "System Settings", "SystemPreferences",
+        "mull", "usernotificationcenter", "notificationcenter",
+        "securityagent", "loginwindow", "universalaccessauthwarn",
+        "system settings", "systempreferences",
     ]
+
+    /// Whether this app should be excluded from analytics.
+    static func isNoiseApp(_ app: String) -> Bool {
+        noiseApps.contains(app.lowercased())
+    }
 
     /// App usage breakdown with time estimates.
     func appUsage(days: Int = 7) -> [AppUsageStat] {
@@ -152,7 +164,7 @@ final class AnalyticsEngine {
 
         var appEventCounts: [String: Int] = [:]
         for event in events {
-            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
+            guard let app = event.appName, !Self.isNoiseApp(app) else { continue }
             appEventCounts[app, default: 0] += 1
         }
 
@@ -247,7 +259,7 @@ final class AnalyticsEngine {
 
         for event in events {
             guard let text = event.textContent else { continue }
-            guard let app = event.appName, !Self.noiseApps.contains(app) else { continue }
+            guard let app = event.appName, !Self.isNoiseApp(app) else { continue }
 
             // Drop synthetic test/QA input — it's all ASCII letters and would
             // read as English.

@@ -258,7 +258,7 @@ struct FactExtractor {
         // Primary work tools — not just "code editors" but whatever they use most
         let workApps = apps
             .filter { !browsers.contains($0.appName) }
-            .filter { !AnalyticsEngine.noiseApps.contains($0.appName) }
+            .filter { !AnalyticsEngine.isNoiseApp($0.appName) }
             .prefix(3)
         if workApps.count >= 2 {
             let names = workApps.map(\.appName).joined(separator: " + ")

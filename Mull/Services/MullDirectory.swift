@@ -8,9 +8,36 @@ private let logger = Logger(subsystem: "com.mull.app", category: "Directory")
 /// All code that reads/writes ~/mull should go through this.
 enum MullDirectory {
 
-    /// Root directory: ~/mull
-    static let root: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("mull")
+    /// True when this process is an XCTest run.
+    ///
+    /// The test host is the app itself, so `AppState.init()` boots on every test
+    /// run — and it calls `setup()` and `FolderOntology.scaffold()`, which were
+    /// rewriting the eight `*/index.md` files in the user's REAL vault every
+    /// time anyone ran the suite. Tests must never mutate real user data.
+    static let isRunningTests: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        return env["XCTestConfigurationFilePath"] != nil
+            || env["XCTestBundlePath"] != nil
+            || env["XCTestSessionIdentifier"] != nil
+    }()
+
+    /// Root directory: ~/mull — or a throwaway directory under XCTest.
+    ///
+    /// Redirecting the root (rather than guarding each writer) means every path
+    /// into the vault is covered at once: Curator, FolderOntology, FolderFiller,
+    /// RawStore, and the MCP write tools. It also makes those write paths safely
+    /// testable, which they were not before.
+    static let root: URL = {
+        guard isRunningTests else {
+            return FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("mull")
+        }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mull-test-vault-\(ProcessInfo.processInfo.processIdentifier)",
+                                    isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
 
     /// Subdirectories created on setup.
     static let daily: URL = root.appendingPathComponent("daily")

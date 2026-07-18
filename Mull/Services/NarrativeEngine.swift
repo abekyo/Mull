@@ -233,7 +233,7 @@ struct NarrativeEngine {
         let clips = database.fetchEvents(from: since, to: Date())
             .filter { $0.eventType == .clipboard }
             .filter { e in
-                guard let app = e.appName, !AnalyticsEngine.noiseApps.contains(app) else { return false }
+                guard let app = e.appName, !AnalyticsEngine.isNoiseApp(app) else { return false }
                 guard let text = e.textContent, text.count > 10, text.count < 200 else { return false }
                 return true
             }

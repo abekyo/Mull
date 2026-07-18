@@ -586,14 +586,20 @@ final class RecordingService {
             return true
         }
 
-        // Also check by app name (catches renamed bundles, Xcode debug builds)
+        // Also check by app name (catches renamed bundles, Xcode debug builds).
+        //
+        // Compared lowercased: localizedName is "Mull" (project.yml sets
+        // PRODUCT_NAME: Mull), so a case-sensitive lookup for "mull" never
+        // matched and this fallback covered nothing. The list also held "mull"
+        // twice — a Set deduped it silently, hiding that the intended "old name
+        // + new name" pair was really just one entry.
         let excludedNames: Set<String> = [
-            "mull", "mull",  // Our own app (old + new name)
-            "UserNotificationCenter", "NotificationCenter",
-            "SecurityAgent", "loginwindow",
-            "universalAccessAuthWarn",
+            "mull", "whatly",   // our own app, before and after the rename
+            "usernotificationcenter", "notificationcenter",
+            "securityagent", "loginwindow",
+            "universalaccessauthwarn",
         ]
-        if let name = app.localizedName, excludedNames.contains(name) {
+        if let name = app.localizedName, excludedNames.contains(name.lowercased()) {
             return true
         }
 

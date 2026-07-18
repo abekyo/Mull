@@ -850,9 +850,33 @@ final class MCPServer {
     }
 
     private func send(_ msg: [String: Any]) {
+        // Test seam (see `handleForTesting`): when a sink is installed the
+        // response is handed to it instead of stdout. Nil in production, so the
+        // stdio path below is unchanged.
+        if let sink = responseSink {
+            sink(msg)
+            return
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: msg),
               let json = String(data: data, encoding: .utf8) else { return }
         print(json) // stdout
         fflush(stdout)
+    }
+
+    // MARK: - Testability
+
+    /// Where `send` delivers responses when set. Internal for testability only.
+    private var responseSink: (([String: Any]) -> Void)?
+
+    /// Internal for testability: dispatch one JSON-RPC message and return the
+    /// response that `run()` would have written to stdout (nil for notifications
+    /// and other no-reply methods). Printing to stdout during a test is both
+    /// unobservable and, in the real server, the JSON-RPC stream itself.
+    func handleForTesting(_ msg: [String: Any]) -> [String: Any]? {
+        var captured: [String: Any]?
+        responseSink = { captured = $0 }
+        defer { responseSink = nil }
+        handle(msg)
+        return captured
     }
 }

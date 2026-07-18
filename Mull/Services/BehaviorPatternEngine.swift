@@ -105,7 +105,7 @@ struct BehaviorPatternEngine {
             let hour = Calendar.current.component(.hour, from: event.timestamp)
             guard peakHours.contains(hour) else { continue }
             guard let app = event.appName else { continue }
-            guard !AnalyticsEngine.noiseApps.contains(app) else { continue }
+            guard !AnalyticsEngine.isNoiseApp(app) else { continue }
             peakAppCounts[app, default: 0] += 1
         }
 

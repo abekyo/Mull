@@ -20,7 +20,7 @@ struct CurrentState {
         let events = database.fetchEvents(from: now.addingTimeInterval(-window), to: now)
             .filter { event in
                 guard let app = event.appName else { return true }
-                return !noiseApps.contains(app)
+                return !AnalyticsEngine.isNoiseApp(app)
             }
         guard !events.isEmpty else {
             return CurrentState(activeApp: nil, activeTitle: nil, activeEntity: nil,
@@ -97,11 +97,10 @@ struct CurrentState {
         return text
     }
 
-    private static let noiseApps: Set<String> = [
-        "mull", "UserNotificationCenter", "NotificationCenter",
-        "SecurityAgent", "loginwindow", "universalAccessAuthWarn",
-        "System Settings", "SystemPreferences",
-    ]
+    // The noise list lives in AnalyticsEngine and is matched case-insensitively
+    // (`localizedName` is "Mull", "System Settings" — a case-sensitive lookup
+    // silently matched nothing). A second private copy here drifted from it and
+    // had the same bug, so this now defers to the one definition.
 
     /// Best-effort project/entity from a window title. Thin wrapper over the
     /// shared `Entity` extractor (kept for call sites and tests).

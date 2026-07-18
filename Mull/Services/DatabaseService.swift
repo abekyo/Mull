@@ -35,13 +35,28 @@ final class DatabaseService: Sendable {
             logger.error("Failed to create app support directory: \(error.localizedDescription)")
         }
 
-        let dbPath = appSupport.appendingPathComponent("mull.sqlite").path
+        // Under XCTest the test host is the app, so AppState.init() constructs a
+        // DatabaseService on every run — against the user's real recorded
+        // history. Sandboxing happened to make that read-only, but the suite was
+        // one entitlement change away from mutating real data. Redirect instead.
+        let dbPath: String
+        if MullDirectory.isRunningTests {
+            dbPath = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mull-test-\(ProcessInfo.processInfo.processIdentifier).sqlite")
+                .path
+        } else {
+            dbPath = appSupport.appendingPathComponent("mull.sqlite").path
+        }
 
         // One-time migration from the pre-rename location
         // (~/Library/Application Support/Whatly/whatly.sqlite). Moves the DB and its
         // WAL/SHM sidecars so the user keeps their full recorded history.
+        // Skipped under test: the redirected temp path never exists, so this
+        // would otherwise fire on every test run and move the user's real legacy
+        // database out from under them.
         let fmMigrate = FileManager.default
-        if !fmMigrate.fileExists(atPath: dbPath),
+        if !MullDirectory.isRunningTests,
+           !fmMigrate.fileExists(atPath: dbPath),
            let legacyDir = fmMigrate.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
                .appendingPathComponent("Whatly", isDirectory: true) {
             for suffix in ["", "-wal", "-shm"] {

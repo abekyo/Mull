@@ -32,7 +32,7 @@ struct TimeBlockEngine {
         let events = database.fetchEvents(from: startOfDay, to: min(endOfDay, Date()))
             .filter { event in
                 guard let app = event.appName else { return true }
-                return !AnalyticsEngine.noiseApps.contains(app)
+                return !AnalyticsEngine.isNoiseApp(app)
             }
         guard !events.isEmpty else { return [] }
 
@@ -338,11 +338,11 @@ struct DailyActivity {
         var lines: [String] = []
 
         lines.append("What you mainly did today:")
-        for activity in mainActivities where !AnalyticsEngine.noiseApps.contains(activity.app) {
+        for activity in mainActivities where !AnalyticsEngine.isNoiseApp(activity.app) {
             lines.append("- \(activity.label) (\(activity.durationFormatted), \(activity.app))")
         }
 
-        let filteredOther = otherActivities.filter { !AnalyticsEngine.noiseApps.contains($0.app) }
+        let filteredOther = otherActivities.filter { !AnalyticsEngine.isNoiseApp($0.app) }
         if !filteredOther.isEmpty {
             lines.append("")
             lines.append("Also:")
