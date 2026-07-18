@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 /// Aggregates raw events into time blocks for calendar-style timeline.
 /// Pure rule-based — no LLM needed.
@@ -248,8 +247,6 @@ struct TimeBlock: Identifiable {
         return f.string(from: end)
     }
 
-    var color: Color { DS.appColor(app) }
-
     init(from segment: EventSegment) {
         self.app = segment.app
         self.start = segment.timestamp
@@ -378,7 +375,6 @@ struct ActivitySummary: Identifiable {
         return m > 0 ? "\(h)h \(m)m" : "\(h)h"
     }
 
-    var color: Color { blocks.first?.color ?? .secondary }
 }
 
 extension TimeBlockEngine {
@@ -571,7 +567,6 @@ struct ProjectSnapshot: Identifiable {
         return "\(daysSinceActive) days ago"
     }
 
-    var color: Color { DS.appColor(primaryApp) }
 }
 
 struct DaySnapshot: Identifiable {

@@ -1,6 +1,5 @@
 import Foundation
 import EventKit
-import SwiftUI
 
 /// A calendar event for display in the week view.
 struct CalendarEvent: Identifiable {
@@ -9,7 +8,10 @@ struct CalendarEvent: Identifiable {
     let start: Date
     let end: Date
     let location: String?
-    let color: Color
+    /// The calendar's tint, as CoreGraphics rather than SwiftUI — this type
+    /// lives in the service layer, which the MCP binary also links. See
+    /// `CalendarEvent.color` in the Views layer for the SwiftUI form.
+    let calendarColor: CGColor
 
     var duration: TimeInterval { end.timeIntervalSince(start) }
 
@@ -160,7 +162,7 @@ final class CalendarService {
                 start: event.startDate,
                 end: event.endDate,
                 location: event.location,
-                color: Color(cgColor: event.calendar.cgColor)
+                calendarColor: event.calendar.cgColor
             ))
         }
 
@@ -201,7 +203,7 @@ final class CalendarService {
                 start: ev.startDate,
                 end: ev.endDate,
                 location: ev.location,
-                color: Color(cgColor: ev.calendar.cgColor)
+                calendarColor: ev.calendar.cgColor
             ))
         }
         return results

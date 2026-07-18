@@ -6,7 +6,8 @@ import Foundation
 ///
 /// When you switch into a project (a state change), it runs one end-to-end pass:
 ///   1. ANCHOR  — read the present (CurrentState: the active entity).
-///   2. SELECT  — pull the relevant slice for it (the selection layer).
+///   2. SELECT  — pull the relevant slice for it (the selection layer), plus any
+///                decision you already recorded about it.
 ///   3. JUDGE   — an LLM brief when a provider is configured; a structured
 ///                digest otherwise, so the loop always closes.
 ///   4. WRITE   — persist it as an editable, provenance-protected Curator block
@@ -71,14 +72,29 @@ final class ProactiveLoop {
             let items = Selection.rank(events: events, query: "", entity: entity,
                                        type: nil, now: now, since: since, limit: 6)
 
+            // Knowledge entries live in their own table, so the ranking pass above —
+            // which reads recording_events — can never surface one. This was
+            // ProactiveEngine's "You know this" notification; it is folded in here
+            // instead of firing as a second banner, and it anchors on the entity
+            // rather than on the raw window title it used to match against.
+            let prior = db.findRelevantKnowledge(context: entity, limit: 1).first
+                .flatMap { entry -> String? in
+                    // Something you decided today isn't news — it's what you just did.
+                    let days = Calendar.current
+                        .dateComponents([.day], from: entry.sourceDate, to: now).day ?? 0
+                    guard days >= 1 else { return nil }
+                    var line = "\(entry.topic): \(entry.decision)"
+                    if let why = entry.reasoning, !why.isEmpty { line += " — why: \(why)" }
+                    return line
+                }
+
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 guard !items.isEmpty else { self.lastEntity = entity; return }  // nothing to say yet
                 guard !self.briefing else { return }
 
-                // ProactiveEngine reacts to the same switch from the same tick.
-                // Whoever claims the project first speaks; the other stays quiet,
-                // so one app switch can't yield two briefs about it.
+                // Per-project cooldown on top of this loop's own `cooldown`, so
+                // hopping away and back doesn't re-announce the same project.
                 guard Notifier.shared.claimProjectAnnouncement(entity) else {
                     self.lastEntity = entity
                     return
@@ -87,7 +103,7 @@ final class ProactiveLoop {
                 self.lastEntity = entity
                 self.lastFiredAt = Date()
                 self.briefing = true
-                Task { await self.brief(entity: entity, items: items) }
+                Task { await self.brief(entity: entity, items: items, priorDecision: prior) }
             }
         }
     }
@@ -95,10 +111,14 @@ final class ProactiveLoop {
     // MARK: - Judge → write-back → hand off
 
     /// Caller sets `briefing`; this clears it on every exit path.
-    private func brief(entity: String, items: [Selection.Result]) async {
+    private func brief(entity: String, items: [Selection.Result], priorDecision: String?) async {
         defer { briefing = false }
 
-        let digest = items.map { "- \($0.type): \($0.text)" }.joined(separator: "\n")
+        let recent = items.map { "- \($0.type): \($0.text)" }.joined(separator: "\n")
+        // The recorded decision joins the same digest the judge reads: "you already
+        // settled this" is often the single most useful thing to know on resumption,
+        // and it should shape the headline rather than trail it.
+        let digest = priorDecision.map { "\(recent)\n- decision: \($0)" } ?? recent
         let headline = await judge(entity: entity, digest: digest)
 
         // 4. Write-back: one editable block per project, updated in place. The

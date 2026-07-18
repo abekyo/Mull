@@ -96,28 +96,22 @@ targets:
   MullMCP:
     type: tool
     platform: macOS
+    # Mull/Core is the UI-free layer both targets share: models, storage,
+    # retrieval, classification, and the MCP server itself. Referencing the
+    # DIRECTORY rather than listing files means adding a core file no longer
+    # requires editing this list — the previous 21-path hand-maintained list
+    # broke the CLI build with a confusing missing-symbol error every time
+    # someone forgot to append to it.
+    #
+    # This target is also what keeps the layering honest: Mull/Core is compiled
+    # here WITHOUT Mull/Views, so a core file that reaches for an app-layer type
+    # (DS, a View, AppState) fails this build with "cannot find 'X' in scope".
+    # Note it does not stop a core file from importing SwiftUI itself — that
+    # compiles fine in a CLI target — so keep core UI-free by review, not by
+    # trusting the compiler to catch the import alone.
     sources:
       - MullMCP
-      - Mull/Services/MCPServer.swift
-      - Mull/Services/MullDirectory.swift
-      - Mull/Services/Curator.swift
-      - Mull/Services/ContextBlock.swift
-      - Mull/Services/CurrentState.swift
-      - Mull/Services/Selection.swift
-      - Mull/Services/Entity.swift
-      - Mull/Services/Signal.swift
-      - Mull/Services/DatabaseService.swift
-      - Mull/Services/AnalyticsEngine.swift
-      - Mull/Services/KeychainService.swift
-      - Mull/Services/BehaviorPatternEngine.swift
-      - Mull/Services/TimeBlockEngine.swift
-      - Mull/Services/CalendarService.swift
-      - Mull/Services/KnowledgeExtractor.swift
-      - Mull/Services/SensitiveText.swift
-      - Mull/Services/Redactor.swift
-      - Mull/Services/TestInput.swift
-      - Mull/Views/Components/DesignTokens.swift
-      - Mull/Models/Models.swift
+      - Mull/Core
     dependencies:
       - package: GRDB
     settings:

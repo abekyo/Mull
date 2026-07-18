@@ -6,10 +6,12 @@ import AppKit
 ///
 /// There used to be three independent `UNMutableNotificationContent` builders
 /// (AppState, ProactiveEngine, ProactiveLoop), each with its own throttle and no
-/// knowledge of the others. ProactiveEngine and ProactiveLoop both fire on a project
-/// switch from the SAME 3-second tick, so one app switch could produce two banners
-/// saying nearly the same thing. Routing everything through here gives them a shared
-/// rate limit and a shared record of which project has already been announced.
+/// knowledge of the others — and ProactiveEngine and ProactiveLoop both fired on a
+/// project switch from the SAME 3-second tick, so one app switch could produce two
+/// banners saying nearly the same thing. ProactiveLoop is now the only project-switch
+/// path, but the sources that remain (briefing, meetings, clipboard hand-off) still
+/// fire independently, so routing everything through here keeps one rate limit for
+/// the app instead of one per subsystem.
 @MainActor
 final class Notifier {
 
@@ -48,9 +50,9 @@ final class Notifier {
         return true
     }
 
-    /// Claim the right to announce a return to `project`. The first of the two
-    /// proactive systems to ask wins; the other stays quiet for the cooldown, so a
-    /// single switch yields one brief instead of two contradicting ones.
+    /// Claim the right to announce a return to `project`. A project announced inside
+    /// the cooldown is not announced again, so hopping away and back — or a second
+    /// caller appearing later — cannot re-brief the same project.
     func claimProjectAnnouncement(_ project: String, cooldown: TimeInterval = 900) -> Bool {
         let key = project.lowercased()
         if let last = announcedProjects[key], Date().timeIntervalSince(last) < cooldown {
@@ -63,12 +65,19 @@ final class Notifier {
 
 /// mull comes to you. Not the other way around.
 ///
-/// Four interventions, each triggered by existing data:
+/// Three interventions, each triggered by existing data:
 ///
 ///   1. AI auto-copy — user opens claude.ai or chatgpt.com → context copied to clipboard
-///   2. Project resumption — stale project reopened → notification with "Open" action
-///   3. Morning briefing — first activity of the day → notification with top action
-///   4. Pre-meeting — 15 minutes before a calendar event → notification
+///   2. Morning briefing — first activity of the day → notification with top action
+///   3. Pre-meeting — 15 minutes before a calendar event → notification
+///
+/// Project resumption used to be a fourth intervention here, keyed off a raw
+/// window-title diff against a 14-day `projectSnapshots` cache. ProactiveLoop now
+/// owns that case entirely — it anchors on `CurrentState.activeEntity` and ranks
+/// with the selection layer (DIRECTION §7, SELECTION-LAYER.md) instead of substring
+/// matching, and both fired from this same 3-second tick. What is left here is the
+/// set of interventions ProactiveLoop does not cover: clipboard hand-off, the
+/// once-a-day briefing, and calendar proximity.
 ///
 /// No polling. No new observers. Runs inside AppState's existing 3-second refresh loop.
 @MainActor
@@ -82,13 +91,6 @@ final class ProactiveEngine: NSObject {
     private var hasSentMorningBriefing = false
     private var lastMorningBriefingDate: Date = .distantPast
     private var notifiedMeetings: Set<String> = []
-    private var notifiedProjects: Set<String> = []
-    private var notifiedKnowledge: Set<String> = []  // knowledge topics already surfaced today
-    private var lastActiveApp: String = ""
-    private var lastActiveWindow: String = ""
-    private var projectCache: [ProjectSnapshot] = []
-    private var projectCacheDate: Date = .distantPast
-    private var projectCacheRefreshing = false
 
     // Upcoming calendar events, cached. `upcomingEvents` is a full EventKit
     // predicate query; running it straight off the 3-second tick meant one every
@@ -117,6 +119,11 @@ final class ProactiveEngine: NSObject {
     }
 
     /// Called every 3 seconds from AppState.refreshStats().
+    ///
+    /// `currentApp` and `currentWindow` are no longer read: the only thing that used
+    /// them was the project-resumption diff, now owned by ProactiveLoop. They stay in
+    /// the signature so AppState's call site is untouched, and because the eventual
+    /// window-anchored interventions belong here rather than in the loop.
     func tick(todayEventCount: Int, currentApp: String?, currentWindow: String?, browserURL: String?) {
         let today = Calendar.current.startOfDay(for: Date())
 
@@ -124,8 +131,6 @@ final class ProactiveEngine: NSObject {
         if today != Calendar.current.startOfDay(for: lastMorningBriefingDate) {
             hasSentMorningBriefing = false
             notifiedMeetings.removeAll()
-            notifiedProjects.removeAll()
-            notifiedKnowledge.removeAll()
             lastCopiedForAIURL = ""
             lastAICopyDate = .distantPast
             lastMorningBriefingDate = today
@@ -142,17 +147,7 @@ final class ProactiveEngine: NSObject {
             sendMorningBriefing()
         }
 
-        // 3. Project resumption + knowledge surfacing
-        let app = currentApp ?? ""
-        let window = currentWindow ?? ""
-        if app != lastActiveApp || window != lastActiveWindow {
-            lastActiveApp = app
-            lastActiveWindow = window
-            checkProjectResumption(app: app, window: window)
-            surfaceRelevantKnowledge(window: window)
-        }
-
-        // 4. Pre-meeting
+        // 3. Pre-meeting
         checkUpcomingMeetings()
     }
 
@@ -240,9 +235,6 @@ final class ProactiveEngine: NSObject {
             let upcoming = cal.upcomingEvents(limit: 1)
 
             await MainActor.run { [weak self] in
-                self?.projectCache = cache
-                self?.projectCacheDate = Date()
-
                 var title = "Good morning"
                 var lines: [String] = []
                 var action: NotificationAction?
@@ -286,115 +278,7 @@ final class ProactiveEngine: NSObject {
         }
     }
 
-    // MARK: - 3. Project Resumption
-
-    private func checkProjectResumption(app: String, window: String) {
-        guard !window.isEmpty else { return }
-        refreshProjectCacheIfNeeded()
-
-        let windowLower = window.lowercased()
-        let appLower = app.lowercased()
-
-        // Find matching stalled project (lightweight, uses cache)
-        var matchedProject: ProjectSnapshot?
-        for project in projectCache {
-            guard project.daysSinceActive >= 3 else { continue }
-            guard !notifiedProjects.contains(project.name) else { continue }
-
-            let nameMatch = windowLower.contains(project.name.lowercased())
-            let fileMatch = project.lastFile.map { windowLower.contains($0.lowercased()) } ?? false
-            let appMatch = appLower == project.primaryApp.lowercased()
-
-            if nameMatch || (appMatch && fileMatch) {
-                matchedProject = project
-                break
-            }
-        }
-
-        guard let project = matchedProject else { return }
-        // ProactiveLoop fires on the same project switch from the same 3s tick.
-        // Whichever system claims the project first speaks; the other stays quiet.
-        guard Notifier.shared.claimProjectAnnouncement(project.name) else { return }
-        notifiedProjects.insert(project.name)
-
-        // Heavy pattern detection off main thread
-        let db = database
-        let projectName = project.name
-        let projectApp = project.primaryApp
-        let daysSince = project.daysSinceActive
-        let lastFile = project.lastFile
-        let lastClip = project.lastClipboard
-
-        Task.detached { [weak self] in
-            // Only surface observations proactively, never judgments (PRODUCT.md "Epistemics").
-            let patterns = BehaviorPatternEngine(database: db).detectPatterns()
-                .filter { $0.autoSurfaceable }
-            let projectPattern = patterns.first { $0.project == projectName }
-
-            // `let`, not a mutated `var` — a captured var read from the nested
-            // concurrent closure is a Swift 6 error.
-            let body: String
-            if let pattern = projectPattern {
-                body = pattern.insight + "\n" + pattern.action
-            } else {
-                var lines = "\(daysSince) days since last session"
-                if let file = lastFile { lines += "\nLast file: \(file)" }
-                if let clip = lastClip { lines += "\nLast copied: \(clip)" }
-                body = lines
-            }
-
-            await MainActor.run { [weak self] in
-                self?.sendNotification(
-                    id: "project-resume-\(projectName)",
-                    title: "Welcome back to \(projectName)",
-                    body: body,
-                    action: .openApp(projectApp)
-                )
-            }
-        }
-    }
-
-    // MARK: - 3.5. Knowledge Surfacing
-
-    /// When the user opens a file/project, surface related knowledge they've accumulated.
-    /// "You solved a similar problem before" — delivered before they even ask.
-    private func surfaceRelevantKnowledge(window: String) {
-        guard !window.isEmpty else { return }
-
-        // A DB query on EVERY window-title change — that's a keystroke-rate trigger
-        // in an editor. Off the main thread, like the other proactive lookups.
-        let db = database
-        Task.detached { [weak self] in
-            let relevant = db.findRelevantKnowledge(context: window, limit: 1)
-            guard let entry = relevant.first else { return }
-
-            // Only surface if knowledge is from a different day (not what they just did)
-            let daysSince = Calendar.current.dateComponents([.day], from: entry.sourceDate, to: Date()).day ?? 0
-            guard daysSince >= 1 else { return }
-
-            var body = entry.decision
-            if let reasoning = entry.reasoning, !reasoning.isEmpty {
-                body += "\nWhy: \(reasoning)"
-            }
-
-            await MainActor.run {
-                guard let self else { return }
-                // Don't re-notify same topic (checked on the main actor, where the
-                // set lives — the fetch above is concurrent).
-                guard !self.notifiedKnowledge.contains(entry.topic) else { return }
-                self.notifiedKnowledge.insert(entry.topic)
-
-                self.sendNotification(
-                    id: "knowledge-\(entry.id ?? 0)-\(entry.topic.prefix(20))",
-                    title: "You know this: \(entry.topic)",
-                    body: body,
-                    action: nil
-                )
-            }
-        }
-    }
-
-    // MARK: - 4. Pre-Meeting
+    // MARK: - 3. Pre-Meeting
 
     private func checkUpcomingMeetings() {
         refreshUpcomingCacheIfNeeded()
@@ -421,7 +305,8 @@ final class ProactiveEngine: NSObject {
                 let appCounts = Dictionary(grouping: recentEvents.filter { $0.eventType == .appSwitch }) { $0.appName ?? "Unknown" }
                 let topApp = appCounts.max(by: { $0.value.count < $1.value.count })?.key
 
-                // `let`, not a mutated `var` — see checkProjectResumption.
+                // `let`, not a mutated `var` — a captured var read from the nested
+                // concurrent closure is a Swift 6 error.
                 let body = topApp.map { "\(title) in \(minutesUntil) minutes\nCurrent session: \($0)" }
                     ?? "\(title) in \(minutesUntil) minutes"
 
@@ -445,26 +330,6 @@ final class ProactiveEngine: NSObject {
             await MainActor.run {
                 self?.upcomingCache = events
                 self?.upcomingRefreshing = false
-            }
-        }
-    }
-
-    // MARK: - Project Cache
-
-    /// `projectSnapshots(days: 14)` is a 14-day scan. Hourly is fine, but it must
-    /// not run ON the main thread — it was being invoked straight from the 3s tick's
-    /// window-title branch.
-    private func refreshProjectCacheIfNeeded() {
-        guard !projectCacheRefreshing, Date().timeIntervalSince(projectCacheDate) > 3600 else { return }
-        projectCacheRefreshing = true
-        projectCacheDate = Date()
-
-        let db = database
-        Task.detached { [weak self] in
-            let snapshots = TimeBlockEngine(database: db).projectSnapshots(days: 14)
-            await MainActor.run {
-                self?.projectCache = snapshots
-                self?.projectCacheRefreshing = false
             }
         }
     }
