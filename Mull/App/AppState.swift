@@ -58,16 +58,15 @@ final class AppState: ObservableObject {
     private var refreshTimer: Timer?
     private var eveningDraftTimer: Timer?
     private var lastRefreshDate: Date = Date()
-    private var globalShortcutMonitor: Any?
+    /// Owned, not observed: releasing this removes the global event monitor (see
+    /// GlobalShortcuts.deinit), so AppState's own deinit no longer has to.
+    private var shortcuts: GlobalShortcuts?
 
     deinit {
         refreshTimer?.invalidate()
         eveningDraftTimer?.invalidate()
         ingestion.stop()
         mullEngine.cancelSchedule()
-        if let monitor = globalShortcutMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
     }
 
     // MARK: - Evening draft (先回り)
@@ -160,31 +159,13 @@ final class AppState: ObservableObject {
             UserDefaults.standard.set(50000, forKey: "outputMaxChars")
         }
 
-        // Global keyboard shortcuts
-        globalShortcutMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-
-            // ⌘+Shift+D — open main window
-            if mods == [.command, .shift] && event.keyCode == 2 {
-                Task { @MainActor in
-                    self?.openMainWindow()
-                }
-            }
-
-            // ⌘+Shift+C — instant copy context to clipboard (no UI, no sheet)
-            if mods == [.command, .shift] && event.keyCode == 8 {
-                Task { @MainActor in
-                    self?.copyContextToClipboard()
-                }
-            }
-
-            // ⌘+Shift+W — inject context into current text field (clipboard-safe)
-            if mods == [.command, .shift] && event.keyCode == 13 {
-                Task { @MainActor in
-                    self?.injectContextIntoFocusedField()
-                }
-            }
-        }
+        // Global keyboard shortcuts. Weak self throughout: the monitor outlives
+        // nothing here, but the handlers must not be what keeps AppState alive.
+        shortcuts = GlobalShortcuts(
+            onOpenWindow: { [weak self] in self?.openMainWindow() },
+            onCopyContext: { [weak self] in self?.copyContextToClipboard() },
+            onInjectContext: { [weak self] in self?.injectContextIntoFocusedField() }
+        )
 
         // Refresh stats every 3 seconds + handle date crossing
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
@@ -445,156 +426,21 @@ final class AppState: ObservableObject {
     /// Clipboard-safe: saves current clipboard, pastes context, restores original clipboard.
     func injectContextIntoFocusedField() {
         Task {
-            let contextText = await buildContextText()
+            let contextText = await ContextComposer(database: database).compose()
             guard !contextText.isEmpty else { return }
             // Already on the main actor (AppState is @MainActor) — no await needed.
-            performInject(contextText)
+            TextInjector.inject(contextText)
+            sendNotification(
+                title: "Context injected",
+                body: "Your AI context has been pasted. Clipboard restored."
+            )
         }
-    }
-
-    private func performInject(_ contextText: String) {
-
-        // 1. Save current clipboard
-        let pasteboard = NSPasteboard.general
-        let savedItems = pasteboard.pasteboardItems?.compactMap { item -> (String, Data)? in
-            guard let type = item.types.first,
-                  let data = item.data(forType: type) else { return nil }
-            return (type.rawValue, data)
-        } ?? []
-
-        // 2. Put context on clipboard
-        pasteboard.clearContents()
-        pasteboard.setString(contextText, forType: .string)
-
-        // 3. Simulate ⌘V to paste into focused field
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            let source = CGEventSource(stateID: .combinedSessionState)
-            // Key down: ⌘V
-            if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) {
-                keyDown.flags = .maskCommand
-                keyDown.post(tap: .cghidEventTap)
-            }
-            // Key up: ⌘V
-            if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) {
-                keyUp.flags = .maskCommand
-                keyUp.post(tap: .cghidEventTap)
-            }
-
-            // 4. Restore original clipboard after paste completes
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                if !savedItems.isEmpty {
-                    pasteboard.clearContents()
-                    for (typeStr, data) in savedItems {
-                        pasteboard.setData(data, forType: NSPasteboard.PasteboardType(typeStr))
-                    }
-                }
-            }
-        }
-
-        sendNotification(
-            title: "Context injected",
-            body: "Your AI context has been pasted. Clipboard restored."
-        )
-    }
-
-    /// Build the "Copy to AI" text — a SELECTED, current, self-contained snapshot,
-    /// not a raw full.md dump. It composes the same use-time signals the MCP tools
-    /// serve (identity + what you're doing now + where you left off), so a paste
-    /// into ChatGPT/Claude is immediately useful with no tools to call. Passively
-    /// consumed media (YouTube titles you watched, background audio) is excluded by
-    /// construction: these engines key on projects/apps/files, not raw window
-    /// titles, so the noise that pollutes full.md never reaches the clipboard.
-    private func buildContextText() async -> String {
-        await Task.detached { [database] in
-            var sections: [String] = []
-
-            // 1. Who I am — rule-based identity facts (role, stack, work patterns).
-            //    NOT me.md: its header is MCP-oriented boilerplate ("call the tools"),
-            //    which is useless once pasted somewhere no tools exist.
-            let identity = FactExtractor(analytics: AnalyticsEngine(database: database),
-                                         database: database)
-                .generateFactSummary(days: 14)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !identity.isEmpty { sections.append("# Who I am\n\n\(identity)") }
-
-            // 2. Right now — organized by MODE, not filtered by deletion
-            //    (MAP-ARCHITECTURE.md: keep everything, mean it with mode). The lens
-            //    for a small-context model surfaces what you're DOING
-            //    (produce/decide/think/communicate) and keeps consumption but
-            //    compacts it as research/consume — nothing is silently dropped.
-            let state = CurrentState.current(database: database)
-            var nowLines: [String] = []
-            if let entity = state.activeEntity { nowLines.append("Active: \(entity)") }
-            else if let title = state.activeTitle { nowLines.append("Active: \(title)") }
-            if let app = state.activeApp { nowLines.append("App: \(app)") }
-
-            var doing: [String] = []        // produce / decide / think / communicate
-            var researching: [String] = []  // consume / research — kept, compacted
-            var seen = Set<String>()
-            for e in database.fetchEvents(from: Date().addingTimeInterval(-1800), to: Date()).reversed() {
-                guard e.eventType == .clipboard || e.eventType == .screenText,
-                      let raw = e.textContent?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      raw.count >= 3 else { continue }
-                let key = String(raw.prefix(40)).lowercased()
-                if seen.contains(key) { continue }
-                seen.insert(key)
-                let snippet = String(raw.prefix(90))
-                switch e.resolvedMode {
-                case .produce, .decide, .think, .communicate:
-                    if doing.count < 6 { doing.append("- [\(e.resolvedMode.rawValue)] \(snippet)") }
-                case .consume, .research:
-                    if researching.count < 4 { researching.append(String(snippet.prefix(50))) }
-                }
-                if doing.count >= 6 && researching.count >= 4 { break }
-            }
-            if !doing.isEmpty {
-                nowLines.append("Recently (doing):")
-                nowLines.append(contentsOf: doing)
-            }
-            if !researching.isEmpty {
-                nowLines.append("Also (research/consume): " + researching.joined(separator: " · "))
-            }
-            if !nowLines.isEmpty { sections.append("# Right now\n\n\(nowLines.joined(separator: "\n"))") }
-
-            // 3. Where I left off — ranked active projects with resume points.
-            //    Drop window-title / file-path junk masquerading as a project
-            //    (full paths, "NNN notes" counters, truncated titles): better an
-            //    empty section than "projects" the AI would wrongly trust.
-            func isJunkProject(_ name: String) -> Bool {
-                if name.contains("/") { return true }
-                if name.contains("…") || name.hasSuffix("...") { return true }
-                if name.range(of: #"\d+\s*notes"#, options: .regularExpression) != nil { return true }
-                return false
-            }
-            let snaps = TimeBlockEngine(database: database).projectSnapshots(days: 14)
-            let active = snaps.filter { $0.daysSinceActive < 3 && !isJunkProject($0.name) }.prefix(5)
-            if !active.isEmpty {
-                var lines = ["# Active work — where I left off"]
-                for p in active {
-                    var line = "- **\(p.name)** — \(p.totalDurationFormatted), \(p.primaryApp), last \(p.lastActiveFormatted)"
-                    if let file = p.lastFile { line += "\n  - resume at: \(file)" }
-                    lines.append(line)
-                }
-                sections.append(lines.joined(separator: "\n"))
-            }
-
-            guard !sections.isEmpty else { return "" }
-
-            // A short preamble so the pasted block is self-explanatory to any AI.
-            let preamble = "Here is my current context from mull (a tool that records what I work on). "
-                + "Use it to help me without making me re-explain myself.\n"
-            var text = preamble + "\n" + sections.joined(separator: "\n\n")
-            text = ContextBlockFile.stripMarkers(text)
-
-            let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
-            return (maxChars > 0 && text.count > maxChars) ? String(text.prefix(maxChars)) : text
-        }.value
     }
 
     /// Instant copy — no UI, no sheet. ⌘+Shift+C from anywhere.
     func copyContextToClipboard() {
         Task {
-            let finalText = await buildContextText()
+            let finalText = await ContextComposer(database: database).compose()
             guard !finalText.isEmpty else { return }
 
             NSPasteboard.general.clearContents()
