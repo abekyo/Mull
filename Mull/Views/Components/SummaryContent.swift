@@ -37,7 +37,7 @@ struct SummarySection: View {
                 if let icon {
                     Image(systemName: icon)
                         .font(.system(size: 10))
-                        .foregroundStyle(Color.accentColor.opacity(0.7))
+                        .foregroundStyle(DS.moon.opacity(0.7))
                 }
                 Text(title)
                     .sectionLabel()

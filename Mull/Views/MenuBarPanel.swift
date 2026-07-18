@@ -63,14 +63,7 @@ struct MenuBarPanel: View {
                     NSApp.keyWindow?.close()
                 }
 
-                panelButton(
-                    icon: appState.isPaused ? "play.fill" : "pause.fill",
-                    label: appState.isPaused ? "Resume Recording" : "Pause Recording",
-                    hint: nil,
-                    accent: false
-                ) {
-                    appState.isPaused.toggle()
-                }
+                pauseControl
             }
             .padding(.horizontal, DS.sm)
             .padding(.vertical, DS.sm)
@@ -90,6 +83,7 @@ struct MenuBarPanel: View {
             }
         }
         .frame(width: DS.panelWidth)
+        .tint(DS.moon)   // keep native controls on the warm brand accent
     }
 
     // MARK: - Quick Capture
@@ -170,6 +164,54 @@ struct MenuBarPanel: View {
 
     // MARK: - Panel Button
 
+    // MARK: - Pause control (real — stops capture; timed or until-resume)
+
+    @ViewBuilder
+    private var pauseControl: some View {
+        if appState.isPaused {
+            panelButton(
+                icon: "play.fill",
+                label: "Resume Recording",
+                hint: resumeHint,
+                accent: false
+            ) {
+                appState.resumeCapture()
+            }
+        } else {
+            Menu {
+                Button("Pause for 15 minutes") { appState.pauseCapture(for: 15 * 60) }
+                Button("Pause for 1 hour") { appState.pauseCapture(for: 60 * 60) }
+                Button("Pause until I resume") { appState.pauseCapture() }
+            } label: {
+                pauseLabel(icon: "pause.fill", label: "Pause Recording")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .foregroundStyle(.primary)
+        }
+    }
+
+    /// "resumes 14:30" when a timed pause is active.
+    private var resumeHint: String? {
+        guard let ends = appState.pauseEndsAt else { return nil }
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        return "until \(f.string(from: ends))"
+    }
+
+    private func pauseLabel(icon: String, label: String) -> some View {
+        HStack(spacing: DS.sm) {
+            Image(systemName: icon)
+                .font(DS.smallFont)
+                .frame(width: 16)
+            Text(label)
+                .font(DS.bodyFont)
+            Spacer()
+        }
+        .padding(.horizontal, DS.md)
+        .padding(.vertical, DS.sm)
+        .contentShape(Rectangle())
+    }
+
     private func panelButton(icon: String, label: String, hint: String?, accent: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: DS.sm) {
@@ -189,11 +231,11 @@ struct MenuBarPanel: View {
             .padding(.vertical, DS.sm)
             .background(
                 RoundedRectangle(cornerRadius: DS.radiusSm)
-                    .fill(accent ? Color.accentColor.opacity(0.08) : Color.clear)
+                    .fill(accent ? DS.moon.opacity(0.08) : Color.clear)
             )
         }
         .buttonStyle(.plain)
-        .foregroundStyle(accent ? Color.accentColor : .primary)
+        .foregroundStyle(accent ? DS.moon : .primary)
     }
 
     // MARK: - Permission Banner

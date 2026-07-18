@@ -13,16 +13,25 @@ import ApplicationServices
 struct OnboardingView: View {
     @EnvironmentObject var appState: AppState
     @Binding var isPresented: Bool
-    @State private var step: OnboardingStep = .welcome
+    @State private var step: OnboardingStep
     @State private var permissionCheckTimer: Timer?
     @State private var showHowTo = false
     @State private var showCopiedConfirmation = false
+    // Loaded when the profile step appears, not in the initialiser: a default
+    // expression runs on every re-init of the struct, and this one reads a file.
+    @State private var profileAnswers: [String: String] = [:]
+
+    init(isPresented: Binding<Bool>, startStep: OnboardingStep = .welcome) {
+        _isPresented = isPresented
+        _step = State(initialValue: startStep)
+    }
 
     enum OnboardingStep: Int, CaseIterable {
         case welcome = 0
         case permissions = 1
         case coldRead = 2    // "Here's what I already know about you"
-        case tryIt = 3
+        case profile = 3     // "Now lock in the essentials" — guided me.pinned.md
+        case tryIt = 4
     }
 
     @State private var coldReading: ColdReading?
@@ -35,7 +44,7 @@ struct OnboardingView: View {
             HStack(spacing: DS.sm) {
                 ForEach(OnboardingStep.allCases, id: \.rawValue) { s in
                     Circle()
-                        .fill(s.rawValue <= step.rawValue ? Color.accentColor : Color.secondary.opacity(0.2))
+                        .fill(s.rawValue <= step.rawValue ? DS.moon : Color.secondary.opacity(0.2))
                         .frame(width: 6, height: 6)
                 }
             }
@@ -49,16 +58,27 @@ struct OnboardingView: View {
                 permissionsStep
             case .coldRead:
                 coldReadStep
+            case .profile:
+                profileStep
             case .tryIt:
                 tryItStep
             }
         }
         .frame(width: 500, height: 560)
-        .background(.ultraThinMaterial)
+        // Paper, not glass: .ultraThinMaterial is the cold-tech surface the design
+        // north star bans on anything a person reads (DESIGN-NORTHSTAR / CLAUDE.md §4).
+        .background(DS.canvas)
         .interactiveDismissDisabled()
+        // The poller belongs to the permissions step alone. It used to keep running
+        // after "Skip", so granting a permission ten minutes later yanked the user
+        // back to .coldRead — mid-typing, from wherever they had got to.
+        .onChange(of: step) { _, newStep in
+            if newStep != .permissions { stopPermissionPolling() }
+        }
         .onDisappear {
-            permissionCheckTimer?.invalidate()
+            stopPermissionPolling()
             factRevealTimer?.invalidate()
+            factRevealTimer = nil
         }
     }
 
@@ -72,7 +92,7 @@ struct OnboardingView: View {
                 Circle()
                     .fill(DS.accentGradient)
                     .frame(width: 72, height: 72)
-                    .shadow(color: Color.accentColor.opacity(0.2), radius: 16, y: 4)
+                    .shadow(color: DS.moon.opacity(0.2), radius: 16, y: 4)
                 Image(systemName: "moon.stars.fill")
                     .font(.system(size: 32))
                     .foregroundStyle(.white)
@@ -112,7 +132,7 @@ struct OnboardingView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Color.accentColor)
+            .tint(DS.moon)
             .padding(.horizontal, 40)
             .padding(.bottom, DS.xl)
         }
@@ -126,7 +146,7 @@ struct OnboardingView: View {
 
             Image(systemName: "hand.raised.fill")
                 .font(.system(size: 36))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(DS.moon)
 
             Text("Two permissions needed")
                 .font(.system(size: 18, weight: .semibold))
@@ -172,7 +192,7 @@ struct OnboardingView: View {
                 } label: {
                     Text(showHowTo ? "Hide instructions" : "How do I do this?")
                         .font(DS.captionFont)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(DS.moon)
                 }
                 .buttonStyle(.plain)
 
@@ -185,6 +205,7 @@ struct OnboardingView: View {
             Spacer()
 
             Button("Skip — clipboard still works") {
+                stopPermissionPolling()
                 withAnimation { step = .coldRead }
                 startRecordingAndProof()
             }
@@ -207,12 +228,12 @@ struct OnboardingView: View {
 
             // Facts revealed one by one, like a fortune teller
             VStack(alignment: .leading, spacing: DS.md) {
-                if let reading = coldReading {
+                if hasColdRead, let reading = coldReading {
                     ForEach(Array(reading.facts.prefix(revealedFactCount).enumerated()), id: \.offset) { _, fact in
                         HStack(alignment: .top, spacing: DS.md) {
                             Image(systemName: "sparkle")
                                 .font(.system(size: 10))
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(DS.moon)
                                 .padding(.top, 3)
                             Text(fact)
                                 .font(DS.bodyFont)
@@ -220,12 +241,17 @@ struct OnboardingView: View {
                         }
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
+                } else if coldReading != nil {
+                    // A cold read can legitimately come back empty (fresh Mac, nothing
+                    // open, no calendar access). An empty 200pt box under a headline
+                    // promising knowledge read as a bug — say the truth instead.
+                    coldReadEmptyState
                 }
             }
             .padding(.horizontal, 40)
             .frame(minHeight: 200, alignment: .top)
 
-            if revealedFactCount >= (coldReading?.facts.count ?? 0) {
+            if hasColdRead, revealedFactCount >= (coldReading?.facts.count ?? 0) {
                 Text("All of this without recording a single keystroke.\nImagine what mull knows after a full day.")
                     .font(DS.captionFont)
                     .foregroundStyle(.tertiary)
@@ -237,7 +263,7 @@ struct OnboardingView: View {
 
             Button {
                 factRevealTimer?.invalidate()
-                withAnimation { step = .tryIt }
+                withAnimation { step = .profile }
             } label: {
                 Text("Continue")
                     .font(.system(size: 14, weight: .medium))
@@ -245,16 +271,117 @@ struct OnboardingView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Color.accentColor)
+            .tint(DS.moon)
             .padding(.horizontal, 40)
             .padding(.bottom, DS.xl)
-            .opacity(revealedFactCount >= 2 ? 1 : 0.3)
-            .disabled(revealedFactCount < 2)
+            // With nothing to reveal there is nothing to wait for — don't trap the
+            // user behind a gate that can never open.
+            .opacity(canLeaveColdRead ? 1 : 0.3)
+            .disabled(!canLeaveColdRead)
         }
         .onAppear { startColdRead() }
     }
 
+    // MARK: - Step 4: Profile (guided me.pinned.md — stated facts mull can't infer)
+
+    private var profileStep: some View {
+        VStack(spacing: DS.md) {
+            VStack(spacing: DS.xs) {
+                Text("Tell mull the essentials")
+                    .font(.system(size: 18, weight: .semibold))
+                Text("A minute now beats weeks of guessing. All optional —\nskip any, edit later in About Me — your edits.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, DS.lg)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.lg) {
+                    ForEach(OnboardingProfile.questions) { q in
+                        VStack(alignment: .leading, spacing: DS.xs) {
+                            Text(q.prompt)
+                                .font(DS.bodyMedium)
+                            Text(q.hint)
+                                .font(DS.captionFont)
+                                .foregroundStyle(.tertiary)
+                            TextField(q.placeholder, text: Binding(
+                                get: { profileAnswers[q.id] ?? "" },
+                                set: { profileAnswers[q.id] = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                }
+                .padding(.horizontal, 40)
+                .padding(.vertical, DS.sm)
+            }
+
+            HStack {
+                Button("Skip") {
+                    withAnimation { step = .tryIt }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .font(DS.captionFont)
+
+                Spacer()
+
+                Button {
+                    OnboardingProfile.save(profileAnswers)
+                    appState.regenerateContextNow()
+                    withAnimation { step = .tryIt }
+                } label: {
+                    Text("Save & Continue")
+                        .font(.system(size: 14, weight: .medium))
+                        .padding(.horizontal, DS.lg)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(DS.moon)
+            }
+            .padding(.horizontal, 40)
+            .padding(.bottom, DS.lg)
+        }
+        // Read the saved answers here — the file read happens once, when the step is
+        // actually shown, rather than on every re-init of the view struct.
+        .onAppear {
+            if profileAnswers.isEmpty { profileAnswers = OnboardingProfile.answers }
+        }
+    }
+
+    /// True when the cold read actually produced something to show.
+    private var hasColdRead: Bool { !(coldReading?.isEmpty ?? true) }
+
+    /// Continue is gated on the reveal only while there IS a reveal.
+    private var canLeaveColdRead: Bool {
+        guard hasColdRead else { return coldReading != nil }
+        return revealedFactCount >= 2 || revealedFactCount >= (coldReading?.facts.count ?? 0)
+    }
+
+    /// Shown when mull can't see anything yet — honest, and points at the fix.
+    private var coldReadEmptyState: some View {
+        VStack(spacing: DS.sm) {
+            Image(systemName: "moon.stars")
+                .font(.system(size: 28, weight: .thin))
+                .foregroundStyle(DS.moon.opacity(0.4))
+            Text("Nothing to read yet")
+                .font(DS.bodyMedium)
+            Text("mull looks at what's open, your calendar and your Mac's own settings. With those unavailable there's nothing to guess from — it starts learning the moment you keep working.")
+                .font(DS.captionFont)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, DS.lg)
+    }
+
     private func startColdRead() {
+        // Re-entering the step (back navigation, a second .onAppear) must not leave
+        // the previous reveal timer running alongside the new one.
+        factRevealTimer?.invalidate()
+        factRevealTimer = nil
+
         // Gather everything knowable right now
         coldReading = ColdReadService.read()
         revealedFactCount = 0
@@ -281,7 +408,7 @@ struct OnboardingView: View {
 
             Image(systemName: "sparkles")
                 .font(.system(size: 36))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(DS.moon)
 
             VStack(spacing: DS.sm) {
                 Text("Try it now")
@@ -310,7 +437,7 @@ struct OnboardingView: View {
                 .padding(.vertical, 12)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Color.accentColor)
+            .tint(DS.moon)
             .padding(.horizontal, 40)
 
             if showCopiedConfirmation {
@@ -337,7 +464,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.tertiary)
                 Text("⌘ + Shift + C")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(DS.moon)
             }
 
             Spacer()
@@ -351,7 +478,7 @@ struct OnboardingView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .tint(Color.accentColor)
+            .tint(DS.moon)
             .padding(.horizontal, 40)
             .padding(.bottom, DS.xl)
         }
@@ -363,7 +490,7 @@ struct OnboardingView: View {
         HStack(spacing: DS.md) {
             Image(systemName: icon)
                 .font(.system(size: 14))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(DS.moon)
                 .frame(width: 24)
             Text(text)
                 .font(DS.bodyFont)
@@ -412,12 +539,15 @@ struct OnboardingView: View {
     // MARK: - Actions
 
     private func startPermissionPolling() {
-        permissionCheckTimer?.invalidate()
+        stopPermissionPolling()
         permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
             Task { @MainActor in
+                // The user may have moved on (Skip, or a granted-then-advanced race)
+                // between ticks: never auto-advance from anywhere but this step.
+                guard step == .permissions else { stopPermissionPolling(); return }
                 appState.permissions.checkAll()
                 if appState.permissions.accessibilityGranted && appState.permissions.inputMonitoringGranted {
-                    permissionCheckTimer?.invalidate()
+                    stopPermissionPolling()
                     // Auto-advance after 1 second
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         withAnimation(.spring(duration: 0.3)) { step = .coldRead }
@@ -428,6 +558,11 @@ struct OnboardingView: View {
         }
     }
 
+    private func stopPermissionPolling() {
+        permissionCheckTimer?.invalidate()
+        permissionCheckTimer = nil
+    }
+
     private func startRecordingAndProof() {
         appState.hasCompletedOnboarding = true
         appState.startRecording()
@@ -435,7 +570,8 @@ struct OnboardingView: View {
 
     private func finishOnboarding() {
         factRevealTimer?.invalidate()
-        permissionCheckTimer?.invalidate()
+        factRevealTimer = nil
+        stopPermissionPolling()
         isPresented = false
         (NSApp.delegate as? AppDelegate)?.closeOnboarding()
     }

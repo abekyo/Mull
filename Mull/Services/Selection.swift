@@ -13,6 +13,10 @@ struct Selection {
         let type: String       // note / error / code / web / file / activity
         let entity: String?
         let text: String
+        // Back-pointer (MAP-ARCHITECTURE.md): the source event in the territory.
+        // The map node points INTO _raw — it never replaces it — so a reader can
+        // always return to the full original. Nil only for synthetic results.
+        let eventID: Int64?
 
         /// Cited one-liner for an MCP response.
         func line(_ formatter: DateFormatter) -> String {
@@ -70,7 +74,8 @@ struct Selection {
             guard score > 0 else { return nil }
 
             return (score, Result(timestamp: event.timestamp, app: event.appName,
-                                  type: evType, entity: evEntity, text: String(raw.prefix(200))))
+                                  type: evType, entity: evEntity, text: String(raw.prefix(200)),
+                                  eventID: event.id))
         }
 
         return scored
@@ -79,9 +84,52 @@ struct Selection {
             .map(\.1)
     }
 
+    /// Split a query into matchable terms.
+    ///
+    /// Japanese has no spaces and CJK codepoints ARE alphanumerics, so splitting on
+    /// `alphanumerics.inverted` collapsed a whole Japanese query into ONE token —
+    /// and `lexical` then required the candidate text to contain the entire query
+    /// verbatim. Nothing ever did, the `lexical == 0` gate discarded every
+    /// candidate, and `search` answered "No relevant activity" for any Japanese
+    /// query (undoing the widened CJK candidate window MCPServer already fetches).
+    ///
+    /// Fix: emit character BIGRAMS for CJK runs — the standard n-gram substitute for
+    /// a morphological analyzer, and what SQLite's FTS trigram/`unicode61` fallbacks
+    /// approximate. "選択レイヤー" → 選択 / 択レ / レイ / イヤ / ヤー, each of which a
+    /// relevant snippet plausibly contains. A single-character run is kept as-is so
+    /// one-kanji queries ("鬱", "本") still match.
     private static func tokens(_ s: String) -> [String] {
-        s.lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count >= 2 }
+        var out: [String] = []
+        for run in s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted) {
+            guard !run.isEmpty else { continue }
+            // A run can mix scripts ("swift開発"). Segment it so latin stays whole
+            // words and only the CJK stretches become bigrams.
+            var segment: [Character] = []
+            var segmentIsCJK = false
+
+            func flush() {
+                guard !segment.isEmpty else { return }
+                if segmentIsCJK {
+                    if segment.count == 1 {
+                        out.append(String(segment[0]))
+                    } else {
+                        for i in 0..<(segment.count - 1) { out.append(String(segment[i...(i + 1)])) }
+                    }
+                } else if segment.count >= 2 {
+                    out.append(String(segment))
+                }
+                segment = []
+            }
+
+            for ch in run {
+                let isCJK = DatabaseService.containsCJK(String(ch))
+                if isCJK != segmentIsCJK { flush(); segmentIsCJK = isCJK }
+                segment.append(ch)
+            }
+            flush()
+        }
+        // Bigrams overlap heavily; duplicates would skew the overlap ratio.
+        var seen = Set<String>()
+        return out.filter { seen.insert($0).inserted }
     }
 }

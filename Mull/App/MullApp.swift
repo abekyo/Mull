@@ -15,6 +15,7 @@ struct MullApp: App {
         MenuBarExtra {
             MenuBarPanel()
                 .environmentObject(appState)
+                .preferredColorScheme(.light)
                 .onAppear { appState.markSummaryRead() }
         } label: {
             Label {
@@ -24,7 +25,7 @@ struct MullApp: App {
                     Image(systemName: menuBarIconName)
                     if appState.hasUnreadSummary {
                         Circle()
-                            .fill(Color.accentColor)
+                            .fill(DS.moon)
                             .frame(width: 5, height: 5)
                             .offset(x: 2, y: -2)
                     }
@@ -37,6 +38,7 @@ struct MullApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
+                .preferredColorScheme(.light)
         }
     }
 
@@ -59,9 +61,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
 
-        // Nocturne: the whole app lives on the night canvas, regardless of the
+        // Daylight: the whole app lives on a warm ivory page, regardless of the
         // system light/dark setting.
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        NSApp.appearance = NSAppearance(named: .aqua)
 
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
@@ -96,7 +98,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let appState else { return }
         let view = FullWindowView()
             .environmentObject(appState)
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(.light)
 
         let controller = NSHostingController(rootView: view)
 
@@ -108,11 +110,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = ""
         window.contentViewController = controller
-        // Night canvas + a quiet, integrated title bar with no visible title text.
-        window.backgroundColor = NSColor(red: 0.039, green: 0.047, blue: 0.078, alpha: 1)
+        // Ivory page + a quiet, integrated title bar with no visible title text.
+        window.backgroundColor = NSColor(red: 0.949, green: 0.929, blue: 0.882, alpha: 1)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: .aqua)
         window.center()
         window.setFrameAutosaveName("MullMainWindow")
         window.isReleasedWhenClosed = false
@@ -138,7 +140,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let appState else { return }
         let view = SettingsView()
             .environmentObject(appState)
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(.light)
         let controller = NSHostingController(rootView: view)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
@@ -148,8 +150,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Settings"
         window.contentViewController = controller
-        window.backgroundColor = NSColor(red: 0.039, green: 0.047, blue: 0.078, alpha: 1)
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(red: 0.949, green: 0.929, blue: 0.882, alpha: 1)
+        window.appearance = NSAppearance(named: .aqua)
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -159,10 +161,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Onboarding Window
 
-    func showOnboarding() {
+    func showOnboarding(startStep: OnboardingView.OnboardingStep = .welcome) {
         guard let appState else { return }
-        let view = OnboardingView(isPresented: .constant(true))
+        let view = OnboardingView(isPresented: .constant(true), startStep: startStep)
             .environmentObject(appState)
+            .preferredColorScheme(.light)
 
         let controller = NSHostingController(rootView: view)
 
@@ -174,6 +177,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Welcome to mull"
         window.contentViewController = controller
+        window.backgroundColor = NSColor(red: 0.949, green: 0.929, blue: 0.882, alpha: 1)
+        window.appearance = NSAppearance(named: .aqua)
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)

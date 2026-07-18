@@ -56,20 +56,13 @@ struct TimeBlockEngine {
             if var block = currentBlock {
                 let gap = segment.timestamp.timeIntervalSince(block.end)
 
-                // Same app and gap < 3 minutes → extend block
-                if segment.app == block.app && gap < 180 {
-                    block.end = segment.timestamp
-                    block.eventCount += 1
-                    block.activeDuration += min(gap, Self.activeGapCap)
-                    block.addContext(segment)
-                    currentBlock = block
-                } else if gap < 180 {
-                    // Different app but tiny gap → still extend (multitasking)
-                    block.end = segment.timestamp
-                    block.eventCount += 1
-                    block.activeDuration += min(gap, Self.activeGapCap)
-                    block.addContext(segment)
-                    block.isMultiApp = true
+                if gap < 180 {
+                    // Same app, or a different app within 3 minutes (multitasking):
+                    // either way the session continues. absorb() attributes the gap
+                    // to the app the user was just in, so the dominant app can be
+                    // settled honestly at the end.
+                    if segment.app != block.app { block.isMultiApp = true }
+                    block.absorb(segment, gap: gap)
                     currentBlock = block
                 } else {
                     // Gap too large → save block and start new one
@@ -88,8 +81,10 @@ struct TimeBlockEngine {
         // Step 3: Filter out very short blocks (< 30 seconds)
         blocks = blocks.filter { $0.duration >= 30 }
 
-        // Step 4: Generate labels
+        // Step 4: Settle each block's face on its dominant app (the comment at the top
+        // says "dominant" — before this, the first event's app silently won), then label.
         for i in 0..<blocks.count {
+            blocks[i].finalizeDominantApp()
             blocks[i].label = generateLabel(for: blocks[i])
         }
 
@@ -220,8 +215,15 @@ struct TimeBlock: Identifiable {
 
     // Context accumulation
     private var windowTitles: [String: Int] = [:]
+    private var windowTitleApps: [String: String] = [:]   // title → app it belongs to
     private var clipboardTexts: [String] = []
     private var keystrokeCount: Int = 0
+
+    // Per-app engaged time inside this block. Each inter-event gap is attributed to
+    // the app the user was in *before* the switch (they were using it until they left),
+    // capped like activeDuration so an idle pause doesn't crown the wrong app.
+    private var appDurations: [String: TimeInterval] = [:]
+    private var lastSegmentApp: String = ""
 
     var duration: TimeInterval { end.timeIntervalSince(start) }
 
@@ -253,7 +255,40 @@ struct TimeBlock: Identifiable {
         self.start = segment.timestamp
         self.end = segment.timestamp
         self.eventCount = 1
+        self.lastSegmentApp = segment.app
         addContext(segment)
+    }
+
+    /// Extend the block with the next event: advance the end, attribute the gap to the
+    /// app the user was just in, and accumulate context. Single entry point for both the
+    /// same-app and different-app (multitasking) cases in the engine loop.
+    mutating func absorb(_ segment: EventSegment, gap: TimeInterval) {
+        let engaged = min(gap, TimeBlockEngine.activeGapCap)
+        end = segment.timestamp
+        eventCount += 1
+        activeDuration += engaged
+        appDurations[lastSegmentApp, default: 0] += engaged
+        lastSegmentApp = segment.app
+        addContext(segment)
+    }
+
+    /// Settle `app` on the app the user actually spent the most engaged time in — the
+    /// block's true dominant app, not whichever app happened to open it. Called once by
+    /// the engine after a block is complete; name, colour and label all follow from it.
+    mutating func finalizeDominantApp() {
+        if let dominant = appDurations.max(by: { $0.value < $1.value })?.key,
+           appDurations[dominant, default: 0] > 0 {
+            app = dominant
+        }
+    }
+
+    /// Other apps the user touched in this block, by engaged time. Only dwells that
+    /// register meaningfully (≥30s) — a half-second bounce through Finder isn't a story.
+    var secondaryApps: [String] {
+        appDurations
+            .filter { $0.key != app && $0.value >= 30 }
+            .sorted { $0.value > $1.value }
+            .map(\.key)
     }
 
     mutating func addContext(_ segment: EventSegment) {
@@ -261,6 +296,7 @@ struct TimeBlock: Identifiable {
         case .screenText, .appSwitch:
             if !segment.windowTitle.isEmpty {
                 windowTitles[segment.windowTitle, default: 0] += 1
+                windowTitleApps[segment.windowTitle] = segment.app
             }
         case .clipboard:
             if segment.text.count > 5 {
@@ -268,17 +304,24 @@ struct TimeBlock: Identifiable {
             }
         case .keystroke:
             keystrokeCount += 1
-        case .audio:
+        case .windowBody, .audio:
+            // Body snapshots are territory for search/synthesis, not an activity
+            // signal — letting them drive time blocks would double-count work the
+            // title/keystroke channels already represent.
             break
         }
     }
 
+    /// Most frequent window title, preferring titles that belong to the dominant app —
+    /// so a Safari page name never captions a block whose face is Xcode.
     var topWindowTitle: String? {
-        windowTitles.max(by: { $0.value < $1.value })?.key
+        let dominantOwned = windowTitles.filter { windowTitleApps[$0.key] == app }
+        if let best = dominantOwned.max(by: { $0.value < $1.value }) { return best.key }
+        return windowTitles.max(by: { $0.value < $1.value })?.key
     }
 
     var topClipboard: String? {
-        clipboardTexts.last
+        clipboardTexts.last.map { Redactor.mask($0) }
     }
 }
 
@@ -355,7 +398,7 @@ extension TimeBlockEngine {
         }
 
         // Step 2: Create ActivitySummary per group, sorted by total duration
-        var activities = taskGroups.map { key, blocks -> ActivitySummary in
+        let activities = taskGroups.map { key, blocks -> ActivitySummary in
             let totalDuration = blocks.reduce(0.0) { $0 + $1.activeDuration }
             let totalEvents = blocks.reduce(0) { $0 + $1.eventCount }
             let primaryApp = mostCommonApp(in: blocks)
@@ -692,7 +735,7 @@ extension TimeBlockEngine {
                 name: displayName,
                 lastActiveDate: data.lastDate,
                 lastFile: data.files.last,
-                lastClipboard: data.clipboards.last.map { String($0.prefix(80)) },
+                lastClipboard: data.clipboards.last.map { Redactor.mask(String($0.prefix(80))) },
                 totalDuration: data.duration,
                 primaryApp: primaryApp,
                 eventCount: data.events,

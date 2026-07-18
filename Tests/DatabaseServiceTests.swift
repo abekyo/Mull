@@ -10,9 +10,9 @@ final class DatabaseServiceTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        db = DatabaseService()
-        // Clean slate for each test
-        try? db.deleteAllData()
+        // A throwaway database — never the user's real recorded history.
+        // Each test therefore starts from a genuinely clean slate.
+        db = try! DatabaseService.temporary()
     }
 
     // MARK: - Migration
@@ -23,7 +23,9 @@ final class DatabaseServiceTests: XCTestCase {
     }
 
     func testSchemaVersionIsLatest() {
-        XCTAssertEqual(db.schemaVersion, "v3_predictions")
+        // Derived, not hardcoded: this assertion went stale silently through v4,
+        // v5 and v6, so it was testing nothing until it started failing.
+        XCTAssertEqual(db.schemaVersion, DatabaseService.latestMigrationIdentifier)
     }
 
     // MARK: - Recording Events CRUD

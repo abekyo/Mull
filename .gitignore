@@ -30,3 +30,6 @@ Mull*.xcodeproj/
 
 # Claude Code local state
 .claude/
+
+# Machine-specific signing identity (see Local.xcconfig.example)
+Local.xcconfig

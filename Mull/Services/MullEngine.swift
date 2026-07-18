@@ -96,8 +96,11 @@ final class MullEngine {
     private func passesDataGate() -> Bool {
         let lock = database.fetchmullLock()
         let since = lock?.lastSummaryAt ?? Date.distantPast
-        let events = database.fetchEvents(from: since, to: Date())
-        return events.count >= minEventsRequired
+        // COUNT(*) in SQL, not SELECT * decoded into memory. With the LLM off,
+        // `lastSummaryAt` stays nil forever, so `since` is .distantPast — fetching
+        // rows here meant loading the ENTIRE event table (textContent included)
+        // every 10 minutes just to compare a number against a threshold.
+        return database.countEvents(from: since, to: Date()) >= minEventsRequired
     }
 
     /// Gate 3: No other mull process is running (PID check).
@@ -125,11 +128,48 @@ final class MullEngine {
 
     // MARK: - Acquire / Release Lock
 
-    private func acquireLock() {
-        var lock = database.fetchmullLock() ?? mullLock(sessionsSinceLast: 0)
-        lock.holderPID = Int32(ProcessInfo.processInfo.processIdentifier)
-        lock.acquiredAt = Date()
-        database.updatemullLock(lock)
+    /// Take the lock, or report that someone else holds it.
+    ///
+    /// This must be ONE transaction. The old version read the row, mutated it in
+    /// Swift, then wrote it back in a separate transaction — and `passesLockGate()`
+    /// read it in a third. MullMCP opens a second DatabaseService on the same file,
+    /// so two processes could both see `holderPID == nil` and both start a
+    /// consolidation. GRDB's `write` on a pool is an IMMEDIATE transaction, so
+    /// deciding and claiming inside a single block is genuinely atomic across
+    /// processes: the loser blocks until the winner has committed, then sees the PID.
+    private func acquireLock() -> Bool {
+        let pid = Int32(ProcessInfo.processInfo.processIdentifier)
+        do {
+            return try database.dbPool.write { db -> Bool in
+                // The lock is a singleton row seeded at migration time; recreate it
+                // if it ever went missing so acquisition can't silently no-op.
+                guard let lock = try mullLock.fetchOne(db) else {
+                    try db.execute(sql: """
+                        INSERT INTO mull_lock (holderPID, acquiredAt, sessionsSinceLast)
+                        VALUES (?, ?, 0)
+                    """, arguments: [pid, Date()])
+                    return true
+                }
+
+                if let holder = lock.holderPID {
+                    // Same reclaim rules as passesLockGate, but evaluated under the
+                    // write lock so the decision can't be raced.
+                    if kill(holder, 0) == 0 {
+                        guard let acquired = lock.acquiredAt,
+                              Date().timeIntervalSince(acquired) / 3600 > Self.maxLockHoldHours
+                        else { return false }  // genuinely running — back off
+                    }
+                    // dead PID, or held absurdly long → reclaim
+                }
+
+                try db.execute(sql: "UPDATE mull_lock SET holderPID = ?, acquiredAt = ? WHERE id = ?",
+                               arguments: [pid, Date(), lock.id])
+                return true
+            }
+        } catch {
+            print("[mull] lock acquire failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     private func releaseLock(success: Bool) {
@@ -147,7 +187,7 @@ final class MullEngine {
 
     func runSummary() async throws -> DailySummary {
         let startTime = Date()
-        acquireLock()
+        guard acquireLock() else { throw mullError.alreadyRunning }
 
         do {
             // Phase 1: Orient
@@ -180,7 +220,13 @@ final class MullEngine {
             let provider = UserDefaults.standard.string(forKey: "llmProvider") ?? "off"
 
             let dailySummary = DailySummary(
-                date: Calendar.current.startOfDay(for: Date()),
+                // Stamp the day the summary is ABOUT, not the day it ran. Phase 2
+                // gathers `now - 24h → now`, and the Settings hour picker allows
+                // 0..<24: a 03:00 run summarizes almost entirely yesterday, and
+                // `insertSummary` replaces whatever exists for the stamped date —
+                // so stamping "today" both mislabeled the run and destroyed today's
+                // real summary. The window's midpoint names the day it covers.
+                date: rawData.summaryDate,
                 content: summary.fullMarkdown,
                 morningSection: summary.morning,
                 afternoonSection: summary.afternoon,
@@ -239,9 +285,10 @@ final class MullEngine {
     /// Collect the past 24 hours of recording events, grouped by time and app.
     private func phase2Gather() -> GatheredData {
         let calendar = Calendar.current
-        let yesterday = calendar.date(byAdding: .hour, value: -24, to: Date())!
+        let windowEnd = Date()
+        let windowStart = calendar.date(byAdding: .hour, value: -24, to: windowEnd)!
 
-        let events = database.fetchEvents(from: yesterday, to: Date())
+        let events = database.fetchEvents(from: windowStart, to: windowEnd)
 
         // Group by time period
         var morning: [RecordingEvent] = []
@@ -267,7 +314,9 @@ final class MullEngine {
             morning: morning,
             afternoon: afternoon,
             evening: evening,
-            appGroups: appGroups
+            appGroups: appGroups,
+            windowStart: windowStart,
+            windowEnd: windowEnd
         )
     }
 
@@ -777,8 +826,13 @@ final class MullEngine {
     /// me.md — "Who are you?" Compact, stable, always safe.
     ///
     /// Curated, not rewritten: the nightly LLM pass updates only its own agent blocks
-    /// and shares block ids with the 60s rule-based pass (LiveContextGenerator), so the
-    /// two never duplicate or clobber each other, and pinned/human blocks are preserved.
+    /// and shares block ids with the 60s rule-based pass (LiveContextGenerator). Each
+    /// pass declares the id prefixes it owns, and those sets are DISJOINT — the 60s
+    /// pass owns `fact:`, the nightly pass owns `mem:`/`pref:` — so neither prunes the
+    /// other's blocks, and pinned/human blocks are preserved by the Curator itself.
+    /// Layers B and C (now.md / full.md) now follow the same discipline; before that
+    /// they were written wholesale by both passes and the nightly LLM output was
+    /// destroyed by the next 60s tick.
     private func generateLayerA(memories: [MemoryEntry], timestamp: String) throws {
         var agentBlocks: [ContextBlock] = []
 
@@ -803,10 +857,14 @@ final class MullEngine {
     }
 
     /// now.md — "What are you working on?" Current projects + this week.
+    ///
+    /// Curated under the `nightly:` prefix, NOT written wholesale. LiveContextGenerator
+    /// owns `now:` and rewrites its own block every 60 seconds; the raw
+    /// `String.write(to:)` this used to do was clobbered within a minute, so the
+    /// nightly LLM output never survived long enough for anyone to read it.
     private func generateLayerB(memories: [MemoryEntry], summaries: [DailySummary], timestamp: String) throws {
         var lines: [String] = []
-        lines.append("# now.md — What I'm Working On")
-        lines.append("<!-- ~500 tokens. Include when task context helps. Updated: \(timestamp) -->")
+        lines.append("## From last night's consolidation")
         lines.append("")
 
         // Active projects
@@ -845,29 +903,35 @@ final class MullEngine {
             lines.append(patterns)
         }
 
-        try lines.joined(separator: "\n")
-            .write(to: nowFilePath, atomically: true, encoding: .utf8)
+        Curator.curate(relativePath: "now.md", header: Curator.nowHeader(timestamp: timestamp),
+                       pinnedContent: nil,
+                       agentBlocks: [ContextBlock(
+                           id: "nightly:now", source: .agent,
+                           content: lines.joined(separator: "\n")
+                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           agentHash: nil)],
+                       managedPrefixes: ["nightly:"])
     }
 
     /// full.md — Everything. For onboarding AI to a new major task.
+    ///
+    /// Same story as layer B: curated under `nightly:`, disjoint from the 60s pass's
+    /// `full:` block, so the two coexist instead of overwriting each other.
     private func generateLayerC(memories: [MemoryEntry], summaries: [DailySummary], timestamp: String) throws {
         var lines: [String] = []
-        lines.append("# full.md — Complete Context")
-        lines.append("<!-- ~1500 tokens. Use when starting a big task. Updated: \(timestamp) -->")
+        lines.append("## From last night's consolidation")
         lines.append("")
 
-        // Include me.md content
+        // me.md / now.md are curated files; strip provenance markers before
+        // embedding them here — full.md is read as prose by humans and AIs, and
+        // the markers are internal Curator metadata.
         if let meContent = try? String(contentsOf: meFilePath, encoding: .utf8) {
-            lines.append(meContent)
+            lines.append(ContextBlockFile.stripMarkers(meContent))
             lines.append("")
         }
 
-        // Include now.md content (skip header to avoid duplication)
         if let nowContent = try? String(contentsOf: nowFilePath, encoding: .utf8) {
-            let body = nowContent.components(separatedBy: "\n")
-                .dropFirst(2) // Skip header + token comment
-                .joined(separator: "\n")
-            lines.append(body)
+            lines.append(ContextBlockFile.stripMarkers(nowContent))
             lines.append("")
         }
 
@@ -932,8 +996,14 @@ final class MullEngine {
             }
         }
 
-        try lines.joined(separator: "\n")
-            .write(to: fullFilePath, atomically: true, encoding: .utf8)
+        Curator.curate(relativePath: "full.md", header: Curator.fullHeader(timestamp: timestamp),
+                       pinnedContent: nil,
+                       agentBlocks: [ContextBlock(
+                           id: "nightly:full", source: .agent,
+                           content: lines.joined(separator: "\n")
+                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           agentHash: nil)],
+                       managedPrefixes: ["nightly:"])
     }
 
     // MARK: - Prune Processed Events
@@ -943,14 +1013,18 @@ final class MullEngine {
     /// Summaries and memory files are kept forever.
     /// Prune events according to user's retention setting, not a hardcoded value.
     private func pruneProcessedEvents() {
-        let retentionSetting = UserDefaults.standard.string(forKey: "dataRetention") ?? "unlimited"
+        // Same default as AppState.applyDataRetention — a fresh install prunes at
+        // 90 days rather than growing without bound.
+        let retentionSetting = UserDefaults.standard.string(forKey: "dataRetention")
+            ?? AppState.defaultDataRetentionDays
         guard retentionSetting != "unlimited", let days = Int(retentionSetting) else { return }
         try? database.deleteEventsOlderThan(days: days)
     }
 
     // MARK: - Scheduling
 
-    private var mullTimer: Timer?
+    /// Only ever touched on the main thread — see scheduleSummary.
+    @MainActor private var mullTimer: Timer?
 
     /// Called when a scheduled mull completes. Set by AppState.
     var onSummaryComplete: ((DailySummary) -> Void)?
@@ -958,6 +1032,14 @@ final class MullEngine {
 
     /// Schedule the nightly consolidation using a proper macOS Timer.
     /// Survives app sleep/wake. Reschedules automatically.
+    ///
+    /// Main-actor isolated on purpose: `Timer.invalidate()` must run on the thread
+    /// that installed the timer, and `RunLoop` is not safe to mutate from another
+    /// thread. The reschedule at the end of a run happens inside a `Task`, which is
+    /// NOT the main thread — doing the invalidate/add there left the nightly timer
+    /// either duplicated or silently dead. (AppState.scheduleEveningDraft already
+    /// hops back to the main actor for exactly this reason.)
+    @MainActor
     func scheduleSummary(at hour: Int, minute: Int = 0) {
         mullTimer?.invalidate()
 
@@ -982,7 +1064,7 @@ final class MullEngine {
                         self.onSummaryFailed?(error)
                     }
                 }
-                self.scheduleSummary(at: hour, minute: minute)
+                await MainActor.run { self.scheduleSummary(at: hour, minute: minute) }
             }
         }
         mullTimer = timer
@@ -990,9 +1072,14 @@ final class MullEngine {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    func cancelSchedule() {
-        mullTimer?.invalidate()
-        mullTimer = nil
+    /// Callable from anywhere (AppState's `deinit` is nonisolated), but the actual
+    /// invalidate always happens on the main thread — the same thread that installed
+    /// the timer on the main run loop.
+    nonisolated func cancelSchedule() {
+        Task { @MainActor in
+            self.mullTimer?.invalidate()
+            self.mullTimer = nil
+        }
     }
 }
 
@@ -1004,6 +1091,18 @@ struct GatheredData {
     let afternoon: [RecordingEvent]
     let evening: [RecordingEvent]
     let appGroups: [String: [RecordingEvent]]
+    /// The window these events were gathered from — the summary is stamped from
+    /// this, not from "now" (see runSummary).
+    let windowStart: Date
+    let windowEnd: Date
+
+    /// The calendar day this gather is ABOUT: the day containing the window's
+    /// midpoint. For the default 23:00 run that's today (as before); for an early
+    /// morning run it's correctly yesterday.
+    var summaryDate: Date {
+        let midpoint = windowStart.addingTimeInterval(windowEnd.timeIntervalSince(windowStart) / 2)
+        return Calendar.current.startOfDay(for: midpoint)
+    }
 }
 
 struct ConsolidatedSummary {
@@ -1019,11 +1118,13 @@ struct ConsolidatedSummary {
 enum mullError: LocalizedError {
     case missingAPIKey(String)
     case llmFailed(String)
+    case alreadyRunning
 
     var errorDescription: String? {
         switch self {
         case .missingAPIKey(let provider): "No API key configured for \(provider). Set it in Settings → AI."
         case .llmFailed(let detail): "LLM call failed: \(detail)"
+        case .alreadyRunning: "A consolidation is already running. Try again when it finishes."
         }
     }
 }

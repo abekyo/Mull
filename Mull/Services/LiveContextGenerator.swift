@@ -13,10 +13,13 @@ enum LiveContextGenerator {
 
     private static var mullDir: URL { MullDirectory.root }
 
-    static var calendarService: CalendarService?
-    static var emailService: EmailService?
-
-    static func generate(analytics: AnalyticsEngine, database: DatabaseService) throws {
+    /// Calendar/email are PASSED IN, not stored in mutable statics. They used to be
+    /// `static var` optionals assigned from every detached generation task — writing
+    /// a class reference into shared mutable state from concurrent tasks is a
+    /// retain/release data race, and a torn read could hand the generator a
+    /// half-released object.
+    static func generate(analytics: AnalyticsEngine, database: DatabaseService,
+                         calendar: CalendarService?, email: EmailService?) throws {
         guard MullDirectory.status == .ready else { return }
 
         let memories = database.fetchAllMemories()
@@ -24,12 +27,82 @@ enum LiveContextGenerator {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
 
         try generateMe(memories: memories, analytics: analytics, database: database, timestamp: timestamp)
-        try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendarService, timestamp: timestamp)
+        try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendar, email: email, timestamp: timestamp)
         try generateFull(database: database, analytics: analytics, timestamp: timestamp)
+        generateFrontDoor(timestamp: timestamp)
+        fillFoldersIfDue(database: database, analytics: analytics)
         try snapshotDaily()
         // NOTE: Claude Code integration is manual. User runs:
         //   claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
         // We don't auto-write to ~/.claude.json or ~/.claude/CLAUDE.md — that's invasive.
+    }
+
+    // MARK: - mull.md — the front door (read me first)
+    //
+    // The single cover page for the whole vault: what this record is, the order
+    // to read it in, a map of the folders, and how to work with it. The MCP
+    // server points every agent here first (initialize `instructions` +
+    // `mull://start`), so the record actually functions as material HANDED to an
+    // AI — not a pile of files with no entry point. Rule-based: no LLM, always
+    // current. Plain-written (no user blocks) — it's a generated index.
+
+    private static func generateFrontDoor(timestamp: String) {
+        var l: [String] = []
+        l.append("# mull — start here")
+        l.append("")
+        l.append("This is the mull record of one person: an automatically-kept, local context")
+        l.append("vault. Read it to understand who they are and what they are doing, so you can")
+        l.append("help without them explaining themselves from scratch.")
+        l.append("")
+        l.append("_Auto-updated \(timestamp). Kept locally on the user's Mac — lent to you, not owned by you._")
+        l.append("")
+        l.append("## Read in this order")
+        l.append("1. **me.md** — who they are: identity, skills, preferences (~200 tokens, always safe).")
+        l.append("2. **now.md** — what they're working on right now (~500 tokens).")
+        l.append("3. For anything live or specific, call the tools instead of guessing:")
+        l.append("   - `whats_active_now` — current app / project / recent actions. Call this FIRST.")
+        l.append("   - `search` — relevance-ranked retrieval, scoped to the current project.")
+        l.append("   - `get_projects` — where they left off on each project.")
+        l.append("4. **full.md** — everything, including raw activity. Only when starting a big task.")
+        l.append("")
+        l.append("## The vault")
+        l.append("- `me.md`, `now.md`, `full.md` — the 3-layer context above.")
+        l.append("- `daily/` — daily snapshots of the full context.")
+        for folder in FolderOntology.folders {
+            l.append("- `\(folder.path)/` — \(folder.purpose)")
+        }
+        l.append("- `notes/` — the user's own notes.")
+        l.append("")
+        l.append("## Working with this record")
+        l.append("- It is **theirs**. Don't assert what they think; if you infer judgment, mark it as a guess and let them correct it.")
+        l.append("- You may write back with the `curate` / `write_note` tools — your own block only. The user's writing is never overwritten.")
+        l.append("")
+        _ = MullDirectory.write(l.joined(separator: "\n"), to: "mull.md")
+    }
+
+    // MARK: - Rule-based vault fill (throttled)
+    //
+    // The numbered folders (00/01/03/06) are filled rule-based so the vault isn't
+    // empty with the LLM off. Heavier than me/now (14-day project scans, fact +
+    // knowledge extraction), so it runs at most every 5 minutes, not every 60s.
+
+    /// Guarded by `folderFillLock`: a bare `static var` here was a read-check-write
+    /// on shared state from concurrent generation tasks, so two overlapping runs
+    /// could both decide they were due and run FolderFiller in parallel.
+    private static var lastFolderFill: Date?
+    private static let folderFillLock = NSLock()
+
+    private static func fillFoldersIfDue(database: DatabaseService, analytics: AnalyticsEngine) {
+        let now = Date()
+        folderFillLock.lock()
+        if let last = lastFolderFill, now.timeIntervalSince(last) < 300 {
+            folderFillLock.unlock()
+            return
+        }
+        lastFolderFill = now
+        folderFillLock.unlock()
+
+        FolderFiller.fill(database: database, analytics: analytics)
     }
 
     // MARK: - Daily Snapshot
@@ -39,7 +112,11 @@ enum LiveContextGenerator {
     // always reflects the latest state. Past days are frozen in place.
 
     private static func snapshotDaily() throws {
-        guard let content = MullDirectory.read("full.md"), !content.isEmpty else { return }
+        guard let raw = MullDirectory.read("full.md"), !raw.isEmpty else { return }
+        // full.md is a curated file now (two writers, disjoint block prefixes), so
+        // strip the provenance markers before freezing the day's copy — the daily
+        // snapshot is a readable artifact, not something the Curator round-trips.
+        let content = ContextBlockFile.stripMarkers(raw)
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy/MM"
@@ -106,6 +183,11 @@ enum LiveContextGenerator {
     }
 
     // MARK: - now.md (~500 tokens) — What you're working on
+    //
+    // Curated, not rewritten wholesale. This 60s pass owns the `now:` prefix; the
+    // nightly MullEngine pass owns `nightly:`. Both used to `String.write` the whole
+    // file, which meant the nightly LLM output was destroyed by the very next tick —
+    // me.md had been fixed this way, now.md and full.md had not.
 
     private static func generateNow(
         memories: [MemoryEntry],
@@ -113,11 +195,10 @@ enum LiveContextGenerator {
         analytics: AnalyticsEngine,
         database: DatabaseService,
         calendar: CalendarService?,
+        email: EmailService?,
         timestamp: String
     ) throws {
         var lines: [String] = []
-        lines.append("What the user is currently working on (\(timestamp)):")
-        lines.append("")
 
         // Current work-in-progress (what you're doing now, where to resume) is no
         // longer pre-digested here by rule-based project inference. The AI gets it
@@ -137,13 +218,13 @@ enum LiveContextGenerator {
         }
 
         // Email metadata
-        if let emailSummary = emailService?.recentEmailSummary(hours: 24) {
+        if let emailSummary = email?.recentEmailSummary(hours: 24) {
             lines.append(emailSummary)
             lines.append("")
         }
 
         // Calendar events
-        if let schedule = calendarService?.todaySchedule() {
+        if let schedule = calendar?.todaySchedule() {
             lines.append(schedule)
             lines.append("")
         }
@@ -178,7 +259,14 @@ enum LiveContextGenerator {
             }
         }
 
-        MullDirectory.write(lines.joined(separator: "\n"), to: "now.md")
+        Curator.curate(relativePath: "now.md", header: Curator.nowHeader(timestamp: timestamp),
+                       pinnedContent: nil,
+                       agentBlocks: [ContextBlock(
+                           id: "now:live", source: .agent,
+                           content: lines.joined(separator: "\n")
+                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           agentHash: nil)],
+                       managedPrefixes: ["now:"])
     }
 
     // MARK: - full.md — Synthesized context
@@ -186,6 +274,9 @@ enum LiveContextGenerator {
     // pagpag philosophy: transform, don't discard.
     // Keep the user's own words (the magic). Remove only truly toxic data.
     // Group by project/context so AI can understand the narrative.
+    //
+    // Curated under `full:`, disjoint from the nightly pass's `nightly:` — same
+    // two-writer fix as now.md above.
 
     private static func generateFull(database: DatabaseService, analytics: AnalyticsEngine, timestamp: String) throws {
         var parts: [String] = []
@@ -214,7 +305,14 @@ enum LiveContextGenerator {
             parts.append(grouped)
         }
 
-        MullDirectory.write(parts.joined(separator: "\n"), to: "full.md")
+        Curator.curate(relativePath: "full.md", header: Curator.fullHeader(timestamp: timestamp),
+                       pinnedContent: nil,
+                       agentBlocks: [ContextBlock(
+                           id: "full:live", source: .agent,
+                           content: parts.joined(separator: "\n")
+                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           agentHash: nil)],
+                       managedPrefixes: ["full:"])
     }
 
     /// Group clipboard entries by project/context.

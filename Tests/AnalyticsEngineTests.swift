@@ -10,16 +10,19 @@ final class AnalyticsEngineTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        db = DatabaseService()
-        try? db.deleteAllData()
+        // A throwaway database — never the user's real recorded history.
+        db = try! DatabaseService.temporary()
         analytics = AnalyticsEngine(database: db)
     }
 
     // MARK: - Keyword Extraction
 
     func testTopKeywordsFiltersStopWords() {
-        insertClipboard("the quick brown fox jumps over the lazy dog")
-        insertClipboard("the quick brown fox jumps over the lazy dog")
+        // NB: the fixture must not itself look like QA input — "the quick brown
+        // fox" is a pangram in TestInput.fillerPhrases, so the engine correctly
+        // discards it and this test asserted on an empty result for a long time.
+        insertClipboard("the migration handles the retry logic for uploads")
+        insertClipboard("the migration handles the retry logic for uploads")
 
         let keywords = analytics.topKeywords(days: 1, limit: 10)
         let words = keywords.map(\.word)
@@ -27,8 +30,8 @@ final class AnalyticsEngineTests: XCTestCase {
         // "the" should be filtered as a stop word
         XCTAssertFalse(words.contains("the"))
         // Content words should remain
-        XCTAssertTrue(words.contains("quick"))
-        XCTAssertTrue(words.contains("brown"))
+        XCTAssertTrue(words.contains("migration"))
+        XCTAssertTrue(words.contains("retry"))
     }
 
     func testTopKeywordsFiltersURLs() {
@@ -55,17 +58,20 @@ final class AnalyticsEngineTests: XCTestCase {
     }
 
     func testTopKeywordsFiltersEmptyAndShortWords() {
-        insertClipboard("a b cd efg hijkl")
-        insertClipboard("a b cd efg hijkl")
+        // Avoid adjacent single-letter words ("a b cd …") — TestInput treats that
+        // shape as keyboard filler and drops the event before tokenizing.
+        insertClipboard("db is ok but the parser needs work")
+        insertClipboard("db is ok but the parser needs work")
 
         let keywords = analytics.topKeywords(days: 1, limit: 10)
         let words = keywords.map(\.word)
 
-        XCTAssertFalse(words.contains("a"))
-        XCTAssertFalse(words.contains("b"))
-        XCTAssertFalse(words.contains("cd"))
+        // 1-2 char words are dropped
+        XCTAssertFalse(words.contains("db"))
+        XCTAssertFalse(words.contains("is"))
+        XCTAssertFalse(words.contains("ok"))
         // 3+ chars should pass (if not a stop word)
-        XCTAssertTrue(words.contains("efg"))
+        XCTAssertTrue(words.contains("parser"))
     }
 
     // MARK: - Phrase Detection

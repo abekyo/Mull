@@ -29,6 +29,8 @@ final class RecordingService {
     private var wakeObserver: NSObjectProtocol?
     private var clipboardTimer: Timer?
     private var windowTitleTimer: Timer?
+    private var windowBodyTimer: Timer?
+    private var lastWindowBody = ""
     private var healthCheckTimer: Timer?
 
     // Keystroke capture
@@ -98,6 +100,9 @@ final class RecordingService {
         startWindowTitleMonitor()
         print("[mull] Window title monitor started")
 
+        startWindowBodyMonitor()
+        print("[mull] Window body monitor started")
+
         startKeystrokeCapture()
         // CGEvent tap creation logs its own success/failure
 
@@ -130,15 +135,46 @@ final class RecordingService {
         clipboardTimer = nil
         windowTitleTimer?.invalidate()
         windowTitleTimer = nil
+        windowBodyTimer?.invalidate()
+        windowBodyTimer = nil
 
         recordAppSession()
     }
 
+    /// Generation token so a stale timed-pause auto-resume can't override a later
+    /// manual pause/resume.
+    private var pauseToken = 0
+
+    /// Pause until explicitly resumed. Honest pause: we also DISABLE the CGEvent tap
+    /// at the OS level, so keystrokes are not even delivered to mull while paused —
+    /// not merely dropped in-process. Clipboard/window pollers early-return on isPaused.
+    func pauseIndefinitely() {
+        pauseToken += 1
+        setPaused(true)
+    }
+
+    /// Pause for a fixed window, then auto-resume (unless superseded meanwhile).
     func pause(for duration: TimeInterval) {
-        isPaused = true
+        pauseToken += 1
+        let token = pauseToken
+        setPaused(true)
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-            self?.isPaused = false
+            guard let self, self.pauseToken == token else { return }   // not superseded
+            self.setPaused(false)
         }
+    }
+
+    /// Resume capture immediately (cancels any pending timed auto-resume).
+    func resume() {
+        pauseToken += 1
+        setPaused(false)
+    }
+
+    private func setPaused(_ paused: Bool) {
+        isPaused = paused
+        // Disabling the tap stops keystrokes from reaching us at all; re-enabling
+        // resumes without rebuilding the whole capture stack.
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: !paused) }
     }
 
     // MARK: - 1. Keystroke Capture (CGEvent tap — EVERYTHING)
@@ -320,6 +356,30 @@ final class RecordingService {
         }
     }
 
+    // MARK: - 3b. Window Body Monitor (capture fidelity #1)
+    //
+    // Reads the BODY text of the focused window every 30s — the work itself, not
+    // the title. Territory-first (MAP-ARCHITECTURE.md): a body we don't capture
+    // now can never be re-captured. Recorded only on change, on a separate
+    // channel (.windowBody) so title heuristics stay clean. Same privacy gates
+    // as every monitor: app exclusions, private browsing, secure input — plus
+    // WindowTextCapture itself never reads password fields.
+
+    private func startWindowBodyMonitor() {
+        windowBodyTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            guard let self, self.isRunning, !self.isPaused else { return }
+            guard !self.isExcludedApp() else { return }
+            if IsSecureEventInputEnabled() { return }
+            if let title = self.currentWindowTitle, PrivateBrowsing.isPrivate(title) { return }
+
+            // Below ~80 chars a title-only window adds nothing over .screenText.
+            guard let body = WindowTextCapture.focusedWindowText(), body.count >= 80 else { return }
+            guard body != self.lastWindowBody else { return }
+            self.lastWindowBody = body
+            self.recordEvent(type: .windowBody, text: body)
+        }
+    }
+
     /// Get the current URL from the active browser tab via AppleScript.
     /// Works with Safari, Chrome, Firefox, Arc, Brave, Edge.
     private var lastBrowserURL: String = ""
@@ -371,8 +431,12 @@ final class RecordingService {
         let result = AXUIElementCopyAttributeValue(
             appElement, kAXFocusedWindowAttribute as CFString, &windowRef
         )
-        guard result == .success, let window = windowRef else { return nil }
-        let windowElement = window as CFTypeRef as! AXUIElement
+        // Some apps answer kAXFocusedWindow with something that isn't an AXUIElement.
+        // A force-cast crashes the whole recorder there, so verify the CF type first
+        // (same guard as WindowTextCapture.focusedWindowText).
+        guard result == .success, let window = windowRef,
+              CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
+        let windowElement = unsafeDowncast(window as AnyObject, to: AXUIElement.self)
 
         var titleRef: CFTypeRef?
         AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &titleRef)
@@ -391,7 +455,20 @@ final class RecordingService {
 
             let currentCount = NSPasteboard.general.changeCount
             guard currentCount != self.lastClipboardCount else { return }
+            // Advance the counter before the privacy gates: even when we drop this
+            // copy, the *next* one (from a permitted app) must still look changed.
             self.lastClipboardCount = currentCount
+
+            // The same privacy gates every other capture channel applies — keystrokes,
+            // window titles and window body all check these, and the clipboard was the
+            // one poller that didn't, so a password copied out of 1Password (an
+            // explicitly excluded app) still landed in the vault. We return before
+            // reading the pasteboard at all, so the secret isn't even held in
+            // `lastClipboardText`. Checked here rather than at the top of the tick:
+            // this runs twice a second, and the common case is "nothing was copied".
+            if self.isExcludedApp() { return }
+            if IsSecureEventInputEnabled() { return }
+            if let title = self.currentWindowTitle, PrivateBrowsing.isPrivate(title) { return }
 
             guard let text = NSPasteboard.general.string(forType: .string),
                   !text.isEmpty,
@@ -414,8 +491,14 @@ final class RecordingService {
                 return
             }
 
-            print("[mull] Clipboard captured: \(text.prefix(50))...")
-            self.recordEvent(type: .clipboard, text: String(text.prefix(5000)))
+            // Log the shape, never the content: Console.app is world-readable to any
+            // process that can talk to the unified log, so echoing clipboard text
+            // there leaks exactly what the local-only vault promise protects.
+            print("[mull] Clipboard captured: \(text.count) chars")
+            // Capture fidelity (MAP-ARCHITECTURE.md): the cap is irreversible loss
+            // at the territory layer — you can't re-copy the past. Keep generously;
+            // pasted docs/code routinely exceed 5k chars. SQLite handles this fine.
+            self.recordEvent(type: .clipboard, text: String(text.prefix(40000)))
         }
     }
 
@@ -427,7 +510,10 @@ final class RecordingService {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self, self.isRunning else { return }
+            // `!isPaused` matters: setPaused(true) deliberately disables the tap at the
+            // OS level, and a wake would otherwise silently switch keystroke capture
+            // back on behind the user's explicit pause.
+            guard let self, self.isRunning, !self.isPaused else { return }
             self.updateCurrentApp()
             // Re-enable event tap (may be disabled after sleep)
             if let tap = self.eventTap {
@@ -451,7 +537,12 @@ final class RecordingService {
     private func startHealthCheck() {
         lastHealthStatus = true
         healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
-            guard let self, self.isRunning else { return }
+            // While paused the tap is disabled *on purpose* (setPaused). Without the
+            // isPaused check this timer read that as "macOS killed the tap" and
+            // re-enabled it within 10s, quietly undoing the user's pause. A paused
+            // tap has nothing to recover, so skip the tick entirely — recreating a
+            // destroyed tap below would re-enable it too.
+            guard let self, self.isRunning, !self.isPaused else { return }
 
             var isHealthy = true
 
@@ -531,11 +622,15 @@ final class RecordingService {
             return
         }
 
-        print("[mull] Recording event: \(type.rawValue) — \(cleaned.prefix(60))")
+        // Type and size only — this path carries keystrokes, clipboard and window
+        // body text, none of which belongs in the unified log.
+        print("[mull] Recording event: \(type.rawValue) — \(cleaned.count) chars")
 
         // Capture-time enrichment (#4): classify once, store on the row, so the
         // selection layer doesn't recompute kind/salience/entity per query.
         let signal = Signal.classify(text: cleaned, eventType: type, windowTitle: currentWindowTitle)
+        let mode = Mode.classify(text: cleaned, eventType: type, appName: currentAppName,
+                                 windowTitle: currentWindowTitle, contentType: signal.type)
         let event = RecordingEvent(
             timestamp: Date(),
             eventType: type,
@@ -544,7 +639,8 @@ final class RecordingService {
             textContent: cleaned,
             entity: Entity.from(currentWindowTitle ?? cleaned),
             contentType: signal.type,
-            salience: signal.salience
+            salience: signal.salience,
+            mode: mode.rawValue
         )
         database.insertEvent(event)
     }
@@ -564,6 +660,37 @@ final class RecordingService {
 
     var excludedApps: Set<String> {
         excludedBundleIDs
+    }
+
+    /// Excluded apps as (bundleID, displayName), sorted by name — for the settings list.
+    var excludedAppList: [(id: String, name: String)] {
+        excludedBundleIDs
+            .map { (id: $0, name: Self.appName(for: $0)) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Currently running, user-facing apps not already excluded — for the "Add" picker.
+    var addableRunningApps: [(id: String, name: String)] {
+        var seen = Set<String>()
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> (id: String, name: String)? in
+                guard let id = app.bundleIdentifier,
+                      !excludedBundleIDs.contains(id),
+                      seen.insert(id).inserted else { return nil }
+                return (id: id, name: app.localizedName ?? id)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Best-effort friendly name for a bundle id (running app → installed app → id).
+    static func appName(for bundleID: String) -> String {
+        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID }),
+           let name = app.localizedName { return name }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        }
+        return bundleID
     }
 }
 

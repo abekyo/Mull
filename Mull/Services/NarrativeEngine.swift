@@ -61,9 +61,7 @@ struct NarrativeEngine {
         }
 
         let totalMinutes = Int(analysis.totalDuration / 60)
-        let mainApp = analysis.mainActivities.first?.app ?? ""
         let mainLabel = analysis.mainActivities.first?.label ?? ""
-        let activityCount = analysis.mainActivities.count + analysis.otherActivities.count
 
         // Single-focus day
         if analysis.mainActivities.count == 1 {

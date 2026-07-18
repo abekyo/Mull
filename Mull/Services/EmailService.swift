@@ -10,7 +10,16 @@ final class EmailService {
     private let database: DatabaseService
     private var pollTimer: Timer?
     private var lastFetchDate: Date = Date()
+    /// Dedup keys for emails already recorded, bounded so a long-running session with a
+    /// busy inbox can't grow this without limit. `seenOrder` is the insertion order used
+    /// to evict the oldest key once we pass the cap.
+    ///
+    /// Known limitation: this lives in memory only, so a relaunch forgets it and the
+    /// next poll re-records whatever is still inside Mail's 24h window as fresh events.
+    /// Fixing that properly needs persistence, and a new DB table is out of scope here.
     private var seenSubjects: Set<String> = []
+    private var seenOrder: [String] = []
+    private static let maxSeenSubjects = 2_000
 
     var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: "emailCaptureEnabled")
@@ -79,7 +88,7 @@ final class EmailService {
             // Dedup — don't re-record same email
             let key = "\(subject)|\(sender)"
             guard !seenSubjects.contains(key) else { continue }
-            seenSubjects.insert(key)
+            noteSeen(key)
 
             // Skip excluded patterns
             if isExcluded(subject: subject, sender: sender) { continue }
@@ -96,9 +105,42 @@ final class EmailService {
         }
     }
 
+    /// Record a dedup key, evicting the oldest keys once the cap is reached. Eviction is
+    /// safe for our purpose: keys age out roughly in the order they arrived, and Mail
+    /// only ever hands us the last 24h, so an evicted key is one we're unlikely to see
+    /// again — at worst a very old mail is recorded twice.
+    private func noteSeen(_ key: String) {
+        seenSubjects.insert(key)
+        seenOrder.append(key)
+        guard seenOrder.count > Self.maxSeenSubjects else { return }
+        let overflow = seenOrder.count - Self.maxSeenSubjects
+        for old in seenOrder.prefix(overflow) { seenSubjects.remove(old) }
+        seenOrder.removeFirst(overflow)
+    }
+
+    /// Sender-side markers for the same built-in categories the subject is screened for.
+    /// Matched against the whole `sender` string (Mail hands us "Name <addr@host>"), so
+    /// both the display name and the address/domain are covered.
+    ///
+    /// Why this exists: subject-only screening broke the "bank notices are auto-excluded"
+    /// promise the moment a bank wrote a neutral subject — `alerts@chase.com` /
+    /// "Your July summary is ready" matched nothing and was recorded.
+    private static let excludedSenderMarkers: [String] = [
+        // Security / no-reply automation
+        "noreply", "no-reply", "donotreply", "do-not-reply", "security@", "accounts@",
+        "verify", "verification", "auth@", "otp@",
+        // Financial institutions and payment processors
+        "bank", "銀行", "chase", "wellsfargo", "citibank", "capitalone", "amex",
+        "americanexpress", "paypal", "stripe", "visa", "mastercard", "mufg", "smbc",
+        "mizuho", "rakuten-bank", "card@", "billing@", "invoice@",
+        // Bulk / marketing senders
+        "newsletter", "marketing@", "mailer", "notifications@", "notification@",
+    ]
+
     /// Exclude sensitive emails by pattern.
     private func isExcluded(subject: String, sender: String) -> Bool {
         let lower = subject.lowercased()
+        let senderLower = sender.lowercased()
 
         // Password / security
         if lower.contains("password") || lower.contains("reset") ||
@@ -111,6 +153,9 @@ final class EmailService {
 
         // Spam / marketing
         if lower.contains("unsubscribe") || lower.contains("配信停止") { return true }
+
+        // Same categories, matched on who sent it rather than what it's titled.
+        if Self.excludedSenderMarkers.contains(where: { senderLower.contains($0) }) { return true }
 
         // Excluded senders from user settings
         let excludedSenders = UserDefaults.standard.stringArray(forKey: "emailExcludedSenders") ?? []

@@ -14,6 +14,10 @@ enum Signal {
     }
 
     static func kind(text: String, eventType: RecordingEvent.EventType, windowTitle: String?) -> String {
+        // Window-body snapshots are ambient documents. Classify by channel, not
+        // content: a long Japanese body would trip the "note" heuristic and any
+        // README would trip "error"/"web" — wrong kind, inflated salience.
+        if eventType == .windowBody { return "document" }
         let t = text.lowercased()
         if t.contains("error") || t.contains("exception") || t.contains("failed")
             || t.contains("traceback") || t.contains("fatal") { return "error" }
@@ -34,6 +38,7 @@ enum Signal {
         case "error": return 0.95
         case "note", "decision": return 0.85
         case "file", "code": return 0.45
+        case "document": return 0.35   // ambient body snapshot — useful, not an act
         case "web": return 0.30
         default: return 0.20
         }

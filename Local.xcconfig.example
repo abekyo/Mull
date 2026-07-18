@@ -1,0 +1,9 @@
+// Copy to Local.xcconfig and fill in your own signing identity.
+//
+// Find your Development certificate's SHA-1 hash with:
+//     security find-identity -v -p codesigning
+//
+// Setting this keeps macOS TCC grants (Calendar, Accessibility, Input
+// Monitoring) stable across rebuilds. Leaving it unset falls back to ad-hoc
+// signing, which builds and runs but re-prompts for permissions each time.
+MULL_CODE_SIGN_IDENTITY =

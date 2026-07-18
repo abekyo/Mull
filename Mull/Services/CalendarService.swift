@@ -39,26 +39,33 @@ final class CalendarService {
     /// permission is never re-prompted (when the build's code signature is stable).
     private func requestAccess() {
         let status = EKEventStore.authorizationStatus(for: .event)
-        switch status {
-        case .notDetermined:
-            if #available(macOS 14.0, *) {
-                store.requestFullAccessToEvents { granted, _ in self.hasAccess = granted }
+        if #available(macOS 14.0, *) {
+            if status == .fullAccess {
+                hasAccess = true
             } else {
-                store.requestAccess(to: .event) { granted, _ in self.hasAccess = granted }
+                // Request full READ access whenever we don't already have it:
+                // - .notDetermined → first prompt
+                // - .writeOnly ("Add only") → prompt to upgrade to full (the cause
+                //   of "calendar won't load events" — write-only can't read)
+                // - .denied/.restricted → returns false without prompting (Settings needed)
+                store.requestFullAccessToEvents { granted, _ in
+                    DispatchQueue.main.async { self.hasAccess = granted }
+                }
             }
-        case .authorized:
-            hasAccess = true
-        default:
-            if #available(macOS 14.0, *) {
-                hasAccess = (status == .fullAccess)
+        } else {
+            if status == .authorized {
+                hasAccess = true
             } else {
-                hasAccess = false
+                store.requestAccess(to: .event) { granted, _ in
+                    DispatchQueue.main.async { self.hasAccess = granted }
+                }
             }
         }
     }
 
     /// Get today's calendar events as a plain text summary for AI.
     func todaySchedule() -> String? {
+        if !hasAccess { recheckAccess() }
         guard hasAccess else { return nil }
 
         let calendar = Calendar.current
@@ -113,7 +120,20 @@ final class CalendarService {
 
     /// Get all events for a specific date (for calendar view).
     /// Deduplicates events that appear in multiple calendar sources (iCloud + Google etc.).
+    /// Re-read the live authorization status (no prompt). Lets a permission
+    /// granted while the app is running take effect on the next query, so the
+    /// user doesn't have to restart.
+    private func recheckAccess() {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        if #available(macOS 14.0, *) {
+            hasAccess = (status == .fullAccess)
+        } else {
+            hasAccess = (status == .authorized)
+        }
+    }
+
     func events(for date: Date) -> [CalendarEvent] {
+        if !hasAccess { recheckAccess() }
         guard hasAccess else { return [] }
 
         let calendar = Calendar.current
@@ -147,8 +167,49 @@ final class CalendarService {
         return results
     }
 
+    /// Search calendar events by title/location across a window around now. EventKit has
+    /// no text index, so we fetch the range and filter in memory — fine for a personal
+    /// calendar, and keeps mull's "calendar is read-only, never stored" principle (we don't
+    /// copy events into the DB just to search them).
+    func searchEvents(query: String, monthsBack: Int = 12, monthsAhead: Int = 3) -> [CalendarEvent] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
+        if !hasAccess { recheckAccess() }
+        guard hasAccess else { return [] }
+
+        let cal = Calendar.current
+        let now = Date()
+        guard let start = cal.date(byAdding: .month, value: -monthsBack, to: now),
+              let end = cal.date(byAdding: .month, value: monthsAhead, to: now) else { return [] }
+
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        let matches = store.events(matching: predicate).filter { ev in
+            (ev.title?.localizedCaseInsensitiveContains(q) ?? false) ||
+            (ev.location?.localizedCaseInsensitiveContains(q) ?? false)
+        }
+        .sorted { $0.startDate > $1.startDate }
+
+        var seen = Set<String>()
+        var results: [CalendarEvent] = []
+        for ev in matches {
+            let title = ev.title ?? "Untitled"
+            let key = "\(title)|\(ev.startDate.timeIntervalSince1970)"
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            results.append(CalendarEvent(
+                title: title,
+                start: ev.startDate,
+                end: ev.endDate,
+                location: ev.location,
+                color: Color(cgColor: ev.calendar.cgColor)
+            ))
+        }
+        return results
+    }
+
     /// Get upcoming events (next 3) for quick context.
     func upcomingEvents(limit: Int = 3) -> [(title: String, start: Date, minutesUntil: Int)] {
+        if !hasAccess { recheckAccess() }
         guard hasAccess else { return [] }
 
         let now = Date()

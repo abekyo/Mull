@@ -20,6 +20,13 @@ targets:
       - Mull/Resources
     dependencies:
       - package: GRDB
+      # Build the MCP server alongside the app and embed it at
+      # Mull.app/Contents/Helpers/MullMCP so one-click connect (AIToolSetup) points
+      # AI tools at a real binary in shipped builds, not just dev.
+      - target: MullMCP
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
     info:
       path: Mull/Resources/Info.plist
       properties:
@@ -48,14 +55,26 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        # TODO(release): notarization requires the hardened runtime. It is off here
+        # because the CGEvent tap needs the debugger attached during development;
+        # split this into a Release configuration before shipping.
         ENABLE_HARDENED_RUNTIME: false
         GENERATE_INFOPLIST_FILE: true
         # Stable Development signing so macOS TCC grants (Calendar, Accessibility,
         # Input Monitoring) persist across rebuilds instead of re-prompting.
         # Select the cert by SHA-1 hash to avoid team-matching ambiguity; local
         # macOS dev runs need no provisioning profile.
+        #
+        # MULL_CODE_SIGN_IDENTITY is machine-specific — a committed cert hash makes
+        # the project unbuildable for anyone else. Set it in Local.xcconfig
+        # (gitignored, see Local.xcconfig.example) to keep stable TCC grants;
+        # leave it unset and signing falls back to ad-hoc "-", which builds and
+        # runs fine but re-prompts for permissions on each rebuild.
         CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "B93835093E7812B2DB6A799E9C7101312A4C499E"
+        CODE_SIGN_IDENTITY: "$(MULL_CODE_SIGN_IDENTITY:default=-)"
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
 
   MullTests:
     type: bundle.unit-test
@@ -80,6 +99,13 @@ targets:
     sources:
       - MullMCP
       - Mull/Services/MCPServer.swift
+      - Mull/Services/MullDirectory.swift
+      - Mull/Services/Curator.swift
+      - Mull/Services/ContextBlock.swift
+      - Mull/Services/CurrentState.swift
+      - Mull/Services/Selection.swift
+      - Mull/Services/Entity.swift
+      - Mull/Services/Signal.swift
       - Mull/Services/DatabaseService.swift
       - Mull/Services/AnalyticsEngine.swift
       - Mull/Services/KeychainService.swift
@@ -88,6 +114,7 @@ targets:
       - Mull/Services/CalendarService.swift
       - Mull/Services/KnowledgeExtractor.swift
       - Mull/Services/SensitiveText.swift
+      - Mull/Services/Redactor.swift
       - Mull/Services/TestInput.swift
       - Mull/Views/Components/DesignTokens.swift
       - Mull/Models/Models.swift

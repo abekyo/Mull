@@ -11,6 +11,9 @@
 
 import Foundation
 
+// Ready the ~/mull directory so Curator-based write-back (the `curate` tool) works.
+_ = MullDirectory.setup()
+
 // Initialize database (read-only access to mull's existing DB)
 let database = DatabaseService()
 let server = MCPServer(database: database)

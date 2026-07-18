@@ -112,75 +112,119 @@ final class DatabaseService: Sendable {
             }
         }
 
-        // Step 3: Last resort — temporary location
+        // Step 3: Last resort — temporary location. Try a stable name first, then a
+        // unique one (the stable path may itself be an unwritable leftover).
         if pool == nil {
-            let tmpPath = NSTemporaryDirectory() + "mull-fallback.sqlite"
-            do {
-                pool = try DatabasePool(path: tmpPath, configuration: config)
-                usedFallback = true
-                reason = "Database is running from a temporary location. Data will not persist across restarts."
-                logger.fault("\(reason!)")
-            } catch {
-                fatalError("[mull] Cannot create database at all: \(error)")
+            for tmpPath in [NSTemporaryDirectory() + "mull-fallback.sqlite",
+                            NSTemporaryDirectory() + "mull-fallback-\(UUID().uuidString).sqlite"] {
+                if let p = try? DatabasePool(path: tmpPath, configuration: config) {
+                    pool = p
+                    usedFallback = true
+                    reason = "Database is running from a temporary location. Data will not persist across restarts."
+                    logger.fault("\(reason!)")
+                    break
+                }
             }
         }
 
-        dbPool = pool!
-        isFallback = usedFallback
-        fallbackReason = reason
+        guard var activePool = pool else {
+            // Nothing is writable — Application Support, the primary path, and the
+            // temp directory all failed. There is no honest way to continue.
+            fatalError("[mull] Cannot create a database at any location. Disk full or permissions denied.")
+        }
 
+        // Migrate BEFORE publishing the pool. On failure the pool must be closed
+        // before the files are touched: unlinking a database that an open
+        // DatabasePool still holds leaves the app writing to a deleted inode
+        // (the data looks recorded, then vanishes on next launch).
         do {
-            try migrate(dbPath: dbPath, config: config)
+            try Self.buildMigrator().migrate(activePool)
         } catch {
             logger.fault("Database migration failed: \(error.localizedDescription)")
-            // Migration failure on an existing DB likely means a schema conflict.
-            // Back up the current DB and start fresh to avoid a permanently broken state.
             let fm = FileManager.default
-            let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
             let backupPath = dbPath + ".pre-migration-\(timestamp)"
-            for ext in ["", "-wal", "-shm"] {
-                try? fm.copyItem(atPath: dbPath + ext, toPath: backupPath + ext)
-            }
-            logger.warning("Pre-migration backup saved to \(backupPath)")
 
-            // Attempt fresh DB at same path
+            try? activePool.close()
+
+            // Move aside rather than copy-then-delete: the move IS the backup, and
+            // it is atomic where copying a live WAL database is not.
+            var movedAside = false
+            for ext in ["", "-wal", "-shm"] where fm.fileExists(atPath: dbPath + ext) {
+                do {
+                    try fm.moveItem(atPath: dbPath + ext, toPath: backupPath + ext)
+                    movedAside = true
+                } catch {
+                    logger.error("Could not move aside \(dbPath + ext): \(error.localizedDescription)")
+                }
+            }
+
             do {
-                for ext in ["", "-wal", "-shm"] {
-                    try? fm.removeItem(atPath: dbPath + ext)
-                }
                 let freshPool = try DatabasePool(path: dbPath, configuration: config)
-                // Swap pool — requires reinit, so store in a mutable local first
-                // Since dbPool is already assigned above, we re-migrate on the existing pool
-                // after wiping tables. This path is rare (migration failure).
-                try freshPool.write { db in
-                    // Drop all existing tables/triggers/FTS to start clean
-                    let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'grdb_%'")
-                    for table in tables {
-                        try db.execute(sql: "DROP TABLE IF EXISTS \(table)")
-                    }
-                    let triggers = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type='trigger'")
-                    for trigger in triggers {
-                        try db.execute(sql: "DROP TRIGGER IF EXISTS \(trigger)")
-                    }
-                }
-                try freshPool.close()
-                // Re-open and migrate
-                let reopened = try DatabasePool(path: dbPath, configuration: config)
-                try Self.buildMigrator().migrate(reopened)
-                try reopened.close()
-                // The existing dbPool at the same path will see the new schema
-                try Self.buildMigrator().migrate(dbPool)
-                if fallbackReason == nil {
-                    // Update reason through a workaround since these are let
-                }
-                logger.warning("Database reset after migration failure. Previous data backed up.")
+                try Self.buildMigrator().migrate(freshPool)
+                activePool = freshPool
+                reason = movedAside
+                    ? "The database schema could not be upgraded, so mull started a new one. Your previous data is saved at \(backupPath)."
+                    : "The database schema could not be upgraded and has been reset."
+                logger.warning("\(reason!)")
             } catch {
                 logger.fault("Could not recover from migration failure: \(error.localizedDescription)")
+                reason = "The database schema is broken and could not be reset: \(error.localizedDescription)"
+                // Re-open the original so the app still runs read-mostly rather than
+                // dying; the schema is stale but the user's data is intact.
+                if let reopened = try? DatabasePool(path: backupPath, configuration: config) {
+                    activePool = reopened
+                } else if let reopened = try? DatabasePool(path: dbPath, configuration: config) {
+                    activePool = reopened
+                } else {
+                    fatalError("[mull] Database is unusable after a failed migration: \(error)")
+                }
             }
         }
+
+        dbPool = activePool
+        isFallback = usedFallback
+        fallbackReason = reason
+    }
+
+    /// Open a database at an explicit path, with the same schema and pragmas as
+    /// the real one but none of the recovery/fallback machinery.
+    ///
+    /// This exists so tests never touch the user's actual recorded history.
+    /// They used to construct `DatabaseService()` — the live database — and call
+    /// `deleteAllData()` in `setUp`, which destroys everything mull has recorded
+    /// on any machine where that file is writable.
+    init(path: String) throws {
+        var config = Configuration()
+        config.prepareDatabase { db in
+            try db.execute(sql: "PRAGMA journal_mode = WAL")
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
+            try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
+        }
+        let pool = try DatabasePool(path: path, configuration: config)
+        try Self.buildMigrator().migrate(pool)
+
+        dbPool = pool
+        isFallback = false
+        fallbackReason = nil
+    }
+
+    /// A throwaway database in a unique temp directory, for tests.
+    static func temporary() throws -> DatabaseService {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mull-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return try DatabaseService(path: dir.appendingPathComponent("test.sqlite").path)
     }
 
     // MARK: - Schema Version
+
+    /// The identifier of the newest migration this build knows how to apply.
+    /// `schemaVersion` should equal this after a successful migration.
+    static var latestMigrationIdentifier: String {
+        buildMigrator().migrations.last ?? "unknown"
+    }
 
     /// Current schema version name (the last applied migration).
     var schemaVersion: String {
@@ -337,6 +381,63 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v6_event_mode_column") { db in
+            // The MODE axis (MAP-ARCHITECTURE.md): how a moment is engaged with —
+            // produce/consume/decide/think/research/communicate. Stored next to the
+            // other capture-time enrichment; recomputed for pre-migration rows.
+            try db.alter(table: "recording_events") { t in
+                t.add(column: "mode", .text).indexed()
+            }
+        }
+
+        migrator.registerMigration("v7_fts_delete_triggers") { db in
+            // daily_summaries and knowledge_entries shipped with an AFTER INSERT
+            // trigger only, so deleting a row left its tokenized text in the FTS
+            // shadow table forever — including after "Delete All Data". Add the
+            // missing delete/update triggers, then rebuild to purge the orphans
+            // already accumulated.
+            try db.execute(sql: """
+                CREATE TRIGGER IF NOT EXISTS daily_summaries_ad AFTER DELETE ON daily_summaries BEGIN
+                    INSERT INTO daily_summaries_fts(daily_summaries_fts, rowid, content, learnings, inProgress)
+                    VALUES ('delete', old.id, old.content, old.learnings, old.inProgress);
+                END
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER IF NOT EXISTS daily_summaries_au AFTER UPDATE ON daily_summaries BEGIN
+                    INSERT INTO daily_summaries_fts(daily_summaries_fts, rowid, content, learnings, inProgress)
+                    VALUES ('delete', old.id, old.content, old.learnings, old.inProgress);
+                    INSERT INTO daily_summaries_fts(rowid, content, learnings, inProgress)
+                    VALUES (new.id, new.content, new.learnings, new.inProgress);
+                END
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER IF NOT EXISTS knowledge_entries_ad AFTER DELETE ON knowledge_entries BEGIN
+                    INSERT INTO knowledge_entries_fts(knowledge_entries_fts, rowid, topic, decision, reasoning, rejected, project, tags)
+                    VALUES ('delete', old.id, old.topic, old.decision, old.reasoning, old.rejected, old.project, old.tags);
+                END
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER IF NOT EXISTS knowledge_entries_au AFTER UPDATE ON knowledge_entries BEGIN
+                    INSERT INTO knowledge_entries_fts(knowledge_entries_fts, rowid, topic, decision, reasoning, rejected, project, tags)
+                    VALUES ('delete', old.id, old.topic, old.decision, old.reasoning, old.rejected, old.project, old.tags);
+                    INSERT INTO knowledge_entries_fts(rowid, topic, decision, reasoning, rejected, project, tags)
+                    VALUES (new.id, new.topic, new.decision, new.reasoning, new.rejected, new.project, new.tags);
+                END
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER IF NOT EXISTS recording_events_au AFTER UPDATE ON recording_events BEGIN
+                    INSERT INTO recording_events_fts(recording_events_fts, rowid, textContent, appName, windowTitle)
+                    VALUES ('delete', old.id, old.textContent, old.appName, old.windowTitle);
+                    INSERT INTO recording_events_fts(rowid, textContent, appName, windowTitle)
+                    VALUES (new.id, new.textContent, new.appName, new.windowTitle);
+                END
+            """)
+
+            // Purge text belonging to rows that were deleted before the triggers existed.
+            try db.execute(sql: "INSERT INTO daily_summaries_fts(daily_summaries_fts) VALUES('rebuild')")
+            try db.execute(sql: "INSERT INTO knowledge_entries_fts(knowledge_entries_fts) VALUES('rebuild')")
+        }
+
         // ── Future migrations go here ──
         // Example:
         //
@@ -347,10 +448,6 @@ final class DatabaseService: Sendable {
         // }
 
         return migrator
-    }
-
-    private func migrate(dbPath: String, config: Configuration) throws {
-        try Self.buildMigrator().migrate(dbPool)
     }
 
     // MARK: - FTS Rebuild
@@ -374,7 +471,7 @@ final class DatabaseService: Sendable {
     func insertEvent(_ event: RecordingEvent) {
         do {
             try dbPool.write { db in
-                var r = event
+                let r = event
                 try r.insert(db)
             }
         } catch {
@@ -443,7 +540,7 @@ final class DatabaseService: Sendable {
                     sql: "DELETE FROM daily_summaries WHERE date >= ? AND date < ?",
                     arguments: [startOfDay, endOfDay]
                 )
-                var s = summary
+                let s = summary
                 try s.insert(db)
             }
         } catch {
@@ -483,24 +580,71 @@ final class DatabaseService: Sendable {
 
     // MARK: - Search (FTS5)
 
-    func searchSummaries(query: String) -> [DailySummary] {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-        let ftsQuery = query
-            .components(separatedBy: .whitespacesAndNewlines)
+    /// True when the string contains kana or CJK ideographs.
+    ///
+    /// FTS5's default `unicode61` tokenizer treats every CJK codepoint as a token
+    /// character, so a contiguous Japanese run indexes as ONE token: 「今日の会議のメモ」
+    /// is a single term. A substring query like 会議 therefore can never
+    /// prefix-match it, and FTS silently returns nothing. Those queries take the
+    /// LIKE path against the base table instead.
+    static func containsCJK(_ s: String) -> Bool {
+        s.unicodeScalars.contains { u in
+            (0x3040...0x30FF).contains(u.value) ||   // hiragana + katakana
+            (0x3400...0x4DBF).contains(u.value) ||   // CJK extension A
+            (0x4E00...0x9FFF).contains(u.value) ||   // CJK unified ideographs
+            (0xF900...0xFAFF).contains(u.value)      // CJK compatibility
+        }
+    }
+
+    /// Build a safe FTS5 MATCH expression, or nil if the query has no usable terms.
+    ///
+    /// Terms are reduced to alphanumerics and quoted, so user punctuation — `"`,
+    /// `(`, `-`, `:`, or a bare AND/OR/NOT/NEAR — cannot produce a syntax error.
+    /// Unquoted, `re-render` or `main()` threw, got swallowed by the catch, and
+    /// surfaced to the user as "no results".
+    static func ftsMatchExpression(_ query: String) -> String? {
+        let terms = query
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
-            .map { "\($0)*" }
-            .joined(separator: " ")
+        guard !terms.isEmpty else { return nil }
+        return terms.map { "\"\($0)\"*" }.joined(separator: " ")
+    }
+
+    /// Escape a string for use inside a LIKE pattern with `ESCAPE '\'`.
+    static func likePattern(_ s: String) -> String {
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        return "%\(escaped)%"
+    }
+
+    func searchSummaries(query: String) -> [DailySummary] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
 
         do {
             return try dbPool.read { db in
-                try DailySummary.fetchAll(db, sql: """
+                if Self.containsCJK(trimmed) {
+                    let p = Self.likePattern(trimmed)
+                    return try DailySummary.fetchAll(db, sql: """
+                        SELECT * FROM daily_summaries
+                        WHERE content LIKE ? ESCAPE '\\'
+                           OR learnings LIKE ? ESCAPE '\\'
+                           OR inProgress LIKE ? ESCAPE '\\'
+                        ORDER BY date DESC
+                        LIMIT 50
+                    """, arguments: [p, p, p])
+                }
+                guard let match = Self.ftsMatchExpression(trimmed) else { return [] }
+                return try DailySummary.fetchAll(db, sql: """
                     SELECT daily_summaries.*
                     FROM daily_summaries
                     JOIN daily_summaries_fts ON daily_summaries.id = daily_summaries_fts.rowid
                     WHERE daily_summaries_fts MATCH ?
                     ORDER BY rank
                     LIMIT 50
-                """, arguments: [ftsQuery])
+                """, arguments: [match])
             }
         } catch {
             logger.warning("Failed to search summaries: \(error.localizedDescription)")
@@ -544,27 +688,90 @@ final class DatabaseService: Sendable {
     }
 
     func searchEvents(query: String, limit: Int = 100) -> [RecordingEvent] {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-        let ftsQuery = query
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .map { "\($0)*" }
-            .joined(separator: " ")
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
 
         do {
             return try dbPool.read { db in
-                try RecordingEvent.fetchAll(db, sql: """
+                if Self.containsCJK(trimmed) {
+                    // Walks the timestamp index newest-first and stops at LIMIT.
+                    let p = Self.likePattern(trimmed)
+                    return try RecordingEvent.fetchAll(db, sql: """
+                        SELECT * FROM recording_events
+                        WHERE textContent LIKE ? ESCAPE '\\'
+                           OR windowTitle LIKE ? ESCAPE '\\'
+                           OR appName LIKE ? ESCAPE '\\'
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                    """, arguments: [p, p, p, limit])
+                }
+                guard let match = Self.ftsMatchExpression(trimmed) else { return [] }
+                return try RecordingEvent.fetchAll(db, sql: """
                     SELECT recording_events.*
                     FROM recording_events
                     JOIN recording_events_fts ON recording_events.id = recording_events_fts.rowid
                     WHERE recording_events_fts MATCH ?
                     ORDER BY rank
                     LIMIT ?
-                """, arguments: [ftsQuery, limit])
+                """, arguments: [match, limit])
             }
         } catch {
             logger.warning("Failed to search events: \(error.localizedDescription)")
             return []
+        }
+    }
+
+    /// Count events in a window without materializing them.
+    ///
+    /// The nightly gate used to call `fetchEvents` (SELECT *, every row decoded
+    /// into a struct including textContent) purely to compare `.count` against a
+    /// threshold — a full-table scan into memory on every check.
+    func countEvents(from start: Date, to end: Date) -> Int {
+        do {
+            return try dbPool.read { db in
+                try RecordingEvent
+                    .filter(Column("timestamp") >= start && Column("timestamp") <= end)
+                    .fetchCount(db)
+            }
+        } catch {
+            logger.warning("Failed to count events: \(error.localizedDescription)")
+            return 0
+        }
+    }
+
+    /// Per-day event counts over a range, aggregated in SQL.
+    ///
+    /// Backs the calendar's month/year heat grid, which previously fetched every
+    /// row of the range (a full year ≈ 1.5M rows with their text) just to bucket
+    /// them by day. Keys are start-of-day in the current calendar.
+    func dailyEventCounts(from start: Date, to end: Date) -> [Date: Int] {
+        do {
+            return try dbPool.read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT date(timestamp) AS day, COUNT(*) AS n
+                    FROM recording_events
+                    WHERE timestamp >= ? AND timestamp <= ?
+                    GROUP BY day
+                """, arguments: [start, end])
+
+                let parser = DateFormatter()
+                parser.dateFormat = "yyyy-MM-dd"
+                parser.timeZone = TimeZone(identifier: "UTC")
+                parser.locale = Locale(identifier: "en_US_POSIX")
+
+                var out: [Date: Int] = [:]
+                for row in rows {
+                    guard let day: String = row["day"],
+                          let parsed = parser.date(from: day) else { continue }
+                    // date() operates on the stored UTC string; re-anchor to the
+                    // local day so callers can key by Calendar.startOfDay.
+                    out[Calendar.current.startOfDay(for: parsed)] = row["n"] ?? 0
+                }
+                return out
+            }
+        } catch {
+            logger.warning("Failed to aggregate daily counts: \(error.localizedDescription)")
+            return [:]
         }
     }
 
@@ -573,7 +780,7 @@ final class DatabaseService: Sendable {
     func insertKnowledge(_ entry: KnowledgeEntry) {
         do {
             try dbPool.write { db in
-                var e = entry
+                let e = entry
                 try e.insert(db)
             }
         } catch {
@@ -586,7 +793,7 @@ final class DatabaseService: Sendable {
     func insertPrediction(_ prediction: Prediction) {
         do {
             try dbPool.write { db in
-                var p = prediction
+                let p = prediction
                 try p.insert(db)
             }
         } catch {
@@ -677,13 +884,54 @@ final class DatabaseService: Sendable {
     }
 
     func searchKnowledge(query: String, limit: Int = 20) -> [KnowledgeEntry] {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-        let ftsQuery = query
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .map { "\($0)*" }
-            .joined(separator: " ")
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
 
+        do {
+            return try dbPool.read { db in
+                if Self.containsCJK(trimmed) {
+                    let p = Self.likePattern(trimmed)
+                    return try KnowledgeEntry.fetchAll(db, sql: """
+                        SELECT * FROM knowledge_entries
+                        WHERE topic LIKE ? ESCAPE '\\'
+                           OR decision LIKE ? ESCAPE '\\'
+                           OR reasoning LIKE ? ESCAPE '\\'
+                           OR project LIKE ? ESCAPE '\\'
+                           OR tags LIKE ? ESCAPE '\\'
+                        ORDER BY sourceDate DESC
+                        LIMIT ?
+                    """, arguments: [p, p, p, p, p, limit])
+                }
+                guard let match = Self.ftsMatchExpression(trimmed) else { return [] }
+                return try KnowledgeEntry.fetchAll(db, sql: """
+                    SELECT knowledge_entries.*
+                    FROM knowledge_entries
+                    JOIN knowledge_entries_fts ON knowledge_entries.id = knowledge_entries_fts.rowid
+                    WHERE knowledge_entries_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                """, arguments: [match, limit])
+            }
+        } catch {
+            logger.warning("Failed to search knowledge: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Find knowledge relevant to a given window title / file / topic.
+    ///
+    /// This used to hand `searchKnowledge` a pre-built expression ("swift* OR
+    /// chart*"), which then appended `*` to every whitespace-separated component —
+    /// producing `swift** OR* chart**`, an FTS5 syntax error that was caught and
+    /// returned as an empty array. The feature never once returned a result.
+    /// Terms are now passed as plain words and the OR is built here.
+    func findRelevantKnowledge(context: String, limit: Int = 3) -> [KnowledgeEntry] {
+        let words = context.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 3 }
+            .prefix(5)
+        guard !words.isEmpty else { return [] }
+
+        let match = words.map { "\"\($0)\"*" }.joined(separator: " OR ")
         do {
             return try dbPool.read { db in
                 try KnowledgeEntry.fetchAll(db, sql: """
@@ -693,22 +941,12 @@ final class DatabaseService: Sendable {
                     WHERE knowledge_entries_fts MATCH ?
                     ORDER BY rank
                     LIMIT ?
-                """, arguments: [ftsQuery, limit])
+                """, arguments: [match, limit])
             }
         } catch {
-            logger.warning("Failed to search knowledge: \(error.localizedDescription)")
+            logger.warning("findRelevantKnowledge failed: \(error.localizedDescription)")
             return []
         }
-    }
-
-    /// Find knowledge relevant to a given window title / file / topic.
-    func findRelevantKnowledge(context: String, limit: Int = 3) -> [KnowledgeEntry] {
-        let words = context.components(separatedBy: .alphanumerics.inverted)
-            .filter { $0.count > 3 }
-            .prefix(5)
-        guard !words.isEmpty else { return [] }
-        let query = words.map { "\($0)*" }.joined(separator: " OR ")
-        return searchKnowledge(query: query, limit: limit)
     }
 
     // MARK: - Memory
@@ -716,7 +954,7 @@ final class DatabaseService: Sendable {
     func insertMemory(_ entry: MemoryEntry) {
         do {
             try dbPool.write { db in
-                var e = entry
+                let e = entry
                 try e.insert(db)
             }
         } catch {
@@ -792,6 +1030,22 @@ final class DatabaseService: Sendable {
             try db.execute(sql: "DELETE FROM knowledge_entries")
             try db.execute(sql: "DELETE FROM predictions")
             try db.execute(sql: "UPDATE mull_lock SET lastSummaryAt = NULL, sessionsSinceLast = 0")
+
+            // The delete triggers (v7) evict each row's text as it goes, but an
+            // explicit rebuild guarantees the shadow tables are empty even if a
+            // trigger was missing when some row was written. "Delete all" has to
+            // mean the text is gone from the file, not just from the base tables.
+            try db.execute(sql: "INSERT INTO recording_events_fts(recording_events_fts) VALUES('rebuild')")
+            try db.execute(sql: "INSERT INTO daily_summaries_fts(daily_summaries_fts) VALUES('rebuild')")
+            try db.execute(sql: "INSERT INTO knowledge_entries_fts(knowledge_entries_fts) VALUES('rebuild')")
+        }
+    }
+
+    /// Delete events recorded at or after `date` — backs Settings' "forget the
+    /// last hour/today" actions, which previously ran raw SQL from the View.
+    func deleteEvents(since date: Date) throws {
+        try dbPool.write { db in
+            try db.execute(sql: "DELETE FROM recording_events WHERE timestamp >= ?", arguments: [date])
         }
     }
 
@@ -810,10 +1064,27 @@ final class DatabaseService: Sendable {
     }
 
     /// Reclaim disk space after bulk deletes.
+    ///
+    /// `PRAGMA incremental_vacuum` only reclaims pages when the database was
+    /// *created* with auto_vacuum = INCREMENTAL. Databases that predate that
+    /// setting — including every `whatly.sqlite` migrated in at init — report
+    /// auto_vacuum = NONE and silently ignore it, so the file never shrinks after
+    /// a delete. Fall back to a full VACUUM for those.
     func vacuum() {
         do {
-            try dbPool.write { db in
-                try db.execute(sql: "PRAGMA incremental_vacuum")
+            let mode = try dbPool.read { db in
+                try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") ?? 0
+            }
+            if mode == 2 {   // INCREMENTAL
+                try dbPool.write { db in
+                    try db.execute(sql: "PRAGMA incremental_vacuum")
+                }
+            } else {
+                // Full VACUUM rewrites the file, so it cannot run inside a
+                // transaction — writeWithoutTransaction is required here.
+                try dbPool.writeWithoutTransaction { db in
+                    try db.execute(sql: "VACUUM")
+                }
             }
         } catch {
             logger.warning("Vacuum failed: \(error.localizedDescription)")

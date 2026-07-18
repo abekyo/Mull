@@ -1,0 +1,108 @@
+import Foundation
+
+/// The guided identity bootstrap — the few facts that are worth far more asked
+/// once than inferred slowly from keystroke noise (role, language, goal, how you
+/// want AI to answer). Each answer is a *stated prior*; passive capture stays the
+/// *observed update* on top. We never replace capture with this — we seed it.
+///
+/// Answers are stored in UserDefaults (the editable source of truth) AND projected
+/// into me.pinned.md as a delimited, comment-marked section. Because both markers
+/// begin with '#', Curator.pinnedFacts() treats them as comments and strips them
+/// from me.md, while the `- …` fact lines between them become authoritative pinned
+/// facts placed atop me.md — and, like the rest of me.pinned.md, never overwritten.
+enum OnboardingProfile {
+
+    struct Question: Identifiable {
+        let id: String
+        let prompt: String       // what the user sees
+        let hint: String         // why we ask / what it changes
+        let placeholder: String
+        let label: String        // the me.pinned.md fact label
+    }
+
+    /// Seven questions. Each earns its place by changing a downstream decision —
+    /// no "how old are you" unless it moves something.
+    static let questions: [Question] = [
+        .init(id: "role", prompt: "What do you do?",
+              hint: "Your role — the core of who mull says you are.",
+              placeholder: "e.g. Solo founder & Swift developer", label: "Role"),
+        .init(id: "language", prompt: "What language should AI reply in?",
+              hint: "Locks your working language instead of guessing it.",
+              placeholder: "e.g. Japanese (日本語)", label: "Primary working language"),
+        .init(id: "building", prompt: "What are you working on right now?",
+              hint: "Seeds your current projects.",
+              placeholder: "e.g. mull, plus an FX trading business", label: "Currently working on"),
+        .init(id: "goal", prompt: "What do you want AI's help with?",
+              hint: "Your aim for using mull — what to surface toward.",
+              placeholder: "e.g. Ship faster, fewer re-explanations", label: "Goal with AI"),
+        .init(id: "style", prompt: "How should AI respond to you?",
+              hint: "Terse or detailed, tone, language — shapes every reply.",
+              placeholder: "e.g. Terse, in Japanese, no preamble", label: "Preferred AI response style"),
+        .init(id: "offload", prompt: "What would you like to offload?",
+              hint: "What you'd rather not do yourself.",
+              placeholder: "e.g. Boilerplate, research, scheduling", label: "Wants to offload"),
+        .init(id: "hours", prompt: "Time zone & working hours?",
+              hint: "So mull times proactive nudges well.",
+              placeholder: "e.g. JST, evenings", label: "Time zone / working hours"),
+    ]
+
+    // MARK: - Persistence (source of truth)
+
+    private static let answersKey = "onboardingProfileAnswers"
+    private static let startMarker = "# ── mull profile (from onboarding · edit in Settings) ──"
+    private static let endMarker = "# ── end mull profile ──"
+
+    static var answers: [String: String] {
+        (UserDefaults.standard.dictionary(forKey: answersKey) as? [String: String]) ?? [:]
+    }
+
+    static var hasAnswers: Bool {
+        answers.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// Persist answers and (re)project them into me.pinned.md, preserving the rest
+    /// of that user-owned file exactly.
+    static func save(_ newAnswers: [String: String]) {
+        UserDefaults.standard.set(newAnswers, forKey: answersKey)
+        writeSection(lines: factLines(from: newAnswers))
+    }
+
+    /// Clear stored answers and remove the projected section from me.pinned.md.
+    /// Anything the user added to me.pinned.md by hand is left untouched.
+    static func reset() {
+        UserDefaults.standard.removeObject(forKey: answersKey)
+        writeSection(lines: [])
+    }
+
+    // MARK: - Projection into me.pinned.md
+
+    private static func factLines(from a: [String: String]) -> [String] {
+        questions.compactMap { q in
+            let v = (a[q.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return v.isEmpty ? nil : "- \(q.label): \(v)"
+        }
+    }
+
+    private static func writeSection(lines: [String]) {
+        _ = Curator.pinnedFacts()                      // scaffold me.pinned.md if missing
+        var text = removeSection(from: MullDirectory.read(Curator.pinnedFileName) ?? "")
+        if !lines.isEmpty {
+            if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
+            text += "\n\(startMarker)\n" + lines.joined(separator: "\n") + "\n\(endMarker)\n"
+        }
+        MullDirectory.write(text, to: Curator.pinnedFileName)
+    }
+
+    /// Strip any existing managed section (idempotent), leaving all other lines.
+    private static func removeSection(from text: String) -> String {
+        var out: [String] = []
+        var inside = false
+        for line in text.components(separatedBy: "\n") {
+            if line == startMarker { inside = true; continue }
+            if line == endMarker { inside = false; continue }
+            if !inside { out.append(line) }
+        }
+        // Collapse the leading blank we may have inserted before the section.
+        return out.joined(separator: "\n")
+    }
+}

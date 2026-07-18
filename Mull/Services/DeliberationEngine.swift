@@ -93,7 +93,11 @@ final class DeliberationEngine {
         lines.append("Total tracked time: \(p.totalDurationFormatted)")
         lines.append("Last active: \(p.lastActiveFormatted) (\(p.daysSinceActive) days ago)")
         if let file = p.lastFile { lines.append("Last file/area: \(file)") }
-        if let clip = p.lastClipboard, !clip.isEmpty {
+        // Masking alone isn't enough for a prompt that leaves the device: Redactor only
+        // rewrites credential shapes, so an email address or card number in the clipboard
+        // would still be shipped verbatim. If SensitiveText flags it, drop the line —
+        // a briefing is better off without one clipboard than one leak.
+        if let clip = p.lastClipboard, !clip.isEmpty, !SensitiveText.isSensitive(clip) {
             lines.append("Last clipboard near this project: \(clip.prefix(200))")
         }
 

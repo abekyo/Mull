@@ -14,15 +14,22 @@ import SwiftUI
 /// inline `**bold**` / `*italic*` / `` `code` `` via AttributedString.
 struct MarkdownView: View {
     let text: String
+    /// Whether the first non-empty line is promoted to a large title. True for note files
+    /// (Crane: 1行目=タイトル); false where the text is a paragraph that happens to lead a
+    /// document — e.g. a chat reply, whose first line should read as body, not a headline.
+    var titleFirstLine: Bool = true
 
-    init(_ text: String) { self.text = text }
+    init(_ text: String, titleFirstLine: Bool = true) {
+        self.text = text
+        self.titleFirstLine = titleFirstLine
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             let lines = text.components(separatedBy: "\n")
             // The first non-empty line reads as the note's title (Crane: 1行目=タイトル),
-            // unless it's already an explicit heading.
-            let titleIdx = lines.firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            // unless it's already an explicit heading or the caller opted out.
+            let titleIdx = titleFirstLine ? lines.firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty } : nil
             ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
                 row(line, isTitleLine: idx == titleIdx && !line.hasPrefix("#"))
             }

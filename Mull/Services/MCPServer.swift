@@ -11,6 +11,7 @@ import Foundation
 ///   User never did anything. AI just... knows.
 ///
 /// Resources exposed:
+///   mull://start    — the front door: what this is, read order, vault map (read first)
 ///   mull://me       — who the user is (~200 tokens)
 ///   mull://now      — what they're working on (~500 tokens)
 ///   mull://full     — everything (~2000 tokens)
@@ -30,6 +31,22 @@ final class MCPServer {
         self.mullDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("mull")
     }
+
+    /// Sent in the `initialize` response so the agent is oriented before its
+    /// first call — the server-side half of the front door (mull.md is the
+    /// file-side half). Keep it short and authoritative.
+    static let serverInstructions = """
+    mull keeps an automatically-recorded, local context record of one person — \
+    who they are and what they are doing — so you can help without them \
+    re-explaining themselves. At the start of a conversation, read the `mull://me` \
+    resource (who they are) and call `whats_active_now` (what they're doing right \
+    now). Use `search` and `get_projects` for specifics instead of guessing. For \
+    the full map and the order to read things in, read `mull://start` (mull.md). \
+    The record is the user's: never assert what they think — if you infer \
+    judgment, mark it as a guess they can correct. You may write back with \
+    `curate` / `write_note`, but only your own block; the user's writing is never \
+    overwritten.
+    """
 
     /// Run the MCP server loop. Blocks forever (reads stdin until EOF).
     /// Call this in a detached process or background thread.
@@ -58,7 +75,8 @@ final class MCPServer {
                     "tools": ["listChanged": false],
                     "resources": ["subscribe": false, "listChanged": false]
                 ],
-                "serverInfo": ["name": "mull", "version": "1.0.0"]
+                "serverInfo": ["name": "mull", "version": "1.0.0"],
+                "instructions": Self.serverInstructions
             ])
 
         case "notifications/initialized":
@@ -206,6 +224,43 @@ final class MCPServer {
                     "type": "object",
                     "properties": [:]
                 ]
+            ],
+            [
+                "name": "read_file",
+                "description": "Read a markdown file from the user's mull vault (a project briefing, note, me.md, etc). Use list_files to discover paths. Provenance markers are stripped for clean reading.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "path": [
+                            "type": "string",
+                            "description": "File path relative to ~/mull/ (e.g. '03_projects/mull.md', 'me.md')"
+                        ]
+                    ],
+                    "required": ["path"]
+                ]
+            ],
+            [
+                "name": "curate",
+                "description": "Write your contribution back into a mull file SAFELY. Unlike write_note (raw overwrite), curate updates only your own provenance-tagged block (by id) and NEVER clobbers the user's hand edits. Use this for anything mull/agent-generated.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "path": ["type": "string", "description": "File path relative to ~/mull/ (.md)"],
+                        "block_id": ["type": "string", "description": "Stable id for your block (e.g. 'summary', 'plan'). Re-using the same id updates it in place instead of duplicating."],
+                        "content": ["type": "string", "description": "Markdown content for your block"]
+                    ],
+                    "required": ["path", "block_id", "content"]
+                ]
+            ],
+            [
+                "name": "calendar",
+                "description": "Planned vs actual, per day: scheduled calendar events (if calendar access is granted) alongside the activity mull actually observed.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "days": ["type": "integer", "description": "How many days back from today to include (default 1 = today, max 14)"]
+                    ]
+                ]
             ]
         ]
     }
@@ -261,6 +316,20 @@ final class MCPServer {
             let result = listFiles()
             respondToolResult(id: id, text: result)
 
+        case "read_file":
+            let path = args["path"] as? String ?? ""
+            respondToolResult(id: id, text: readFile(path: path))
+
+        case "curate":
+            let path = args["path"] as? String ?? ""
+            let blockID = args["block_id"] as? String ?? ""
+            let content = args["content"] as? String ?? ""
+            respondToolResult(id: id, text: toolCurate(path: path, blockID: blockID, content: content))
+
+        case "calendar":
+            let days = args["days"] as? Int ?? 1
+            respondToolResult(id: id, text: toolCalendar(days: days))
+
         default:
             respondError(id: id, code: -32602, message: "Unknown tool: \(name)")
         }
@@ -270,6 +339,12 @@ final class MCPServer {
 
     private func resourceDefinitions() -> [[String: Any]] {
         [
+            [
+                "uri": "mull://start",
+                "name": "Start Here (mull.md)",
+                "description": "The front door — what this record is, the order to read it in, and a map of the vault. Read this FIRST.",
+                "mimeType": "text/markdown"
+            ],
             [
                 "uri": "mull://me",
                 "name": "User Profile (me.md)",
@@ -296,6 +371,7 @@ final class MCPServer {
 
         let fileName: String
         switch uri {
+        case "mull://start": fileName = "mull.md"
         case "mull://me": fileName = "me.md"
         case "mull://now": fileName = "now.md"
         case "mull://full": fileName = "full.md"
@@ -305,7 +381,11 @@ final class MCPServer {
         }
 
         let filePath = mullDir.appendingPathComponent(fileName)
-        let content = (try? String(contentsOf: filePath, encoding: .utf8)) ?? "(No data yet. mull is still recording.)"
+        // Strip Curator provenance markers — they are bookkeeping for the merge,
+        // not context, and now.md/full.md carry them too (not just me.md).
+        let content = (try? String(contentsOf: filePath, encoding: .utf8))
+            .map(ContextBlockFile.stripMarkers)
+            ?? "(No data yet. mull is still recording.)"
 
         respond(id: id, result: [
             "contents": [[
@@ -321,20 +401,22 @@ final class MCPServer {
     private func getUserContext(level: String) -> String {
         var files: [String] = []
 
+        // Always lead with mull.md — the front door — so a tool-first agent gets
+        // the same orientation (read order + map) as one that read the resource.
         switch level {
         case "brief":
-            files = ["me.md"]
+            files = ["mull.md", "me.md"]
         case "full":
-            files = ["full.md"]
+            files = ["mull.md", "full.md"]
         default:
-            files = ["me.md", "now.md"]
+            files = ["mull.md", "me.md", "now.md"]
         }
 
         var parts: [String] = []
         for file in files {
             let path = mullDir.appendingPathComponent(file)
-            if let content = try? String(contentsOf: path, encoding: .utf8), !content.isEmpty {
-                parts.append(content)
+            if let raw = try? String(contentsOf: path, encoding: .utf8), !raw.isEmpty {
+                parts.append(ContextBlockFile.stripMarkers(raw))
             }
         }
 
@@ -373,7 +455,18 @@ final class MCPServer {
     }
 
     private func searchHistory(query: String, days: Int) -> String {
-        let results = database.searchEvents(query: query, limit: 20)
+        // `days` was accepted, advertised in the schema, and echoed in the reply —
+        // but never applied: searchEvents has no time bound. Bound it here instead
+        // (over-fetch, drop anything older than the window, then trim) so the
+        // sentence the agent reads is actually true.
+        let cutoff = Date().addingTimeInterval(-TimeInterval(max(days, 1) * 86_400))
+        let results = database.searchEvents(query: query, limit: 200)
+            .filter { $0.timestamp >= cutoff }
+            // Privacy: this is raw keystroke/clipboard text going straight to a
+            // third-party AI. The ranked `search` path filters secrets inside
+            // Selection.rank; this path bypassed it entirely. Same rule, one place.
+            .filter { !SensitiveText.isSensitive($0.textContent ?? "") }
+            .prefix(20)
 
         if results.isEmpty {
             return "No events found matching '\(query)' in the last \(days) days."
@@ -396,28 +489,169 @@ final class MCPServer {
 
     // MARK: - Write / List Files
 
+    /// A caller-supplied vault path, canonicalized and proven to stay inside ~/mull.
+    private struct VaultPath {
+        let url: URL          // absolute, symlinks resolved
+        let relative: String  // path relative to the resolved mull directory
+    }
+
+    /// Canonicalize a relative vault path, then verify containment.
+    ///
+    /// The old scrub — `replacingOccurrences(of: "..", with: "")` — happened to
+    /// hold, but it is the wrong shape: it mangles legitimate names ("v1..v2.md")
+    /// and, more importantly, says nothing about symlinks. A link inside ~/mull
+    /// pointing at ~/.ssh resolves straight out of the vault while containing no
+    /// ".." at all. So: resolve both sides first, compare after.
+    /// Why a path was refused. Carries the message the tool hands back to the AI.
+    private struct VaultPathError: Error {
+        let reason: String
+    }
+
+    private func resolveVaultPath(_ path: String) -> Result<VaultPath, VaultPathError> {
+        let relative = path.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard relative.hasSuffix(".md") else { return .failure(VaultPathError(reason: "only .md files are allowed")) }
+
+        let base = mullDir.resolvingSymlinksInPath().standardizedFileURL
+        // Walk up to the deepest component that actually exists — the file being
+        // written may not, but every directory on the way to it does, and that is
+        // where a symlink escape would live.
+        var existing = base.appendingPathComponent(relative).standardizedFileURL
+        var trailing: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path) {
+            trailing.append(existing.lastPathComponent)
+            let parent = existing.deletingLastPathComponent()
+            guard parent.path != existing.path else { break }
+            existing = parent
+        }
+        var resolved = existing.resolvingSymlinksInPath().standardizedFileURL
+        for component in trailing.reversed() { resolved.appendPathComponent(component) }
+        resolved = resolved.standardizedFileURL
+
+        guard resolved.path.hasPrefix(base.path + "/") else {
+            return .failure(VaultPathError(reason: "path escapes the mull vault"))
+        }
+        return .success(VaultPath(url: resolved,
+                                  relative: String(resolved.path.dropFirst(base.path.count + 1))))
+    }
+
+    /// Files `write_note` must never raw-overwrite.
+    ///
+    /// me.pinned.md is the user's own file — its header literally says "you own
+    /// this file. mull NEVER overwrites it" — and me/now/full/MEMORY plus mull.md
+    /// are assembled from provenance blocks by the Curator. A wholesale write here
+    /// destroys hand edits and pinned facts, contradicting the promise this server
+    /// makes in its own `initialize` instructions. Agents contribute to these
+    /// through `curate`, which merges one tagged block and leaves the rest alone.
+    private static let curatorOwnedFiles: Set<String> = [
+        "me.md", "me.pinned.md", "now.md", "full.md", "MEMORY.md", "mull.md"
+    ]
+
+    /// Reason `write_note` must refuse this path, or nil if it may write it.
+    /// Folder `index.md` files are Curator-managed too (FolderOntology seeds them
+    /// and FolderFiller curates their sections), so they're matched by name.
+    private static func writeRefusal(for relative: String) -> String? {
+        let name = (relative as NSString).lastPathComponent
+        guard curatorOwnedFiles.contains(name) || name == "index.md" else { return nil }
+        return "Error: ~/mull/\(relative) is curated — write_note would overwrite the "
+            + "user's own writing. Use the `curate` tool instead: it merges your block "
+            + "(by block_id) and never clobbers their edits."
+    }
+
     private func writeNote(path: String, content: String) -> String {
         guard !path.isEmpty, !content.isEmpty else {
             return "Error: path and content are required"
         }
 
-        // Security: prevent path traversal
-        let cleaned = path.replacingOccurrences(of: "..", with: "")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard cleaned.hasSuffix(".md") else {
-            return "Error: only .md files are allowed"
+        let resolved: VaultPath
+        switch resolveVaultPath(path) {
+        case .success(let vp): resolved = vp
+        case .failure(let e): return "Error: \(e.reason)."
         }
-
-        let filePath = mullDir.appendingPathComponent(cleaned)
-        let parentDir = filePath.deletingLastPathComponent()
+        if let refusal = Self.writeRefusal(for: resolved.relative) { return refusal }
 
         do {
-            try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
-            try content.write(to: filePath, atomically: true, encoding: .utf8)
-            return "Written: ~/mull/\(cleaned) (\(content.count) chars)"
+            try FileManager.default.createDirectory(at: resolved.url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try content.write(to: resolved.url, atomically: true, encoding: .utf8)
+            return "Written: ~/mull/\(resolved.relative) (\(content.count) chars)"
         } catch {
             return "Error writing file: \(error.localizedDescription)"
         }
+    }
+
+    /// Read any vault .md file. Provenance markers are stripped for clean reading.
+    private func readFile(path: String) -> String {
+        let resolved: VaultPath
+        switch resolveVaultPath(path) {
+        case .success(let vp): resolved = vp
+        case .failure(let e): return "Error: \(e.reason)."
+        }
+        guard let content = try? String(contentsOf: resolved.url, encoding: .utf8) else {
+            return "Error: could not read ~/mull/\(resolved.relative). Does it exist? Try list_files."
+        }
+        return ContextBlockFile.stripMarkers(content)
+    }
+
+    /// Provenance-safe write-back: merge the agent's block into the file via the
+    /// Curator so the user's hand edits and pinned content are never clobbered.
+    private func toolCurate(path: String, blockID: String, content: String) -> String {
+        guard !path.isEmpty, !blockID.isEmpty, !content.isEmpty else {
+            return "Error: path, block_id, and content are required."
+        }
+        let resolved: VaultPath
+        switch resolveVaultPath(path) {
+        case .success(let vp): resolved = vp
+        case .failure(let e): return "Error: \(e.reason)."
+        }
+        let cleaned = resolved.relative
+
+        let existing = MullDirectory.read(cleaned) ?? ""
+        let (header, _) = ContextBlockFile.parse(existing)
+        let block = ContextBlock(id: blockID, source: .agent, content: content, agentHash: nil)
+        let ok = Curator.curate(relativePath: cleaned, header: header,
+                                pinnedContent: nil, agentBlocks: [block])
+        return ok
+            ? "Curated block '\(blockID)' into ~/mull/\(cleaned). The user's edits were preserved."
+            : "Error: write failed (mull directory not ready)."
+    }
+
+    /// Planned (calendar events) vs actual (observed activity) per day.
+    private func toolCalendar(days: Int) -> String {
+        let cal = Calendar.current
+        let n = max(1, min(days, 14))
+        let calendarSvc = CalendarService()
+        let engine = TimeBlockEngine(database: database)
+        let dayFmt = DateFormatter(); dayFmt.dateFormat = "EEEE, MMM d"
+        let timeFmt = DateFormatter(); timeFmt.dateFormat = "HH:mm"
+
+        var out: [String] = []
+        for offset in 0..<n {
+            guard let date = cal.date(byAdding: .day, value: -offset, to: Date()) else { continue }
+            out.append("# \(dayFmt.string(from: date))")
+
+            let events = calendarSvc.events(for: date)
+            if events.isEmpty {
+                out.append("Scheduled: (none, or calendar access not granted to MullMCP)")
+            } else {
+                out.append("Scheduled:")
+                for e in events {
+                    out.append("- \(timeFmt.string(from: e.start))–\(timeFmt.string(from: e.end)) \(e.title)")
+                }
+            }
+
+            let blocks = engine.generateBlocks(for: date)
+            if blocks.isEmpty {
+                out.append("Activity: (none recorded)")
+            } else {
+                out.append("Activity (what you actually did):")
+                for b in blocks.prefix(20) {
+                    let label = b.label.isEmpty ? b.app : b.label
+                    out.append("- \(b.startFormatted)–\(b.endFormatted) \(label) (\(b.durationFormatted))")
+                }
+            }
+            out.append("")
+        }
+        return out.joined(separator: "\n")
     }
 
     private func listFiles() -> String {
@@ -561,8 +795,11 @@ final class MCPServer {
             lines.append("")
         }
 
-        // 3. Recent events
-        let events = database.searchEvents(query: context, limit: 5)
+        // 3. Recent events (same secret filter as `search` — raw event text is
+        // about to be handed to a third-party AI).
+        let events = database.searchEvents(query: context, limit: 40)
+            .filter { !SensitiveText.isSensitive($0.textContent ?? "") }
+            .prefix(5)
         if !events.isEmpty {
             lines.append("## Recent Activity")
             let formatter = DateFormatter()
@@ -584,26 +821,30 @@ final class MCPServer {
 
     // MARK: - JSON-RPC Helpers
 
+    // JSON-RPC 2.0 requires `id` to be PRESENT on every response — null when it
+    // couldn't be determined. Omitting the key made those responses malformed;
+    // strict clients drop them and the call looks like it hung.
     private func respond(id: Any?, result: [String: Any]) {
-        var msg: [String: Any] = ["jsonrpc": "2.0", "result": result]
-        if let id { msg["id"] = id }
-        send(msg)
+        send(["jsonrpc": "2.0", "id": id ?? NSNull(), "result": result])
     }
 
+    /// Tool results carry their own success flag. The tool functions signal failure
+    /// by returning a string starting with "Error:" — hardcoding `isError: false`
+    /// handed those to the client as successful output, so an agent would read
+    /// "Error: only .md files are allowed" as the note's contents and move on.
     private func respondToolResult(id: Any?, text: String) {
         respond(id: id, result: [
             "content": [["type": "text", "text": text]],
-            "isError": false
+            "isError": text.hasPrefix("Error:")
         ])
     }
 
     private func respondError(id: Any?, code: Int, message: String) {
-        var msg: [String: Any] = [
+        send([
             "jsonrpc": "2.0",
+            "id": id ?? NSNull(),
             "error": ["code": code, "message": message]
-        ]
-        if let id { msg["id"] = id }
-        send(msg)
+        ])
     }
 
     private func send(_ msg: [String: Any]) {

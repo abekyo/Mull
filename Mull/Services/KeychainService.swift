@@ -7,8 +7,14 @@ enum KeychainService {
 
     private static let serviceName = "com.mull.app"
 
-    static func save(key: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
+    /// Store a value, reporting whether it actually landed in the keychain.
+    ///
+    /// This used to return Void and merely print on failure, so the settings UI told the
+    /// user "saved" for a key that was never stored — and the next API call failed with an
+    /// unexplained 401. Callers that show success/failure should check the result.
+    @discardableResult
+    static func save(key: String, value: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
 
         // Delete existing entry first
         delete(key: key)
@@ -24,7 +30,9 @@ enum KeychainService {
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
             print("[mull] Keychain save failed for \(key): \(status)")
+            return false
         }
+        return true
     }
 
     static func load(key: String) -> String? {
@@ -50,5 +58,15 @@ enum KeychainService {
             kSecAttrAccount as String: key,
         ]
         SecItemDelete(query as CFDictionary)
+    }
+
+    /// Load a credential for *use*. API keys arrive via copy-paste and routinely carry an
+    /// invisible trailing newline/space, which silently corrupts an Authorization header
+    /// (the classic "my key is correct but I get 401"). Always trim at the point of use so
+    /// even keys saved before trimming existed self-heal.
+    static func loadKey(_ key: String) -> String? {
+        guard let raw = load(key: key) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

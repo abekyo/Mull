@@ -1,6 +1,65 @@
 import Foundation
 import AppKit
-import UserNotifications
+@preconcurrency import UserNotifications
+
+/// The one notification path for the whole app.
+///
+/// There used to be three independent `UNMutableNotificationContent` builders
+/// (AppState, ProactiveEngine, ProactiveLoop), each with its own throttle and no
+/// knowledge of the others. ProactiveEngine and ProactiveLoop both fire on a project
+/// switch from the SAME 3-second tick, so one app switch could produce two banners
+/// saying nearly the same thing. Routing everything through here gives them a shared
+/// rate limit and a shared record of which project has already been announced.
+@MainActor
+final class Notifier {
+
+    static let shared = Notifier()
+    private init() {}
+
+    /// Floor between any two notifications, whatever their source. Long enough that
+    /// two systems reacting to one app switch collapse into a single banner, short
+    /// enough that genuinely separate events (a meeting reminder an hour later)
+    /// still get through.
+    private let globalFloor: TimeInterval = 30
+
+    private var lastSentAt: Date = .distantPast
+    private var announcedProjects: [String: Date] = [:]
+
+    /// Deliver a notification unless another one just went out. Returns whether it
+    /// was actually enqueued, so callers can avoid marking state as "notified" for
+    /// something the user never saw.
+    @discardableResult
+    func send(id: String, title: String, body: String, userInfo: [String: Any] = [:]) -> Bool {
+        guard Date().timeIntervalSince(lastSentAt) >= globalFloor else { return false }
+        lastSentAt = Date()
+
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            if !userInfo.isEmpty { content.userInfo = userInfo }
+
+            center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        }
+        return true
+    }
+
+    /// Claim the right to announce a return to `project`. The first of the two
+    /// proactive systems to ask wins; the other stays quiet for the cooldown, so a
+    /// single switch yields one brief instead of two contradicting ones.
+    func claimProjectAnnouncement(_ project: String, cooldown: TimeInterval = 900) -> Bool {
+        let key = project.lowercased()
+        if let last = announcedProjects[key], Date().timeIntervalSince(last) < cooldown {
+            return false
+        }
+        announcedProjects[key] = Date()
+        return true
+    }
+}
 
 /// mull comes to you. Not the other way around.
 ///
@@ -29,6 +88,15 @@ final class ProactiveEngine: NSObject {
     private var lastActiveWindow: String = ""
     private var projectCache: [ProjectSnapshot] = []
     private var projectCacheDate: Date = .distantPast
+    private var projectCacheRefreshing = false
+
+    // Upcoming calendar events, cached. `upcomingEvents` is a full EventKit
+    // predicate query; running it straight off the 3-second tick meant one every
+    // 3 seconds on the main thread. The pre-meeting window is 13–15 minutes out,
+    // so a 60-second refresh cannot miss it.
+    private var upcomingCache: [(title: String, start: Date)] = []
+    private var upcomingCacheDate: Date = .distantPast
+    private var upcomingRefreshing = false
 
     // AI auto-copy state
     private var lastCopiedForAIURL: String = ""
@@ -118,10 +186,16 @@ final class ProactiveEngine: NSObject {
 
             guard !text.isEmpty else { return }
 
+            // me/now/full are curated files — strip the Curator provenance markers
+            // before this lands on the clipboard. They're internal metadata and
+            // would be pure noise pasted into an AI chat.
+            let clean = ContextBlockFile.stripMarkers(text)
             let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
-            let finalText = (maxChars > 0 && text.count > maxChars) ? String(text.prefix(maxChars)) : text
+            let finalText = (maxChars > 0 && clean.count > maxChars) ? String(clean.prefix(maxChars)) : clean
 
-            await MainActor.run {
+            // Re-capture weakly here rather than reading the outer closure's `self`
+            // binding from a second concurrent closure (a Swift 6 error).
+            await MainActor.run { [weak self] in
                 let pasteboard = NSPasteboard.general
                 let savedItems = pasteboard.pasteboardItems?.compactMap { item -> (String, Data)? in
                     guard let type = item.types.first,
@@ -165,7 +239,7 @@ final class ProactiveEngine: NSObject {
                 .filter { $0.autoSurfaceable }
             let upcoming = cal.upcomingEvents(limit: 1)
 
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 self?.projectCache = cache
                 self?.projectCacheDate = Date()
 
@@ -238,6 +312,9 @@ final class ProactiveEngine: NSObject {
         }
 
         guard let project = matchedProject else { return }
+        // ProactiveLoop fires on the same project switch from the same 3s tick.
+        // Whichever system claims the project first speaks; the other stays quiet.
+        guard Notifier.shared.claimProjectAnnouncement(project.name) else { return }
         notifiedProjects.insert(project.name)
 
         // Heavy pattern detection off main thread
@@ -254,16 +331,19 @@ final class ProactiveEngine: NSObject {
                 .filter { $0.autoSurfaceable }
             let projectPattern = patterns.first { $0.project == projectName }
 
-            var body = ""
+            // `let`, not a mutated `var` — a captured var read from the nested
+            // concurrent closure is a Swift 6 error.
+            let body: String
             if let pattern = projectPattern {
                 body = pattern.insight + "\n" + pattern.action
             } else {
-                body = "\(daysSince) days since last session"
-                if let file = lastFile { body += "\nLast file: \(file)" }
-                if let clip = lastClip { body += "\nLast copied: \(clip)" }
+                var lines = "\(daysSince) days since last session"
+                if let file = lastFile { lines += "\nLast file: \(file)" }
+                if let clip = lastClip { lines += "\nLast copied: \(clip)" }
+                body = lines
             }
 
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 self?.sendNotification(
                     id: "project-resume-\(projectName)",
                     title: "Welcome back to \(projectName)",
@@ -281,71 +361,112 @@ final class ProactiveEngine: NSObject {
     private func surfaceRelevantKnowledge(window: String) {
         guard !window.isEmpty else { return }
 
-        let relevant = database.findRelevantKnowledge(context: window, limit: 1)
-        guard let entry = relevant.first else { return }
+        // A DB query on EVERY window-title change — that's a keystroke-rate trigger
+        // in an editor. Off the main thread, like the other proactive lookups.
+        let db = database
+        Task.detached { [weak self] in
+            let relevant = db.findRelevantKnowledge(context: window, limit: 1)
+            guard let entry = relevant.first else { return }
 
-        // Don't re-notify same topic
-        guard !notifiedKnowledge.contains(entry.topic) else { return }
-        notifiedKnowledge.insert(entry.topic)
+            // Only surface if knowledge is from a different day (not what they just did)
+            let daysSince = Calendar.current.dateComponents([.day], from: entry.sourceDate, to: Date()).day ?? 0
+            guard daysSince >= 1 else { return }
 
-        // Only surface if knowledge is from a different day (not what they just did)
-        let daysSince = Calendar.current.dateComponents([.day], from: entry.sourceDate, to: Date()).day ?? 0
-        guard daysSince >= 1 else { return }
+            var body = entry.decision
+            if let reasoning = entry.reasoning, !reasoning.isEmpty {
+                body += "\nWhy: \(reasoning)"
+            }
 
-        var body = entry.decision
-        if let reasoning = entry.reasoning, !reasoning.isEmpty {
-            body += "\nWhy: \(reasoning)"
+            await MainActor.run {
+                guard let self else { return }
+                // Don't re-notify same topic (checked on the main actor, where the
+                // set lives — the fetch above is concurrent).
+                guard !self.notifiedKnowledge.contains(entry.topic) else { return }
+                self.notifiedKnowledge.insert(entry.topic)
+
+                self.sendNotification(
+                    id: "knowledge-\(entry.id ?? 0)-\(entry.topic.prefix(20))",
+                    title: "You know this: \(entry.topic)",
+                    body: body,
+                    action: nil
+                )
+            }
         }
-
-        sendNotification(
-            id: "knowledge-\(entry.id ?? 0)-\(entry.topic.prefix(20))",
-            title: "You know this: \(entry.topic)",
-            body: body,
-            action: nil
-        )
     }
 
     // MARK: - 4. Pre-Meeting
 
     private func checkUpcomingMeetings() {
-        let upcoming = calendar.upcomingEvents(limit: 3)
+        refreshUpcomingCacheIfNeeded()
 
-        for event in upcoming {
-            guard event.minutesUntil <= 15 && event.minutesUntil >= 13 else { continue }
+        let now = Date()
+        for event in upcomingCache {
+            // Recomputed from `start`, not read from the cache — the cached value
+            // would be up to a minute stale and could skip the 13–15 min window.
+            let minutesUntil = Int(event.start.timeIntervalSince(now) / 60)
+            guard minutesUntil <= 15 && minutesUntil >= 13 else { continue }
 
             let key = "\(event.title)-\(event.start.timeIntervalSince1970)"
             guard !notifiedMeetings.contains(key) else { continue }
             notifiedMeetings.insert(key)
 
-            guard let twoHoursAgo = Calendar.current.date(byAdding: .hour, value: -2, to: Date()) else { continue }
-            let recentEvents = database.fetchEvents(
-                from: twoHoursAgo,
-                to: Date()
-            )
-            let appCounts = Dictionary(grouping: recentEvents.filter { $0.eventType == .appSwitch }) { $0.appName ?? "Unknown" }
-            let topApp = appCounts.max(by: { $0.value.count < $1.value.count })?.key
+            guard let twoHoursAgo = Calendar.current.date(byAdding: .hour, value: -2, to: now) else { continue }
 
-            var body = "\(event.title) in \(event.minutesUntil) minutes"
-            if let app = topApp {
-                body += "\nCurrent session: \(app)"
+            // The 2-hour fetch + grouping is a DB read; keep it off the main thread
+            // (same precedent as the BehaviorPatternEngine hops above).
+            let db = database
+            let title = event.title
+            Task.detached { [weak self] in
+                let recentEvents = db.fetchEvents(from: twoHoursAgo, to: Date())
+                let appCounts = Dictionary(grouping: recentEvents.filter { $0.eventType == .appSwitch }) { $0.appName ?? "Unknown" }
+                let topApp = appCounts.max(by: { $0.value.count < $1.value.count })?.key
+
+                // `let`, not a mutated `var` — see checkProjectResumption.
+                let body = topApp.map { "\(title) in \(minutesUntil) minutes\nCurrent session: \($0)" }
+                    ?? "\(title) in \(minutesUntil) minutes"
+
+                await MainActor.run { [weak self] in
+                    self?.sendNotification(id: "meeting-\(key)", title: "Meeting soon",
+                                           body: body, action: nil)
+                }
             }
+        }
+    }
 
-            sendNotification(
-                id: "meeting-\(key)",
-                title: "Meeting soon",
-                body: body,
-                action: nil
-            )
+    /// Refresh the EventKit query at most once a minute, off the main thread.
+    private func refreshUpcomingCacheIfNeeded() {
+        guard !upcomingRefreshing, Date().timeIntervalSince(upcomingCacheDate) > 60 else { return }
+        upcomingRefreshing = true
+        upcomingCacheDate = Date()
+
+        let cal = calendar
+        Task.detached { [weak self] in
+            let events = cal.upcomingEvents(limit: 3).map { (title: $0.title, start: $0.start) }
+            await MainActor.run {
+                self?.upcomingCache = events
+                self?.upcomingRefreshing = false
+            }
         }
     }
 
     // MARK: - Project Cache
 
+    /// `projectSnapshots(days: 14)` is a 14-day scan. Hourly is fine, but it must
+    /// not run ON the main thread — it was being invoked straight from the 3s tick's
+    /// window-title branch.
     private func refreshProjectCacheIfNeeded() {
-        guard Date().timeIntervalSince(projectCacheDate) > 3600 else { return }
-        let engine = TimeBlockEngine(database: database)
-        projectCache = engine.projectSnapshots(days: 14)
+        guard !projectCacheRefreshing, Date().timeIntervalSince(projectCacheDate) > 3600 else { return }
+        projectCacheRefreshing = true
         projectCacheDate = Date()
+
+        let db = database
+        Task.detached { [weak self] in
+            let snapshots = TimeBlockEngine(database: db).projectSnapshots(days: 14)
+            await MainActor.run {
+                self?.projectCache = snapshots
+                self?.projectCacheRefreshing = false
+            }
+        }
     }
 
     // MARK: - Notification Actions
@@ -357,31 +478,19 @@ final class ProactiveEngine: NSObject {
 
     // MARK: - Notification Delivery
 
+    /// All delivery goes through the shared Notifier, so this engine and
+    /// ProactiveLoop share one rate limit instead of two independent ones.
     private func sendNotification(id: String, title: String, body: String, action: NotificationAction?) {
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
+        // Register the action BEFORE delivery — the tap handler looks it up by id.
+        if let action { pendingActions[id] = action }
 
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            content.sound = .default
+        let delivered = Notifier.shared.send(
+            id: id, title: title, body: body,
+            userInfo: action != nil ? ["actionID": id] : [:])
 
-            // Store action data for when user clicks
-            if action != nil {
-                content.userInfo = ["actionID": id]
-                Task { @MainActor in
-                    self.pendingActions[id] = action
-                }
-            }
-
-            let request = UNNotificationRequest(
-                identifier: id,
-                content: content,
-                trigger: nil
-            )
-            center.add(request)
-        }
+        // Rate-limited away: drop the action so `pendingActions` doesn't accumulate
+        // entries for banners the user never got.
+        if !delivered { pendingActions.removeValue(forKey: id) }
     }
 
     // MARK: - Notification Delegate Setup
@@ -400,8 +509,15 @@ final class ProactiveEngine: NSObject {
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID(for: appName)) {
                 NSWorkspace.shared.openApplication(at: url, configuration: .init())
             } else {
-                // Fallback: try to open by name
-                NSWorkspace.shared.launchApplication(appName)
+                // Fallback when the bundle-id guess misses. `launchApplication(_:)`
+                // is deprecated and has no by-name replacement, so resolve the
+                // bundle path ourselves and use the modern URL-based API.
+                let candidates = ["/Applications", "/System/Applications",
+                                  NSHomeDirectory() + "/Applications"]
+                    .map { URL(fileURLWithPath: $0).appendingPathComponent("\(appName).app") }
+                if let bundle = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+                    NSWorkspace.shared.openApplication(at: bundle, configuration: .init())
+                }
             }
 
         case .openDashboard:

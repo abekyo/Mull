@@ -1,5 +1,4 @@
 import Foundation
-import UserNotifications
 
 /// The proactive loop (DIRECTION §7 / §9.2) — the self-driving core that makes
 /// mull ACT, not just answer. A passive selection layer does nothing until an
@@ -15,6 +14,10 @@ import UserNotifications
 ///   5. HAND OFF— deliver it as a notification.
 ///
 /// Everything else (capture, structuring, retrieval) is scaffolding for this.
+/// State is main-actor isolated: `tick()` is driven from AppState's main-thread
+/// refresh loop, while `brief()` runs on the global executor — without isolation the
+/// two would read and write `lastEntity`/`lastCheckAt`/`lastFiredAt` concurrently.
+@MainActor
 final class ProactiveLoop {
 
     private let database: DatabaseService
@@ -23,6 +26,10 @@ final class ProactiveLoop {
     private var lastEntity: String?
     private var lastCheckAt: Date = .distantPast
     private var lastFiredAt: Date = .distantPast
+    /// True while a brief is being written. `judge()` calls an LLM, which routinely
+    /// outlives the 180s cooldown; two overlapping briefs both reach
+    /// `Curator.curate("proactive.md")`, a read-merge-write, and one is lost.
+    private var briefing = false
 
     /// Throttle the DB-touching check; the active entity rarely changes faster.
     private let checkInterval: TimeInterval = 20
@@ -39,30 +46,58 @@ final class ProactiveLoop {
     func tick() {
         let now = Date()
         guard now.timeIntervalSince(lastCheckAt) >= checkInterval else { return }
+        guard !briefing else { return }
         lastCheckAt = now
 
-        // 1. Anchor on the present. Needs window-title capture (Accessibility);
-        //    until that's granted, activeEntity is nil and the loop stays dormant.
-        guard let entity = CurrentState.current(database: database).activeEntity else { return }
-        guard entity != lastEntity else { return }                       // only on a switch
-        guard now.timeIntervalSince(lastFiredAt) >= cooldown else { return } // not too soon
+        let db = database
+        let previousEntity = lastEntity
+        let canFire = now.timeIntervalSince(lastFiredAt) >= cooldown
 
-        // 2. Select the relevant slice for this project.
-        let since: TimeInterval = 14 * 86_400
-        let events = database.fetchCandidates(
-            query: entity, since: now.addingTimeInterval(-since), useFTS: false, limit: 200)
-        let items = Selection.rank(events: events, query: "", entity: entity,
-                                   type: nil, now: now, since: since, limit: 6)
-        guard !items.isEmpty else { lastEntity = entity; return }        // nothing to say yet
+        // Steps 1 and 2 are DB work — `CurrentState.current`, a 200-row candidate
+        // fetch and a full ranking pass — and they used to run on the main thread
+        // every 20 seconds straight off AppState's tick. Do them off-main and come
+        // back to decide, since the decision touches main-actor state.
+        Task.detached {
+            // 1. Anchor on the present. Needs window-title capture (Accessibility);
+            //    until that's granted, activeEntity is nil and the loop stays dormant.
+            guard let entity = CurrentState.current(database: db).activeEntity else { return }
+            guard entity != previousEntity else { return }   // only on a switch
+            guard canFire else { return }                    // not too soon
 
-        lastEntity = entity
-        lastFiredAt = now
-        Task { await self.brief(entity: entity, items: items) }
+            // 2. Select the relevant slice for this project.
+            let since: TimeInterval = 14 * 86_400
+            let events = db.fetchCandidates(
+                query: entity, since: now.addingTimeInterval(-since), useFTS: false, limit: 200)
+            let items = Selection.rank(events: events, query: "", entity: entity,
+                                       type: nil, now: now, since: since, limit: 6)
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard !items.isEmpty else { self.lastEntity = entity; return }  // nothing to say yet
+                guard !self.briefing else { return }
+
+                // ProactiveEngine reacts to the same switch from the same tick.
+                // Whoever claims the project first speaks; the other stays quiet,
+                // so one app switch can't yield two briefs about it.
+                guard Notifier.shared.claimProjectAnnouncement(entity) else {
+                    self.lastEntity = entity
+                    return
+                }
+
+                self.lastEntity = entity
+                self.lastFiredAt = Date()
+                self.briefing = true
+                Task { await self.brief(entity: entity, items: items) }
+            }
+        }
     }
 
     // MARK: - Judge → write-back → hand off
 
+    /// Caller sets `briefing`; this clears it on every exit path.
     private func brief(entity: String, items: [Selection.Result]) async {
+        defer { briefing = false }
+
         let digest = items.map { "- \($0.type): \($0.text)" }.joined(separator: "\n")
         let headline = await judge(entity: entity, digest: digest)
 
@@ -78,8 +113,10 @@ final class ProactiveLoop {
             header: "# Proactive briefs\n\n_What mull surfaced when you returned to each project. Edit freely — your edits are kept._",
             pinnedContent: nil, agentBlocks: [block])
 
-        // 5. Hand off.
-        notify(title: "Resume \(entity)", body: headline)
+        // 5. Hand off — through the app's one notifier, so this shares a rate limit
+        //    with ProactiveEngine instead of running a second, blind one.
+        Notifier.shared.send(id: "proactive-brief",
+                             title: "Resume \(entity)", body: headline)
     }
 
     /// 3. Judgment. LLM when a provider is configured — and only the already
@@ -105,17 +142,4 @@ final class ProactiveLoop {
         }
     }
 
-    private func notify(title: String, body: String) {
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            content.sound = .default
-            let request = UNNotificationRequest(
-                identifier: "proactive-brief", content: content, trigger: nil)
-            center.add(request)
-        }
-    }
 }

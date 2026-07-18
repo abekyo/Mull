@@ -10,6 +10,12 @@ struct InsightsTab: View {
     @State private var weekday: [WeekdayStat] = []
     @State private var langMix = LanguageMix(japanesePercent: 0, englishPercent: 0, codePercent: 0)
     @State private var facts: [Fact] = []
+    // Everything below used to be computed inside `body`: a TimeBlockEngine day
+    // analysis, a memories fetch, and a blocking EventKit call — all re-running on
+    // every redraw. They're loaded once, off the main thread, into state.
+    @State private var focusInsight: String?
+    @State private var memories: [MemoryEntry] = []
+    @State private var todaySchedule: String?
 
     var body: some View {
         ScrollView {
@@ -20,7 +26,7 @@ struct InsightsTab: View {
                     .padding(.top, DS.lg)
 
                 // Schedule (if available)
-                if let schedule = appState.calendar.todaySchedule() {
+                if let schedule = todaySchedule {
                     scheduleCard(schedule)
                         .padding(.horizontal, DS.xl)
                 }
@@ -56,17 +62,47 @@ struct InsightsTab: View {
                     .padding(.bottom, DS.xl)
             }
         }
-        .onAppear { refresh() }
+        .task { await refresh() }
     }
 
-    private func refresh() {
-        let engine = appState.analytics
-        keywords = engine.topKeywords(days: 7, limit: 20)
-        appUsage = engine.appUsage(days: 7)
-        hourly = engine.hourlyPattern(days: 7)
-        weekday = engine.weekdayPattern(days: 30)
-        langMix = engine.languageMix(days: 7)
-        facts = FactExtractor(analytics: engine, database: appState.database).extractFacts(days: 7)
+    /// Six analytics passes, a day analysis, a memories fetch and an EventKit read —
+    /// each one scans days of events. Running them synchronously from .onAppear froze
+    /// the window on every visit to this tab; they run detached and publish once.
+    private func refresh() async {
+        let analytics = appState.analytics
+        let database = appState.database
+        let calendarService = appState.calendar
+
+        let loaded = await Task.detached(priority: .userInitiated) { () -> (
+            keywords: [KeywordStat], appUsage: [AppUsageStat], hourly: [HourlyStat],
+            weekday: [WeekdayStat], langMix: LanguageMix, facts: [Fact],
+            focus: String?, memories: [MemoryEntry], schedule: String?
+        ) in
+            let dayAnalysis = TimeBlockEngine(database: database).analyzDay(for: Date())
+            return (
+                analytics.topKeywords(days: 7, limit: 20),
+                analytics.appUsage(days: 7),
+                analytics.hourlyPattern(days: 7),
+                analytics.weekdayPattern(days: 30),
+                analytics.languageMix(days: 7),
+                FactExtractor(analytics: analytics, database: database).extractFacts(days: 7),
+                InsightPhrases.focusInsight(mainActivities: dayAnalysis.mainActivities.count,
+                                            totalDuration: dayAnalysis.totalDuration),
+                database.fetchAllMemories(),
+                calendarService.todaySchedule()
+            )
+        }.value
+
+        guard !Task.isCancelled else { return }
+        keywords = loaded.keywords
+        appUsage = loaded.appUsage
+        hourly = loaded.hourly
+        weekday = loaded.weekday
+        langMix = loaded.langMix
+        facts = loaded.facts
+        focusInsight = loaded.focus
+        memories = loaded.memories
+        todaySchedule = loaded.schedule
     }
 
     // MARK: - Hero Card
@@ -101,7 +137,7 @@ struct InsightsTab: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("\(appState.todayEventCount)")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(DS.moon)
                     Text("events today")
                         .font(DS.captionFont)
                         .foregroundStyle(.tertiary)
@@ -117,13 +153,8 @@ struct InsightsTab: View {
                 }
             }
 
-            // Barnum-style focus insight
-            let engine = TimeBlockEngine(database: appState.database)
-            let dayAnalysis = engine.analyzDay(for: Date())
-            if let focus = InsightPhrases.focusInsight(
-                mainActivities: dayAnalysis.mainActivities.count,
-                totalDuration: dayAnalysis.totalDuration
-            ) {
+            // Barnum-style focus insight (computed in refresh(), not here)
+            if let focus = focusInsight {
                 Text(focus)
                     .font(DS.captionFont)
                     .foregroundStyle(.secondary)
@@ -158,7 +189,7 @@ struct InsightsTab: View {
 
     private func factColor(_ category: FactCategory) -> Color {
         switch category {
-        case .identity: Color.accentColor
+        case .identity: DS.moon
         case .skills: DS.recording
         case .projects: DS.paused
         case .patterns: DS.eventApp
@@ -171,7 +202,7 @@ struct InsightsTab: View {
         VStack(alignment: .leading, spacing: DS.sm) {
             HStack {
                 Image(systemName: "calendar")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(DS.moon)
                 Text("Today's Schedule")
                     .font(DS.titleFont)
             }
@@ -201,7 +232,7 @@ struct InsightsTab: View {
         VStack(alignment: .leading, spacing: DS.sm) {
             HStack {
                 Image(systemName: "moon.stars.fill")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(DS.moon)
                 Text("Today's Summary")
                     .font(DS.titleFont)
                 Spacer()
@@ -222,13 +253,15 @@ struct InsightsTab: View {
             Text("ACTIVITY")
                 .sectionLabel()
 
-            // 24-hour bar chart
+            // 24-hour bar chart — bars share the column width so it never overflows the
+            // narrow Settings pane.
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(hourly) { h in
                     VStack(spacing: 2) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(barColor(intensity: h.intensity))
-                            .frame(width: 10, height: max(3, h.intensity * 50))
+                            .frame(height: max(3, h.intensity * 50))
+                            .frame(maxWidth: .infinity)
 
                         if h.hour % 6 == 0 {
                             Text("\(h.hour)")
@@ -251,9 +284,9 @@ struct InsightsTab: View {
     }
 
     private func barColor(intensity: Double) -> Color {
-        if intensity > 0.7 { return Color.accentColor }
-        if intensity > 0.3 { return Color.accentColor.opacity(0.6) }
-        return Color.accentColor.opacity(0.15)
+        if intensity > 0.7 { return DS.moon }
+        if intensity > 0.3 { return DS.moon.opacity(0.6) }
+        return DS.moon.opacity(0.15)
     }
 
     // MARK: - Weekday Chart
@@ -263,12 +296,13 @@ struct InsightsTab: View {
             Text("WEEK")
                 .sectionLabel()
 
-            HStack(spacing: DS.sm) {
+            HStack(alignment: .bottom, spacing: DS.sm) {
                 ForEach(weekday) { day in
                     VStack(spacing: DS.xs) {
                         RoundedRectangle(cornerRadius: 3)
                             .fill(barColor(intensity: day.intensity))
-                            .frame(width: 28, height: max(4, day.intensity * 40))
+                            .frame(height: max(4, day.intensity * 40))
+                            .frame(maxWidth: .infinity)
 
                         Text(day.name)
                             .font(.system(size: 9))
@@ -359,7 +393,7 @@ struct InsightsTab: View {
 
                     GeometryReader { geo in
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.accentColor.opacity(0.5))
+                            .fill(DS.moon.opacity(0.5))
                             .frame(width: geo.size.width * app.percentage / 100)
                     }
                     .frame(height: 8)
@@ -408,7 +442,7 @@ struct InsightsTab: View {
                         }
                         .padding(.horizontal, DS.sm)
                         .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(intensity * 0.15 + 0.03))
+                        .background(DS.moon.opacity(intensity * 0.15 + 0.03))
                         .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
                     }
                 }
@@ -428,12 +462,10 @@ struct InsightsTab: View {
     // MARK: - Memory Card
 
     private var memoryCard: some View {
-        let memories = appState.database.fetchAllMemories()
-
-        return VStack(alignment: .leading, spacing: DS.sm) {
+        VStack(alignment: .leading, spacing: DS.sm) {
             HStack {
                 Image(systemName: "brain")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(DS.moon)
                 Text("What mull Knows")
                     .font(DS.titleFont)
             }
@@ -459,7 +491,7 @@ struct InsightsTab: View {
                             .font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, DS.sm)
                             .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.08))
+                            .background(DS.moon.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 3))
 
                         VStack(alignment: .leading, spacing: 1) {

@@ -14,7 +14,7 @@ final class PredictionEngineTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        db = DatabaseService()
+        db = try! DatabaseService.temporary()
     }
 
     /// A token no other test or prior run could collide with.

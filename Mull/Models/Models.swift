@@ -17,6 +17,9 @@ struct RecordingEvent: Codable, FetchableRecord, PersistableRecord {
     var entity: String?
     var contentType: String?
     var salience: Double?
+    // MODE axis (MAP-ARCHITECTURE.md): how this moment is engaged with
+    // (produce/consume/decide/think/research/communicate). See `Mode`.
+    var mode: String?
 
     enum EventType: String, Codable, DatabaseValueConvertible {
         case screenText
@@ -24,6 +27,10 @@ struct RecordingEvent: Codable, FetchableRecord, PersistableRecord {
         case clipboard
         case appSwitch
         case audio
+        // Capture-fidelity #1 (MAP-ARCHITECTURE.md): the BODY text of the focused
+        // window — the work itself, not just its title. Separate channel so
+        // title-based heuristics (CurrentState, project inference) stay clean.
+        case windowBody
     }
 
     static let databaseTableName = "recording_events"
@@ -182,6 +189,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     case off = "off"
     case gemini = "gemini"
     case local = "local"
+    case localOpenAI = "localopenai"
     case claude = "claude"
     case openai = "openai"
 
@@ -190,7 +198,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     /// Whether this provider sends data off-device.
     var isCloud: Bool {
         switch self {
-        case .off, .local: false
+        case .off, .local, .localOpenAI: false
         case .gemini, .claude, .openai: true
         }
     }
@@ -200,6 +208,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
         case .off: "Off — local rule-based only"
         case .gemini: "Gemini Flash (Free)"
         case .local: "Local (Ollama)"
+        case .localOpenAI: "Local (OpenAI-compatible)"
         case .claude: "Claude API"
         case .openai: "OpenAI API"
         }

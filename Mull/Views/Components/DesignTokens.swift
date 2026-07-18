@@ -68,60 +68,76 @@ enum DS {
     static let radiusMd: CGFloat = 12
     static let radiusLg: CGFloat = 16
 
-    // MARK: - Nocturne — ink on night
+    // MARK: - Daylight — espresso ink on ivory (Cucinelli)
     //
-    // The app is a calm nocturnal surface: mull mulls over your life while you
-    // rest. A near-black indigo canvas, content surfacing in soft moonlight, one
-    // luminous accent. Type-led, lots of air.
+    // The app lives on a warm ivory page: Umbrian daylight, undyed cashmere, the
+    // cream of a fine book. Espresso ink, one tobacco accent, hairlines like a
+    // faint pencil rule. Type-led, lots of air. (Replaces the cool Nocturne;
+    // these are the same token names so every call site flips in one place.)
 
-    /// The night canvas — everything sits on this. Deep indigo-black.
-    static let canvas = Color(red: 0.039, green: 0.047, blue: 0.078)   // #0A0C14
-    /// A surface lifted off the canvas (cards, sidebar wells).
-    static let surface = Color(red: 0.071, green: 0.082, blue: 0.122)  // #12151F
+    /// The ivory page — everything sits on this. Warm cream.
+    static let canvas = Color(red: 0.949, green: 0.929, blue: 0.882)   // #F2EDE1
+    /// A surface lifted off the page (cards, sidebar wells) — barely lighter.
+    static let surface = Color(red: 0.969, green: 0.953, blue: 0.918)  // #F7F3EA
     /// A surface on hover / selection.
-    static let surfaceHi = Color(red: 0.105, green: 0.118, blue: 0.165) // #1B1E2A
-    /// Hairline rule — moonlight at low opacity. The structural signature.
-    static let hairline = Color.white.opacity(0.07)
+    static let surfaceHi = Color(red: 0.988, green: 0.976, blue: 0.949) // #FCF9F2
+    /// Hairline rule — warm umber at low opacity. The structural signature.
+    static let hairline = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.12)
 
-    /// Moonlight indigo — the single accent.
-    static let moon = Color(red: 0.58, green: 0.56, blue: 1.0)         // #948FFF
-    static let moonDim = Color(red: 0.46, green: 0.45, blue: 0.82)
+    /// Tobacco — the single accent. A thread, never a fill. (Named `moon` for
+    /// call-site compatibility; it is no longer moonlight.)
+    static let moon = Color(red: 0.580, green: 0.447, blue: 0.196)     // #945F32
+    static let moonDim = Color(red: 0.46, green: 0.36, blue: 0.18)
 
-    /// Text tiers (soft white, never pure).
-    static let ink = Color.white.opacity(0.92)
-    static let inkDim = Color.white.opacity(0.60)
-    static let inkFaint = Color.white.opacity(0.38)
+    /// Text tiers (warm espresso, never pure black).
+    static let ink = Color(red: 0.224, green: 0.192, blue: 0.149)            // #393127
+    static let inkDim = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.62)
+    static let inkFaint = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.36)
 
-    // MARK: - Semantic Colors (luminous on night)
+    // MARK: - Earth palette (one harmonious family — warm, muted, low-sat)
+    //
+    // Cucinelli is not a rainbow. Every accent is a natural dye drawn from the
+    // same earth as the tobacco anchor: ochre, olive, clay, slate, plum, taupe.
+    // Nothing competes with the ink or the page; the whole screen reads tonal.
 
-    static let recording = Color(red: 0.45, green: 0.82, blue: 0.66)  // Moonlit sage
-    static let paused = Color(red: 0.93, green: 0.74, blue: 0.45)     // Soft amber
-    static let error = Color(red: 0.95, green: 0.48, blue: 0.50)      // Soft red glow
-    static let nowLine = Color(red: 0.58, green: 0.56, blue: 1.0)     // Moonlight
+    static let camel     = Color(red: 0.72, green: 0.54, blue: 0.24)  // #B88A3D — lighter tobacco
+    static let olive     = Color(red: 0.43, green: 0.46, blue: 0.29)  // #6E7549 — greyed green
+    static let clay      = Color(red: 0.66, green: 0.36, blue: 0.26)  // #A85C42 — terracotta
+    static let slate     = Color(red: 0.42, green: 0.49, blue: 0.53)  // #6B7D87 — the one cool note, muted
+    static let plum      = Color(red: 0.52, green: 0.36, blue: 0.42)  // #855C6B — greyed rosewood
+    static let dustyRose = Color(red: 0.68, green: 0.45, blue: 0.44)  // #AD7370 — faded clay rose
+    static let taupe     = Color(red: 0.55, green: 0.51, blue: 0.45)  // #8C8273 — warm neutral
+
+    // MARK: - Semantic Colors (drawn from the earth palette)
+
+    static let recording = olive   // active / "remembering"
+    static let paused = camel      // a pause, not an alarm
+    static let error = clay        // trouble, spoken warmly
+    static let nowLine = moon      // tobacco — the present moment
 
     // MARK: - Event Type Colors
     //
     // Used in LiveTab, HomeTab, InsightsTab for event type indicators.
     // Never use raw .blue/.orange/.green — always go through these.
 
-    static let eventKeystroke = Color(red: 0.55, green: 0.66, blue: 1.0)   // Cool moonlight blue
-    static let eventClipboard = Color(red: 0.93, green: 0.74, blue: 0.45)  // Same as paused
-    static let eventWindow = Color(red: 0.45, green: 0.82, blue: 0.66)     // Same as recording
-    static let eventApp = Color(red: 0.70, green: 0.58, blue: 1.0)         // Moon violet
-    static let eventAudio = Color(red: 0.95, green: 0.60, blue: 0.78)      // Soft rose
+    static let eventKeystroke = slate      // the single cool note
+    static let eventClipboard = camel
+    static let eventWindow = olive
+    static let eventApp = plum
+    static let eventAudio = dustyRose
 
     // MARK: - Insight Colors
 
-    static let langJapanese = Color(red: 0.95, green: 0.48, blue: 0.50)
+    static let langJapanese = clay
     static let langEnglish = moon
-    static let langCode = Color(red: 0.45, green: 0.82, blue: 0.66)
+    static let langCode = olive
 
-    // MARK: - Gradients (moonlight)
+    // MARK: - Gradients (tobacco)
 
     static let accentGradient = LinearGradient(
         colors: [
-            Color(red: 0.58, green: 0.56, blue: 1.0),   // Moonlight indigo
-            Color(red: 0.42, green: 0.40, blue: 0.78)   // Deeper night violet
+            Color(red: 0.62, green: 0.49, blue: 0.24),   // Tobacco
+            Color(red: 0.45, green: 0.34, blue: 0.15)    // Deeper tobacco
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
@@ -134,37 +150,22 @@ enum DS {
     // MARK: - App Colors (deterministic from name)
 
     /// Generate a consistent color for any app name.
-    /// Well-known apps get curated colors. Everything else gets a hash-based color.
+    /// Well-known apps map to the earth palette; everything else gets a muted
+    /// hash-based dye. No raw system colors — nothing breaks the tonal family.
     static func appColor(_ name: String) -> Color {
-        // Curated colors for common apps
         switch name {
-        case "Xcode": return .blue
-        case "Code", "Visual Studio Code": return .purple
-        case "Cursor": return .cyan
-        case "Safari": return .blue.opacity(0.7)
-        case "Firefox": return .orange
-        case "Chrome", "Google Chrome": return .green
-        case "Arc": return .pink
-        case "Slack": return Color(red: 0.6, green: 0.2, blue: 0.6)
-        case "Discord": return Color(red: 0.35, green: 0.4, blue: 0.9)
-        case "Messages": return .green
-        case "Mail": return .blue
-        case "Finder": return .blue.opacity(0.5)
-        case "Terminal", "iTerm2", "Warp", "Ghostty": return .mint
-        case "Simulator": return .indigo
-        case "Figma": return Color(red: 0.6, green: 0.3, blue: 1.0)
-        case "Notion": return .primary.opacity(0.6)
-        case "Obsidian": return Color(red: 0.5, green: 0.3, blue: 0.8)
-        case "Notes": return .yellow
-        case "Photoshop": return Color(red: 0.0, green: 0.6, blue: 1.0)
-        case "Illustrator": return Color(red: 1.0, green: 0.6, blue: 0.0)
-        case "Preview": return .blue.opacity(0.4)
-        case "Zoom": return Color(red: 0.2, green: 0.5, blue: 1.0)
-        case "Teams": return Color(red: 0.3, green: 0.3, blue: 0.8)
+        case "Xcode", "Safari", "Mail", "Zoom", "Preview", "Cursor": return slate
+        case "Code", "Visual Studio Code", "Figma", "Slack", "Obsidian",
+             "Simulator", "Teams", "Discord": return plum
+        case "Firefox", "Illustrator", "Notes": return camel
+        case "Chrome", "Google Chrome", "Messages",
+             "Terminal", "iTerm2", "Warp", "Ghostty": return olive
+        case "Arc", "Photoshop": return dustyRose
+        case "Finder", "Notion": return taupe
         default: break
         }
 
-        // Hash-based color for any unknown app
+        // Muted earth dye for any unknown app
         return colorFromHash(name)
     }
 
@@ -177,8 +178,8 @@ enum DS {
         }
 
         let hue = Double(hash % 360) / 360.0
-        let saturation = 0.30 + Double((hash >> 8) % 25) / 100.0  // 0.30-0.55 (softer)
-        let brightness = 0.60 + Double((hash >> 16) % 20) / 100.0  // 0.60-0.80
+        let saturation = 0.16 + Double((hash >> 8) % 18) / 100.0  // 0.16-0.34 (muted — a natural dye, not a crayon)
+        let brightness = 0.44 + Double((hash >> 16) % 16) / 100.0  // 0.44-0.60 (readable on ivory)
 
         return Color(hue: hue, saturation: saturation, brightness: brightness)
     }

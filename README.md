@@ -25,16 +25,38 @@ The deeper job isn't logging — it's *deliberation*. mull continuously reflects
 ```
 You work normally
     ↓
-mull silently records (keystrokes, clipboard, window titles, browser URLs, calendar)
+mull silently records (keystrokes, clipboard, window titles + body, browser URLs, calendar)
     ↓
-Every 60 seconds: me.md / now.md / full.md auto-generated (no LLM needed)
+At capture: each event is classified (kind, salience, mode) and stored enriched
     ↓
-Every night: mull Engine mulls over your day (LLM or rule-based fallback)
+Every 60 seconds: me.md / now.md / full.md regenerated (no LLM needed)
+    ↓            └─ through the Curator, so your hand-edits survive
+Every night: mull Engine mulls over your day (LLM, or rule-based fallback)
     ↓
 AI reads your context via MCP Server, file reference, or copy/paste
     ↓
 AI knows you. You explain nothing.
 ```
+
+## The app
+
+Four pinned views, plus your vault as an editable file tree:
+
+- **Home** — your portrait: who mull thinks you are, what you're working on,
+  today's activity, and unified search over everything
+- **Calendar** — week / month / year. Planned (calendar events) beside actual
+  (observed activity), auto-filled — you never type into it
+- **Live** — the raw event stream as it happens, so you can see exactly what is
+  being recorded
+- **Chat** — ask about *your own records*. Grounded in me/now/projects; it will
+  send you to Claude or ChatGPT for general questions
+
+### Today, in your words
+
+In the evening mull drafts your day as a report **in your writing voice**,
+learned from what you've actually written. Edit it, and your edits become
+tomorrow's voice sample. The draft is always yours to approve — mull writes,
+you decide.
 
 ## What AI Sees
 
@@ -82,7 +104,6 @@ With this data, AI can say:
 ### Requirements
 
 - macOS 14.0+ (Sonoma)
-- Apple Silicon or Intel Mac
 - Xcode 16+ (for building)
 - [Ollama](https://ollama.com/) (optional, for local LLM summaries)
 
@@ -93,54 +114,95 @@ With this data, AI can say:
 git clone https://github.com/yourname/mull.git
 cd mull
 
+# Optional: keep macOS permission grants stable across rebuilds
+cp Local.xcconfig.example Local.xcconfig
+security find-identity -v -p codesigning   # paste a hash into Local.xcconfig
+
 # Generate Xcode project
 brew install xcodegen   # if not installed
 xcodegen generate
 
 # Open and build
-open mull.xcodeproj
-# Select "mull" scheme → ⌘R
+open Mull.xcodeproj
+# Select the "Mull" scheme → ⌘R
 ```
+
+`Local.xcconfig` is gitignored and optional. Without it the build signs ad-hoc,
+which works but makes macOS re-prompt for permissions after every rebuild.
 
 ### Permissions
 
-mull needs two macOS permissions:
+| Permission | What it does | Required? |
+|-----------|-------------|-----------|
+| **Input Monitoring** | Record keystrokes | Yes, for typing capture |
+| **Accessibility** | Read window titles and focused-window text | Yes, for window capture |
+| **Calendar** | Read today's schedule (EventKit) | Optional |
+| **Automation** | Read browser URLs, and Mail subjects if enabled | Optional, prompted on first use |
 
-| Permission | What it does | How to grant |
-|-----------|-------------|-------------|
-| **Accessibility** | Read window titles | System Settings → Privacy & Security → Accessibility → Add mull |
-| **Input Monitoring** | Record keystrokes | System Settings → Privacy & Security → Input Monitoring → Add mull |
+Grant these in System Settings → Privacy & Security. Clipboard monitoring
+requires no permission.
 
-> **Xcode development note:** When running from Xcode, add **Xcode** to Input Monitoring instead of mull (mull runs as Xcode's child process).
-
-Clipboard monitoring requires no permission.
+> **Xcode development note:** When running from Xcode, add **Xcode** to Input
+> Monitoring instead of mull (mull runs as Xcode's child process).
 
 ## Architecture
 
 ```
-mull/
+Mull/                               — the app target
 ├── App/
-│   ├── MullApp.swift              — Menu bar + Dock + Onboarding
+│   ├── MullApp.swift               — Menu bar + Dock + Onboarding
 │   └── AppState.swift              — Central state, timers, notifications
 ├── Services/
-│   ├── RecordingService.swift      — CGEvent tap + clipboard + window titles + browser URLs
+│   ├── RecordingService.swift      — CGEvent tap + clipboard + window titles/body + browser URLs
 │   ├── DatabaseService.swift       — SQLite (GRDB) + FTS5 + DatabasePool
-│   ├── MullEngine.swift           — 3-gate trigger + 4-phase LLM consolidation
+│   ├── MullEngine.swift            — 3-gate trigger + 4-phase LLM consolidation
+│   ├── LiveContextGenerator.swift  — Generates me.md / now.md / full.md every 60s
+│   ├── Curator.swift               — Block-level merge; protects hand-edits from regeneration
+│   ├── MullDirectory.swift         — The ~/mull vault: setup, atomic reads/writes
+│   ├── FolderOntology.swift        — The 00_identity … 09_inbox folder scheme
+│   ├── Selection.swift             — Ranked, facet-scoped retrieval (now-anchored)
+│   ├── Signal.swift / Mode.swift   — Capture-time classification stored on each row
+│   ├── TimeBlockEngine.swift       — Events → time blocks, "what you mainly did"
 │   ├── AnalyticsEngine.swift       — Keyword frequency, app usage, work rhythm
 │   ├── FactExtractor.swift         — Rule-based identity/role/project inference
-│   ├── LiveContextGenerator.swift  — Generates me.md/now.md/full.md every 60s
+│   ├── ReportWriter.swift          — "Today, in your words" — a draft in your voice
 │   ├── CalendarService.swift       — EventKit calendar integration
-│   ├── PermissionService.swift     — Accessibility + Input Monitoring monitoring
+│   ├── EmailService.swift          — Mail.app subjects + senders (opt-in)
+│   ├── SensitiveText.swift         — The privacy gate before anything leaves the device
+│   ├── PermissionService.swift     — Accessibility + Input Monitoring status
 │   ├── KeychainService.swift       — Secure API key storage
-│   └── MCPServer.swift             — MCP server for Claude Code / Cursor
+│   ├── LLMClient.swift             — Gemini / Ollama / Claude / OpenAI
+│   └── MCPServer.swift             — MCP server for Claude Code / Claude Desktop / Cursor
 ├── Views/
-│   ├── MenuBarPanel.swift          — Main panel (search, summary, actions)
-│   ├── AIExportSheet.swift         — 3-layer AI context export (Profile/Standard/Full)
-│   ├── FullWindowView.swift        — Live / Insights / Timeline dashboard
-│   ├── OnboardingView.swift        — Permission setup with step-by-step guide
-│   └── Components/                 — DesignTokens, ActionBar, SearchBar, etc.
-└── MullMCP/
-    └── main.swift                  — Standalone MCP server binary
+│   ├── FullWindowView.swift        — Sidebar shell: Home / Calendar / Live / Chat + file tree
+│   ├── HomeTab.swift               — Portrait, projects, today's report, search
+│   ├── CalendarView.swift          — Week / month / year, plan vs. actual
+│   ├── ChatPanelView.swift         — Scoped chat grounded in your own records
+│   ├── InsightsTab.swift           — "What mull knows" (lives in Settings → Profile)
+│   ├── MenuBarPanel.swift          — Menu bar dropdown (search, today, actions)
+│   ├── OnboardingView.swift        — Permission setup + cold read
+│   ├── Settings/                   — General / AI / Data / Profile
+│   └── Components/                 — DesignTokens, MarkdownTextEditor, MarkdownView
+│
+MullMCP/                            — standalone MCP server binary target
+└── main.swift
+Tests/                              — XCTest suite
+project.yml                         — XcodeGen project definition
+```
+
+### The vault
+
+Everything mull knows lives in `~/mull/` as plain markdown — readable by you, by
+mull, and by any AI or tool (git, Obsidian, iCloud):
+
+```
+~/mull/
+├── me.md / now.md / full.md    — the 3-layer context system (auto-generated)
+├── me.pinned.md                — yours. mull never overwrites this file
+├── MEMORY.md                   — index of what mull has learned
+├── 00_identity/  01_now/  02_work/  03_projects/
+├── 04_career/    05_people/    06_knowledge/    09_inbox/
+└── daily/                      — one file per day
 ```
 
 ## 3-Layer Context System
@@ -157,12 +219,31 @@ mull generates three files with different token budgets:
 
 ### Option 1: MCP Server (recommended)
 
+Settings → AI can configure Claude Code, Claude Desktop, and Cursor for you. To
+wire it up by hand, build the MullMCP target in Xcode first, then:
+
 ```bash
-# Build the MullMCP target in Xcode first, then:
 claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
 ```
 
-AI can then call `get_user_context`, `search_history`, and `get_patterns` tools automatically.
+The server exposes 12 tools — read *and* write:
+
+| Tool | What it does |
+|------|-------------|
+| `get_user_context` | The 3-layer context (profile / standard / full) |
+| `whats_active_now` | What you are doing right now |
+| `search` | Ranked, now-anchored retrieval across your records |
+| `search_history` | Raw event search |
+| `get_relevant` | Facet-scoped selection for a given topic |
+| `get_projects` | Current projects and their state |
+| `get_knowledge` | Extracted decisions and their reasoning |
+| `calendar` | Planned (events) vs. actual (observed activity) |
+| `list_files` / `read_file` | Browse and read the vault |
+| `write_note` | Write a new note into the vault |
+| `curate` | Merge a block into an existing file — your edits are preserved |
+
+Writes go through the Curator, which merges at block level so an agent can only
+touch its own block. `me.pinned.md` is yours and is never overwritten.
 
 ### Option 2: CLAUDE.md reference
 
@@ -201,14 +282,31 @@ mull captures:
 
 | Signal | Method | Why |
 |--------|--------|-----|
-| Keystrokes | CGEvent tap (every key, 1s buffer) | What you typed — IME romaji included, AI judges |
+| Keystrokes | CGEvent tap (every key, 3s flush) | What you typed — IME romaji included, AI judges |
 | Clipboard | NSPasteboard polling (0.5s) | What you copied — always post-IME, high signal |
-| Window titles | Accessibility API (3s polling) | What files/pages are open |
+| Window titles | Accessibility API (5s polling) | What files/pages are open |
+| Window body | Accessibility API (30s polling) | The work itself, not just its title |
 | Browser URLs | AppleScript (Safari, Chrome, Arc, Brave, Edge) | Full URL context |
 | App switches | NSWorkspace notification | Time allocation per app |
 | Calendar | EventKit | Today's schedule + upcoming meetings |
+| Email | AppleScript, Mail.app (opt-in) | Subject + sender only — never the body |
 
-**Privacy:** All data stays on your Mac. No cloud. No telemetry by default. Database at `~/Library/Application Support/mull/mull.sqlite`.
+### Privacy
+
+All data stays on your Mac. There is no mull server, and no usage statistics are
+collected or transmitted — there isn't even a toggle for it.
+
+- **LLM is off by default.** Nothing is sent anywhere until you pick a provider.
+  Choose a cloud provider and mull talks directly to it with *your* API key —
+  no intermediary. Ollama keeps everything on-device.
+- Password fields are skipped automatically (`IsSecureEventInputEnabled`).
+- 1Password, Keychain Access, and similar apps are excluded by default, and mull
+  never records its own events.
+- Content classified as sensitive — API keys, card numbers, private keys,
+  credentials — is filtered before it can reach a cloud provider.
+- API keys are stored in the macOS Keychain, never in plaintext.
+- Database at `~/Library/Application Support/mull/mull.sqlite`. Settings → Data
+  can delete a time range or everything.
 
 ## Analytics (Rule-Based, No LLM)
 
@@ -219,14 +317,35 @@ mull detects behavioral patterns without any LLM:
 - **Work rhythm** — peak hours, busiest day of week
 - **Language mix** — Japanese / English / Code ratio
 - **Fact extraction** — infers role, tech stack, projects from patterns
+- **Time blocks** — groups events into blocks and infers what you mainly did
+- **Signal & mode** — classifies each moment by content kind, salience, and how
+  it was engaged with (produce / consume / decide / think / research / communicate)
+
+Everything above runs with no LLM configured. An LLM adds nightly synthesis and
+the report in your voice — it is never required for mull to work.
 
 ## Settings
 
-Three tabs:
+Four tabs:
 
-- **General** — mull schedule, output size limit, export destinations
-- **AI** — LLM provider (Ollama / Claude API / OpenAI API) + connection test
-- **Data** — Permission status, storage stats, retention policy, cleanup
+- **General** — mull schedule, launch at login, output size limit, export destinations
+- **AI** — LLM provider + connection test, and one-click MCP setup for Claude
+  Code / Claude Desktop / Cursor
+- **Data** — Permission status, data sources (email), storage stats, retention,
+  cleanup, privacy statement
+- **Profile** — What mull knows about you: portrait, fact tags, keywords,
+  analysis grid. Correct anything that's wrong; corrections are authoritative
+
+### LLM providers
+
+| Provider | On-device? | Notes |
+|----------|-----------|-------|
+| **Off** | — | The default. Rule-based only, nothing leaves your Mac |
+| Ollama | Yes | Local models |
+| OpenAI-compatible (local) | Yes | Any local server speaking the OpenAI API |
+| Gemini | No | Your API key, direct to Google |
+| Claude | No | Your API key, direct to Anthropic |
+| OpenAI | No | Your API key, direct to OpenAI |
 
 ## Origin
 
@@ -248,9 +367,11 @@ How it differs from conversation-based AI memory (ChatGPT Memory, Mem0):
 | Keystrokes | CGEvent tap (Quartz Event Services) |
 | Calendar | EventKit |
 | Browser | AppleScript |
+| Email | AppleScript (Mail.app) |
 | API Keys | macOS Keychain Services |
-| LLM | Ollama (local) / Anthropic API / OpenAI API |
+| LLM | Ollama (local) / Gemini / Anthropic API / OpenAI API |
 | AI Protocol | MCP (Model Context Protocol) via stdio |
+| Project generation | XcodeGen (`project.yml`) |
 
 ## License
 

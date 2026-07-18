@@ -45,6 +45,29 @@ enum Curator {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: - Shared headers for the multi-writer layers
+
+    // now.md and full.md are written by TWO passes (the 60s LiveContextGenerator and
+    // the nightly MullEngine), each owning its own block prefix. The header is a
+    // whole-file property, so both must agree on its wording — otherwise every pass
+    // would rewrite the header the other just wrote. Only the timestamp differs.
+
+    static func nowHeader(timestamp: String) -> String {
+        """
+        # now.md — what I'm working on
+        _Auto-updated \(timestamp). ~500 tokens. Include when task context helps._
+        _Live blocks (`now:`) refresh every 60s; nightly LLM blocks (`nightly:`) refresh once a day. Edit either — your edits are kept._
+        """
+    }
+
+    static func fullHeader(timestamp: String) -> String {
+        """
+        # full.md — complete context
+        _Auto-updated \(timestamp). Everything mull holds. Use when starting a big task._
+        _Live blocks (`full:`) refresh every 60s; nightly LLM blocks (`nightly:`) refresh once a day. Edit either — your edits are kept._
+        """
+    }
+
     // MARK: - Curate (chokepoint)
 
     /// Merge agent blocks into `relativePath`, preserving pinned/human content, and

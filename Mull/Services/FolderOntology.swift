@@ -28,9 +28,44 @@ enum FolderOntology {
         let purpose: String       // one-line description shown in the index header
         let sections: [String]    // template section headings → one agent block each
         let canonical: String?    // root file this folder mirrors, if any (e.g. "me.md")
+        let fills: FillSource     // how this folder gets its content — drives guidance
 
         var path: String { "\(number)_\(slug)" }
         var indexPath: String { "\(path)/index.md" }
+
+        /// One plain line for the index header: how this folder fills and what,
+        /// if anything, the user should DO. The fool-proofing — every folder
+        /// explains itself, so an empty one never reads as "broken / now what?".
+        var guidance: String {
+            switch fills {
+            case .automatic:
+                return "Fills automatically as mull watches you work — nothing to do."
+            case .nightlyAI:
+                return "Turn on AI in Settings to fill this automatically, or jot entries here yourself. mull works fully offline without it."
+            case .connectSource(let name):
+                return "Connect \(name) in Settings to fill this automatically, or add entries here yourself."
+            case .yourNotes:
+                return "No automatic source — just write here. What you add becomes context the AI uses."
+            }
+        }
+
+        /// Short placeholder shown inside an otherwise-empty section.
+        var emptyHint: String {
+            switch fills {
+            case .automatic:            return "_Nothing here yet — fills automatically as you work._"
+            case .nightlyAI:            return "_Nothing here yet — turn on AI in Settings, or add your own._"
+            case .connectSource(let n): return "_Nothing here yet — connect \(n) in Settings, or add your own._"
+            case .yourNotes:            return "_Write here freely._"
+            }
+        }
+    }
+
+    /// How a folder's content arrives — drives the self-explaining guidance.
+    enum FillSource {
+        case automatic               // derived from what mull already captures
+        case nightlyAI               // richer with an LLM on; offline = jot here
+        case connectSource(String)   // connect a source in Settings (e.g. "Gmail")
+        case yourNotes               // no automatic source — the user writes it
     }
 
     static let rawRoot = "_raw"
@@ -42,35 +77,35 @@ enum FolderOntology {
         Folder(number: "00", slug: "identity", title: "Identity",
                purpose: "Who you are — profile, skills, preferences, values.",
                sections: ["Summary", "Skills", "Preferences", "Values"],
-               canonical: "me.md"),
+               canonical: "me.md", fills: .automatic),
         Folder(number: "01", slug: "now", title: "Now",
                purpose: "Your current state — what you're focused on right now.",
                sections: ["Current focus", "This week", "Upcoming"],
-               canonical: "now.md"),
+               canonical: "now.md", fills: .automatic),
         Folder(number: "02", slug: "work", title: "Work",
                purpose: "Businesses and employers you work in or on.",
                sections: ["Organizations", "Responsibilities", "Status"],
-               canonical: nil),
+               canonical: nil, fills: .yourNotes),
         Folder(number: "03", slug: "projects", title: "Projects",
                purpose: "Active projects. Per-project briefings live alongside this index.",
                sections: ["Active projects", "Recently touched"],
-               canonical: nil),
+               canonical: nil, fills: .automatic),
         Folder(number: "04", slug: "career", title: "Career",
                purpose: "Your career arc — roles, achievements, goals.",
                sections: ["Roles", "Achievements", "Goals", "Resume material"],
-               canonical: nil),
+               canonical: nil, fills: .yourNotes),
         Folder(number: "05", slug: "people", title: "People",
                purpose: "Key relationships and the context behind them.",
                sections: ["Key people", "Context per person"],
-               canonical: nil),
+               canonical: nil, fills: .connectSource("Gmail")),
         Folder(number: "06", slug: "knowledge", title: "Knowledge",
                purpose: "Decisions, references, and things you've learned.",
                sections: ["Decisions", "References", "Learnings"],
-               canonical: "MEMORY.md"),
+               canonical: "MEMORY.md", fills: .nightlyAI),
         Folder(number: "09", slug: "inbox", title: "Inbox",
                purpose: "Freshly ingested data, unsorted, awaiting routing.",
                sections: ["Unsorted"],
-               canonical: nil),
+               canonical: nil, fills: .automatic),
     ]
 
     /// Folder a given raw connector's data is primarily routed into (Phase C uses
@@ -116,21 +151,26 @@ enum FolderOntology {
 
     /// Write/update a folder's index.md through the Curator. Section blocks are
     /// placeholders until synthesis (Phase C) fills them; user edits are protected.
-    private static func seedIndex(_ folder: Folder) {
+    /// The Curator header for a folder's index.md. Shared by `seedIndex` (the
+    /// empty template) and `FolderFiller` (the rule-based fill) so both produce
+    /// an identical header and only the section blocks differ.
+    static func indexHeader(for folder: Folder) -> String {
         var header = "# \(folder.number) \(folder.title)\n\n_\(folder.purpose)_"
+        // Always-visible, so the user knows what this is and what (if anything) to do.
+        header += "\n\n**How this fills** — \(folder.guidance)"
         if let canonical = folder.canonical {
             header += "\n\nCanonical file: [../\(canonical)](../\(canonical))"
         }
         header += "\n\n> mull keeps its own blocks below up to date. Edit anything else freely — it won't be overwritten."
+        return header
+    }
 
-        // "Awaiting synthesis" only makes sense if a source actually routes here.
-        // Folders with no connector (e.g. 02_work, 04_career) would otherwise sit
-        // on that placeholder forever; show an honest invite instead.
-        let hasSource = rawConnectors.contains {
-            $0 != "capture" && primaryDestination(forConnector: $0)?.number == folder.number
-        }
-        let placeholder = hasSource ? "_(awaiting synthesis)_"
-            : "_No connected source yet — add notes here, or connect one in Settings._"
+    private static func seedIndex(_ folder: Folder) {
+        let header = indexHeader(for: folder)
+
+        // Each empty section explains itself (folder.emptyHint) instead of the old
+        // jargon "(awaiting synthesis)" — a fresh, empty vault is never confusing.
+        let placeholder = folder.emptyHint
         let blocks = folder.sections.map { section in
             ContextBlock(
                 id: "section:\(ContextBlockFile.slug(section))",

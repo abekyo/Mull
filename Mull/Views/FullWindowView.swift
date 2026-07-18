@@ -27,10 +27,20 @@ struct FullWindowView: View {
     }
 
     @State private var selection: SidebarItem? = .home
+    @State private var searchPresented = false          // ⌘K focuses the toolbar search
+    @State private var calendarJumpDate: Date? = nil    // a search hit asked to open this day
     @State private var fileTree: [mullFileNode] = []
     @State private var editorContent: String = ""
     @State private var savedContent: String = ""   // baseline last loaded/saved (Round-trip ref)
     @State private var isDirty = false
+    // The file `editorContent` actually came from. `selection` is NOT a safe save
+    // target: .onChange(of: selection) fires *after* selection already points at the
+    // next file, so a save derived from it would write buffer A into file B's URL.
+    @State private var loadedFile: mullFile?
+    // Its modification date at load time — a save that finds a newer mtime knows the
+    // file was rewritten underneath us (MCP write_note, Obsidian) and refuses.
+    @State private var loadedModified: Date?
+    @State private var externalChange = false
     @State private var searchQuery = ""
     @State private var autoRefreshTimer: Timer?
     @State private var autosaveTimer: Timer?
@@ -58,11 +68,25 @@ struct FullWindowView: View {
         } detail: {
             detail
         }
-        .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search projects, files, keywords...")
+        .searchable(text: $searchQuery, isPresented: $searchPresented,
+                    placement: .toolbar, prompt: "Search projects, files, keywords...")
+        // Force the warm brand accent on native controls (buttons, pickers, selection):
+        // the user's macOS accent-colour setting otherwise overrides the asset with
+        // e.g. system blue, which clashes with the warm palette (DS rule: no raw colors).
+        .tint(DS.moon)
         .frame(minWidth: 760, minHeight: 560)
         .onAppear { refreshFileTree() }
         .sheet(isPresented: $showNewFile) { newFileSheet }
         .sheet(isPresented: $showNewFolder) { newFolderSheet }
+        // ⌘K — jump to Home and focus search from anywhere in the window.
+        .background {
+            Button("") {
+                selection = .home
+                searchPresented = true
+            }
+            .keyboardShortcut("k", modifiers: .command)
+            .hidden()
+        }
     }
 
     // MARK: - Sidebar
@@ -208,9 +232,9 @@ struct FullWindowView: View {
     }
 
     private var filesHeader: some View {
-        HStack {
+        HStack(spacing: DS.xs) {
             Text("Files")
-            Spacer()
+            Spacer(minLength: 0)
             Menu {
                 Button { startNew(.note) } label: { Label("New Note", systemImage: "doc.badge.plus") }
                 Button { startNew(.folder) } label: { Label("New Folder", systemImage: "folder.badge.plus") }
@@ -219,13 +243,16 @@ struct FullWindowView: View {
                 Button { exportVault() } label: { Label("Export Vault (.zip)…", systemImage: "square.and.arrow.up") }
                 Button { revealVault() } label: { Label("Reveal in Finder", systemImage: "folder") }
             } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 13))
+                // A quiet, header-scaled plus — thin, tobacco, with a comfortable
+                // square hit target so it sits flush with the "Files" baseline.
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(DS.moon)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .fixedSize()
             .help("New · import · export · reveal")
         }
     }
@@ -294,11 +321,14 @@ struct FullWindowView: View {
     private var detail: some View {
         switch selection {
         case .home:
-            HomeTab(searchQuery: $searchQuery)
+            HomeTab(searchQuery: $searchQuery, onOpenDay: { date in
+                calendarJumpDate = date
+                selection = .calendar
+            })
                 .environmentObject(appState)
 
         case .calendar:
-            CalendarWeekView()
+            CalendarWeekView(jumpDate: $calendarJumpDate)
                 .environmentObject(appState)
 
         case .live:
@@ -342,7 +372,7 @@ struct FullWindowView: View {
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, DS.xs)
                         .padding(.vertical, 1)
-                        .background(Color.accentColor.opacity(0.08))
+                        .background(DS.moon.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
 
@@ -353,13 +383,21 @@ struct FullWindowView: View {
                     .foregroundStyle(.quaternary)
 
                 if !file.isAutoGenerated {
-                    if isDirty {
+                    if externalChange {
+                        // Someone else (MCP, Obsidian, Finder) rewrote this file while
+                        // it was open. Autosave has stopped writing so their text is
+                        // safe; an explicit Save is the user saying "mine wins".
+                        Text("Changed on disk")
+                            .font(DS.captionFont)
+                            .foregroundStyle(DS.error)
+                            .help("This file changed outside mull. Save to overwrite it with your version.")
+                    } else if isDirty {
                         Text("Edited")
                             .font(DS.captionFont)
                             .foregroundStyle(DS.paused)
                     }
 
-                    Button("Save") { saveCurrentFile() }
+                    Button("Save") { saveFile(file, force: true) }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .disabled(!isDirty)
@@ -393,13 +431,15 @@ struct FullWindowView: View {
                         .padding(.bottom, 160)
                 }
             } else {
-                // Editable: plain text (原則6 — bytes are never normalised), but with
-                // the reading surface's typography and a capped measure for comfort.
-                TextEditor(text: $editorContent)
-                    .font(DS.readFont)
-                    .foregroundStyle(DS.ink)
-                    .scrollContentBackground(.hidden)
-                    .lineSpacing(DS.readLineSpacing)
+                // Editable: Bear-style live decoration over plain markdown. The buffer on
+                // disk stays byte-identical (原則6); only its on-screen appearance is
+                // enriched. Typography/colours live inside the NSTextView, so the measure
+                // cap and margins are all that's left here.
+                MarkdownTextEditor(text: $editorContent)
+                    // Fresh editor per file: switching notes rebuilds the NSTextView, so
+                    // content swaps can never fight a live editing session (and the undo
+                    // stack no longer bleeds across files).
+                    .id(file.path)
                     .frame(maxWidth: DS.readMeasure)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal, DS.readMargin)
@@ -413,7 +453,7 @@ struct FullWindowView: View {
             startAutoRefreshIfNeeded(file)
         }
         .onDisappear {
-            if isDirty { saveCurrentFile() }   // never lose an edit on close
+            flushPendingEdit()   // never lose an edit on close
             stopAutoRefresh()
         }
         .onChange(of: selection) { _, newVal in
@@ -421,9 +461,27 @@ struct FullWindowView: View {
                 loadFile(newFile)
                 startAutoRefreshIfNeeded(newFile)
             } else {
+                // Leaving the editor for Home/Calendar/…: .onDisappear is not
+                // guaranteed to run before the buffer is torn down, so flush here too.
+                flushPendingEdit()
                 stopAutoRefresh()
             }
         }
+        // Autosave is a 0.8s debounce and .onDisappear does not run on quit, so ⌘Q
+        // within that window used to drop the last keystrokes. Terminate and window
+        // close are the two remaining exits — flush on both.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            flushPendingEdit()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+            flushPendingEdit()
+        }
+    }
+
+    /// Write the buffer to the file it was loaded from, if it has unsaved changes.
+    private func flushPendingEdit() {
+        guard isDirty, let file = loadedFile else { return }
+        saveFile(file)
     }
 
     private func startAutoRefreshIfNeeded(_ file: mullFile) {
@@ -446,10 +504,20 @@ struct FullWindowView: View {
     // MARK: - File Operations
 
     private func loadFile(_ file: mullFile) {
-        if isDirty { saveCurrentFile() }
+        // Flush the OUTGOING file explicitly. By the time .onChange(of: selection)
+        // calls us, `selection` is already the new file — deriving the save target
+        // from it wrote the previous buffer over the newly opened note.
+        if isDirty, let previous = loadedFile, previous != file { saveFile(previous) }
         editorContent = displayContent(of: file)
         savedContent = editorContent   // baseline: a freshly loaded file is never dirty
+        loadedFile = file
+        loadedModified = modificationDate(of: file.url)
+        externalChange = false
         isDirty = false
+    }
+
+    private func modificationDate(of url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
     /// The editor changed. Dirty is measured against the loaded baseline (so the
@@ -458,9 +526,11 @@ struct FullWindowView: View {
     private func editorChanged() {
         isDirty = (editorContent != savedContent)
         autosaveTimer?.invalidate()
-        guard isDirty else { return }
+        guard isDirty, let file = loadedFile else { return }
         autosaveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
-            saveCurrentFile()
+            // Captured, not re-derived: the timer must write to the file this buffer
+            // belongs to even if the user has since selected another note.
+            saveFile(file)
         }
     }
 
@@ -472,10 +542,12 @@ struct FullWindowView: View {
         return file.isAutoGenerated ? ContextBlockFile.stripMarkers(raw) : raw
     }
 
-    private func saveCurrentFile() {
+    /// Write the buffer to `file` — always the file the buffer was loaded from,
+    /// never whatever is selected right now. `force` is the user pressing Save,
+    /// which is allowed to win a conflict with an outside writer.
+    private func saveFile(_ file: mullFile, force: Bool = false) {
         autosaveTimer?.invalidate()
-        guard case .file(let file) = selection else { return }
-        // 原則6 (Round-trip safety) — two guards:
+        // 原則6 (Round-trip safety) — three guards:
         // 1. Auto-generated files carry Curator markers we STRIP for display; writing
         //    the stripped buffer back would destroy them. They're read-only. Refuse.
         guard !file.isAutoGenerated else { isDirty = false; return }
@@ -483,10 +555,30 @@ struct FullWindowView: View {
         //    the file at all — no mtime churn, no chance of altering bytes the user
         //    never edited. A load→save with no change is a true no-op.
         let onDisk = try? String(contentsOf: file.url, encoding: .utf8)
-        guard onDisk != editorContent else { savedContent = editorContent; isDirty = false; return }
+        guard onDisk != editorContent else {
+            savedContent = editorContent
+            loadedModified = modificationDate(of: file.url)
+            externalChange = false
+            isDirty = false
+            return
+        }
+        // 3. Clobber guard: the editor deliberately refuses to sync an external write
+        //    into a first-responder text view (IME safety), so the buffer can be stale.
+        //    If the file's mtime moved since we loaded it, someone else (MCP write_note,
+        //    Obsidian) owns the newer text — an automatic save must not erase it. The
+        //    user's edit stays in the buffer, and an explicit Save can still override.
+        if !force, file == loadedFile, let loadedAt = loadedModified,
+           let current = modificationDate(of: file.url), current > loadedAt.addingTimeInterval(0.5) {
+            externalChange = true
+            return
+        }
         try? editorContent.write(to: file.url, atomically: true, encoding: .utf8)
         savedContent = editorContent
-        isDirty = false
+        if file == loadedFile {
+            loadedModified = modificationDate(of: file.url)
+            externalChange = false
+            isDirty = false
+        }
     }
 
     // MARK: - New File Sheet
@@ -712,12 +804,12 @@ struct FullWindowView: View {
 
     private func fileAccent(_ file: mullFile) -> Color {
         switch file.name {
-        case "me.md": return .blue
+        case "me.md": return DS.slate
         case Curator.pinnedFileName: return DS.moon
         case "now.md": return DS.recording
         case "MEMORY.md": return DS.paused
         default:
-            if file.isAutoGenerated { return Color.accentColor.opacity(0.5) }
+            if file.isAutoGenerated { return DS.moon.opacity(0.5) }
             return .secondary.opacity(0.5)
         }
     }
@@ -772,15 +864,17 @@ struct LiveTab: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(liveEvents.enumerated()), id: \.offset) { index, event in
+                        // Keyed by row id, not by index: the list is a sliding window,
+                        // so index N is a different event every refresh — hover and
+                        // text selection used to jump to whatever slid into that slot.
+                        ForEach(liveEvents, id: \.id) { event in
                             LiveEventRow(event: event)
-                                .id(index)
                         }
                     }
                     .padding(.vertical, DS.sm)
                 }
                 .onChange(of: liveEvents.count) { _, _ in
-                    if let last = liveEvents.indices.last {
+                    if let last = liveEvents.last?.id {
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(last, anchor: .bottom)
                         }
@@ -789,20 +883,32 @@ struct LiveTab: View {
             }
         }
         .onAppear { startRefresh() }
-        .onDisappear { refreshTimer?.invalidate() }
+        .onDisappear { stopRefresh() }
     }
 
     private func startRefresh() {
+        // .onAppear can fire again without an intervening .onDisappear (tab swaps,
+        // window re-shows). Without this the old timer stayed alive and kept polling
+        // the database forever with nothing to render into.
+        stopRefresh()
         loadEvents()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
             loadEvents()
         }
     }
 
+    private func stopRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+
+    /// The tail of today's stream. Bounded in SQL — this runs every 1.5s, and
+    /// fetching every event since midnight (text and all) just to keep the last
+    /// 150 got heavier with every hour of the day.
     private func loadEvents() {
         let start = Calendar.current.startOfDay(for: Date())
-        let all = appState.database.fetchEvents(from: start, to: Date())
-        liveEvents = Array(all.suffix(150))
+        let newest = appState.database.fetchCandidates(query: "", since: start, useFTS: false, limit: 150)
+        liveEvents = newest.reversed()   // fetched newest-first; the stream reads oldest→newest
     }
 
     private func legendDot(color: Color, label: String) -> some View {
@@ -846,14 +952,21 @@ struct LiveEventRow: View {
         }
         .padding(.horizontal, DS.xl)
         .padding(.vertical, 2)
-        .background(isHovered ? Color.primary.opacity(0.03) : Color.clear)
+        .background(isHovered ? DS.surfaceHi : Color.clear)
         .onHover { isHovered = $0 }
     }
 
-    private var timeStr: String {
+    /// One formatter for the whole stream. Building a DateFormatter is expensive and
+    /// this ran per row, per render, 1.5s apart, over 150 rows.
+    private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
-        return f.string(from: event.timestamp)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private var timeStr: String {
+        Self.timeFormatter.string(from: event.timestamp)
     }
 
     private var typeColor: Color {
@@ -861,6 +974,7 @@ struct LiveEventRow: View {
         case .keystroke: DS.eventKeystroke
         case .clipboard: DS.eventClipboard
         case .screenText: DS.eventWindow
+        case .windowBody: DS.taupe
         case .appSwitch: DS.eventApp
         case .audio: DS.eventAudio
         }

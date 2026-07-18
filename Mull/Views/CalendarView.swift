@@ -12,6 +12,8 @@ import SwiftUI
 ///   - Auto-scrolls to current time on appear
 struct CalendarWeekView: View {
     @EnvironmentObject var appState: AppState
+    /// When set by the parent (a search hit click), the view jumps to that day in Day mode.
+    var jumpDate: Binding<Date?> = .constant(nil)
     @State private var weekOffset: Int = 0
     @State private var weekBlocks: [Date: [TimeBlock]] = [:]
     @State private var weekEvents: [Date: [CalendarEvent]] = [:]
@@ -24,6 +26,20 @@ struct CalendarWeekView: View {
     @State private var monthData: [Date: (duration: TimeInterval, label: String)] = [:]
     @State private var yearOffset: Int = 0
     @State private var yearCounts: [Date: Int] = [:]
+    /// Busiest day of the loaded year — hoisted out of `activeFraction`, which is
+    /// called once per cell (365+ times) and used to re-scan every value each time.
+    @State private var yearMax: Int = 1
+
+    // Loading lives off the main thread: a week is 7 block analyses + 7 EventKit
+    // round-trips, a month is up to 42, and a year is a full-range SQL aggregate.
+    // `loadToken` invalidates a load whose result arrived after the user moved on.
+    @State private var isLoading = false
+    @State private var loadToken = 0
+
+    /// The clock behind the "now" line. Read from state, not `Date()` during body —
+    /// body only re-runs on state changes, so the line used to freeze mid-morning.
+    @State private var now = Date()
+    private let clock = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private let hourStart = 0
     private let hourEnd = 24
@@ -34,13 +50,12 @@ struct CalendarWeekView: View {
         VStack(spacing: 0) {
             modeBar
             Divider()
-            switch mode {
-            case .day:   dayContent
-            case .week:  weekContent
-            case .month: monthContent
-            case .year:  yearContent
-            }
+            modeContent
+                .overlay(alignment: .top) {
+                    if isLoading { loadingPill }
+                }
         }
+        .onReceive(clock) { now = $0 }
         .onChange(of: weekOffset) { _, _ in loadWeek() }
         .onChange(of: dayOffset) { _, _ in loadDay() }
         .onChange(of: monthOffset) { _, _ in loadMonth() }
@@ -56,6 +71,45 @@ struct CalendarWeekView: View {
         .popover(item: $popoverBlock) { block in
             blockDetail(block)
         }
+        .onAppear { applyJump() }
+        .onChange(of: jumpDate.wrappedValue) { _, _ in applyJump() }
+    }
+
+    @ViewBuilder
+    private var modeContent: some View {
+        switch mode {
+        case .day:   dayContent
+        case .week:  weekContent
+        case .month: monthContent
+        case .year:  yearContent
+        }
+    }
+
+    /// A quiet note that the grid is still filling — the analysis now runs off the
+    /// main thread, so the view is live (scrollable) while this is up.
+    private var loadingPill: some View {
+        HStack(spacing: DS.sm) {
+            ProgressView().controlSize(.small)
+            Text("Reading your activity…")
+                .font(DS.captionFont)
+                .foregroundStyle(DS.inkDim)
+        }
+        .padding(.horizontal, DS.md)
+        .padding(.vertical, DS.xs)
+        .background(Capsule().fill(DS.surface))
+        .overlay(Capsule().strokeBorder(DS.hairline, lineWidth: 0.75))
+        .padding(.top, DS.sm)
+        .transition(.opacity)
+    }
+
+    /// Honour a parent's request to open a specific day (from a search hit).
+    private func applyJump() {
+        guard let target = jumpDate.wrappedValue else { return }
+        let cal = Calendar.current
+        dayOffset = cal.dateComponents([.day], from: cal.startOfDay(for: Date()),
+                                       to: cal.startOfDay(for: target)).day ?? 0
+        mode = .day
+        jumpDate.wrappedValue = nil
     }
 
     /// Day | Week | Month | Year segmented switch.
@@ -219,11 +273,22 @@ struct CalendarWeekView: View {
     }
 
     private func loadDay() {
-        let engine = TimeBlockEngine(database: appState.database)
         let day = selectedDay
         let key = Calendar.current.startOfDay(for: day)
-        weekBlocks[key] = engine.generateBlocks(for: day)
-        weekEvents[key] = appState.calendar.events(for: day)
+        let database = appState.database
+        let calendarService = appState.calendar
+        let token = beginLoad()
+
+        Task.detached(priority: .userInitiated) {
+            let engine = TimeBlockEngine(database: database)
+            let blocks = engine.generateBlocks(for: day)
+            let events = calendarService.events(for: day)
+            await MainActor.run {
+                guard finishLoad(token) else { return }
+                weekBlocks[key] = blocks
+                weekEvents[key] = events
+            }
+        }
     }
 
     private static func fullDayLabel(_ date: Date) -> String {
@@ -289,7 +354,7 @@ struct CalendarWeekView: View {
                 VStack(spacing: 2) {
                     Text(dayName(date))
                         .font(DS.miniFont)
-                        .foregroundStyle(isToday ? Color.accentColor : .secondary)
+                        .foregroundStyle(isToday ? DS.moon : .secondary)
 
                     // Apple-style: today's number in a blue circle
                     if isToday {
@@ -297,7 +362,7 @@ struct CalendarWeekView: View {
                             .font(DS.smallMedium)
                             .foregroundStyle(.white)
                             .frame(width: 24, height: 24)
-                            .background(Circle().fill(Color.accentColor))
+                            .background(Circle().fill(DS.moon))
                     } else {
                         Text(dayNumber(date))
                             .font(DS.smallFont)
@@ -347,7 +412,7 @@ struct CalendarWeekView: View {
             // Background: today gets a subtle tint
             if isToday {
                 Rectangle()
-                    .fill(Color.accentColor.opacity(0.03))
+                    .fill(DS.moon.opacity(0.03))
             }
 
             // Grid lines — thin, Apple-style
@@ -357,7 +422,7 @@ struct CalendarWeekView: View {
                         .frame(height: hourHeight)
                         .overlay(alignment: .top) {
                             Rectangle()
-                                .fill(Color.primary.opacity(0.08))
+                                .fill(DS.hairline)
                                 .frame(height: 0.5)
                         }
                 }
@@ -455,7 +520,15 @@ struct CalendarWeekView: View {
                             .lineLimit(1)
                     }
 
-                    if height > 48 {
+                    // Multitasking blocks own up to the apps they wove through.
+                    if height > 44, !block.secondaryApps.isEmpty {
+                        Text("+ " + block.secondaryApps.prefix(2).joined(separator: ", "))
+                            .font(DS.miniFont)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+
+                    if height > 60 {
                         Text(block.durationFormatted)
                             .font(DS.miniFont)
                             .foregroundStyle(.tertiary)
@@ -482,8 +555,10 @@ struct CalendarWeekView: View {
     // MARK: - Now Indicator (red line + red dot, Apple-style)
 
     private var nowIndicator: some View {
-        let hour = Calendar.current.component(.hour, from: Date())
-        let minute = Calendar.current.component(.minute, from: Date())
+        // `now` is ticked by the view's clock; reading Date() here would pin the line
+        // to whenever the grid last happened to re-render.
+        let hour = Calendar.current.component(.hour, from: now)
+        let minute = Calendar.current.component(.minute, from: now)
         let y = CGFloat(hour - hourStart) * hourHeight + CGFloat(minute) / 60.0 * hourHeight
 
         return GeometryReader { geo in
@@ -531,6 +606,21 @@ struct CalendarWeekView: View {
             }
             .foregroundStyle(.secondary)
 
+            // Which other apps this session wove through, with their dots.
+            if !block.secondaryApps.isEmpty {
+                HStack(spacing: DS.xs) {
+                    Image(systemName: "square.on.square")
+                        .font(DS.miniFont)
+                        .foregroundStyle(.tertiary)
+                    ForEach(block.secondaryApps.prefix(4), id: \.self) { name in
+                        HStack(spacing: 3) {
+                            Circle().fill(DS.appColor(name)).frame(width: 5, height: 5)
+                            Text(name).font(DS.captionFont).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
             if let title = block.topWindowTitle {
                 HStack(spacing: DS.xs) {
                     Image(systemName: "doc.text")
@@ -562,21 +652,48 @@ struct CalendarWeekView: View {
 
     // MARK: - Data Loading
 
+    /// A week is 7 full day analyses plus 7 blocking EventKit fetches. Doing that on
+    /// the main thread froze the window on every arrow-key week change; it now runs
+    /// detached and publishes once. The analysis itself is unchanged.
     private func loadWeek() {
         let (monday, _) = weekRange
-        let engine = TimeBlockEngine(database: appState.database)
-        var blockResult: [Date: [TimeBlock]] = [:]
-        var eventResult: [Date: [CalendarEvent]] = [:]
+        let database = appState.database
+        let calendarService = appState.calendar
+        let token = beginLoad()
 
-        for offset in 0..<7 {
-            guard let date = Calendar.current.date(byAdding: .day, value: offset, to: monday) else { continue }
-            let dayKey = Calendar.current.startOfDay(for: date)
-            blockResult[dayKey] = engine.generateBlocks(for: date)
-            eventResult[dayKey] = appState.calendar.events(for: date)
+        Task.detached(priority: .userInitiated) {
+            let engine = TimeBlockEngine(database: database)
+            var blockResult: [Date: [TimeBlock]] = [:]
+            var eventResult: [Date: [CalendarEvent]] = [:]
+
+            for offset in 0..<7 {
+                guard let date = Calendar.current.date(byAdding: .day, value: offset, to: monday) else { continue }
+                let dayKey = Calendar.current.startOfDay(for: date)
+                blockResult[dayKey] = engine.generateBlocks(for: date)
+                eventResult[dayKey] = calendarService.events(for: date)
+            }
+
+            await MainActor.run {
+                guard finishLoad(token) else { return }
+                weekBlocks = blockResult
+                weekEvents = eventResult
+            }
         }
+    }
 
-        weekBlocks = blockResult
-        weekEvents = eventResult
+    /// Claim a load slot. A newer load supersedes an older one, so a slow week that
+    /// lands after the user already paged elsewhere is dropped instead of flickering in.
+    private func beginLoad() -> Int {
+        loadToken += 1
+        isLoading = true
+        return loadToken
+    }
+
+    /// True when `token` is still the newest load (and the spinner should come down).
+    private func finishLoad(_ token: Int) -> Bool {
+        guard loadToken == token else { return false }
+        isLoading = false
+        return true
     }
 
     // MARK: - Helpers
@@ -746,21 +863,32 @@ extension CalendarWeekView {
         return (0..<42).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
     }
 
+    /// Up to 42 day analyses — the heaviest load in the calendar. Detached for the
+    /// same reason as the week; the per-day derivation below is untouched.
     func loadMonth() {
-        let engine = TimeBlockEngine(database: appState.database)
-        let cal = Calendar.current
-        var result: [Date: (duration: TimeInterval, label: String)] = [:]
-        for date in monthGridDays {
-            // Don't compute the future.
-            if cal.startOfDay(for: date) > cal.startOfDay(for: Date()) { continue }
-            let blocks = engine.generateBlocks(for: date)
-            guard !blocks.isEmpty else { continue }
-            let total = blocks.reduce(0.0) { $0 + $1.duration }
-            let main = blocks.max(by: { $0.duration < $1.duration })
-            let label = (main?.label.isEmpty == false ? main?.label : main?.app) ?? ""
-            result[cal.startOfDay(for: date)] = (total, label)
+        let database = appState.database
+        let days = monthGridDays
+        let token = beginLoad()
+
+        Task.detached(priority: .userInitiated) {
+            let engine = TimeBlockEngine(database: database)
+            let cal = Calendar.current
+            var result: [Date: (duration: TimeInterval, label: String)] = [:]
+            for date in days {
+                // Don't compute the future.
+                if cal.startOfDay(for: date) > cal.startOfDay(for: Date()) { continue }
+                let blocks = engine.generateBlocks(for: date)
+                guard !blocks.isEmpty else { continue }
+                let total = blocks.reduce(0.0) { $0 + $1.duration }
+                let main = blocks.max(by: { $0.duration < $1.duration })
+                let label = (main?.label.isEmpty == false ? main?.label : main?.app) ?? ""
+                result[cal.startOfDay(for: date)] = (total, label)
+            }
+            await MainActor.run {
+                guard finishLoad(token) else { return }
+                monthData = result
+            }
         }
-        monthData = result
     }
 
     private func jumpToWeek(of date: Date) {
@@ -794,11 +922,13 @@ extension CalendarWeekView {
             yearHeader
             Divider()
             ScrollView {
-                yearHeatmap
-                    .padding(DS.lg)
-                    .onAppear { loadYear() }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: DS.xl)],
+                          alignment: .leading, spacing: DS.xl) {
+                    ForEach(yearMonths, id: \.self) { miniMonth($0) }
+                }
+                .padding(DS.lg)
+                .onAppear { loadYear() }
             }
-            Spacer(minLength: 0)
         }
     }
 
@@ -822,46 +952,61 @@ extension CalendarWeekView {
         .padding(.vertical, DS.sm)
     }
 
-    /// GitHub-style heatmap: columns = weeks, rows = weekday, intensity = activity.
-    private var yearHeatmap: some View {
-        let maxCount = max(yearCounts.values.max() ?? 1, 1)
-        let rows = Array(repeating: GridItem(.fixed(13), spacing: 3), count: 7)
-        return VStack(alignment: .leading, spacing: DS.sm) {
-            LazyHGrid(rows: rows, spacing: 3) {
-                ForEach(yearGridDays, id: \.self) { date in
-                    yearCell(date, maxCount: maxCount)
+    /// One mini-month: title, Monday-first weekday initials, then the day grid. The
+    /// familiar year-at-a-glance (Apple Calendar風), not a contribution heatmap.
+    private func miniMonth(_ monthStart: Date) -> some View {
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 2), count: 7)
+        return VStack(alignment: .leading, spacing: DS.xs) {
+            Button { jumpToMonth(monthStart) } label: {
+                Text(monthTitle(monthStart))
+                    .font(DS.bodyMedium)
+                    .foregroundStyle(DS.moon)
+            }
+            .buttonStyle(.plain)
+            .help("Open \(monthTitle(monthStart)) in Month view")
+            LazyVGrid(columns: cols, spacing: 2) {
+                ForEach(Array(weekdayHeaders.enumerated()), id: \.offset) { _, s in
+                    Text(s).font(DS.tinyFont).foregroundStyle(DS.inkFaint)
+                        .frame(maxWidth: .infinity)
                 }
             }
-            // Legend
-            HStack(spacing: 4) {
-                Text("less").font(DS.tinyFont).foregroundStyle(DS.inkFaint)
-                ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { f in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(heatColor(fraction: f))
-                        .frame(width: 11, height: 11)
+            LazyVGrid(columns: cols, spacing: 2) {
+                ForEach(Array(monthDays(monthStart).enumerated()), id: \.offset) { _, day in
+                    miniDayCell(day)
                 }
-                Text("more").font(DS.tinyFont).foregroundStyle(DS.inkFaint)
             }
         }
     }
 
-    private func yearCell(_ date: Date, maxCount: Int) -> some View {
-        let cal = Calendar.current
-        let inYear = cal.component(.year, from: date) == cal.component(.year, from: displayedYear)
-        let isFuture = cal.startOfDay(for: date) > cal.startOfDay(for: Date())
-        let count = yearCounts[cal.startOfDay(for: date)] ?? 0
-        let fraction = count == 0 ? 0 : 0.15 + 0.85 * (Double(count) / Double(maxCount))
-        return RoundedRectangle(cornerRadius: 2)
-            .fill(isFuture || !inYear ? Color.clear : heatColor(fraction: fraction))
-            .frame(width: 13, height: 13)
-            .overlay(RoundedRectangle(cornerRadius: 2)
-                .strokeBorder(DS.hairline, lineWidth: inYear && !isFuture ? 0.5 : 0))
-            .help(inYear && !isFuture ? "\(Self.shortDate(date)): \(count) events" : "")
-            .onTapGesture { if inYear && !isFuture { jumpToDay(date) } }
+    @ViewBuilder
+    private func miniDayCell(_ day: Date?) -> some View {
+        if let day {
+            let cal = Calendar.current
+            let isToday = cal.isDateInToday(day)
+            let isFuture = cal.startOfDay(for: day) > cal.startOfDay(for: Date())
+            let count = yearCounts[cal.startOfDay(for: day)] ?? 0
+            let active = count > 0 && !isFuture
+            Text("\(cal.component(.day, from: day))")
+                .font(DS.tinyFont)
+                .foregroundStyle(isToday ? DS.canvas : (isFuture ? DS.inkFaint : DS.ink))
+                .frame(maxWidth: .infinity, minHeight: 19)
+                .background(
+                    Circle()
+                        .fill(isToday ? DS.moon
+                              : (active ? DS.moon.opacity(0.12 + 0.45 * activeFraction(count)) : Color.clear))
+                        .frame(width: 19, height: 19)
+                )
+                .contentShape(Rectangle())
+                .help(isFuture ? "" : "\(Self.shortDate(day)): \(count) events")
+                .onTapGesture { if !isFuture { jumpToDay(day) } }
+        } else {
+            Color.clear.frame(height: 19)
+        }
     }
 
-    private func heatColor(fraction: Double) -> Color {
-        fraction <= 0 ? DS.surfaceHi : DS.moon.opacity(0.15 + 0.75 * fraction)
+    /// Activity intensity 0–1 of a day's count relative to the busiest day this year.
+    private func activeFraction(_ count: Int) -> Double {
+        min(1.0, Double(count) / Double(max(yearMax, 1)))
     }
 
     var displayedYear: Date {
@@ -875,33 +1020,69 @@ extension CalendarWeekView {
         return f.string(from: displayedYear)
     }
 
-    /// Days from the Monday on/before Jan 1 through Dec 31 of the displayed year.
-    private var yearGridDays: [Date] {
+    /// First-of-month for each of the 12 months in the displayed year.
+    private var yearMonths: [Date] {
         let cal = Calendar.current
-        let jan1 = displayedYear
-        let weekday = cal.component(.weekday, from: jan1)
-        let daysFromMonday = (weekday + 5) % 7
-        guard let start = cal.date(byAdding: .day, value: -daysFromMonday, to: jan1),
-              let dec31 = cal.date(byAdding: DateComponents(year: 1, day: -1), to: jan1) else { return [] }
-        var days: [Date] = []
-        var d = start
-        while d <= dec31 {
-            days.append(d)
-            guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
-            d = next
-        }
-        return days
+        let year = cal.component(.year, from: displayedYear)
+        return (1...12).compactMap { cal.date(from: DateComponents(year: year, month: $0, day: 1)) }
     }
 
+    /// Day cells for a month: leading blanks from the system's first weekday, each day,
+    /// then trailing blanks to a fixed 6 rows (42 cells) so every month is the same height
+    /// and adjacent months line up — as Apple's year view does.
+    private func monthDays(_ monthStart: Date) -> [Date?] {
+        let cal = Calendar.current
+        let weekday = cal.component(.weekday, from: monthStart)
+        let lead = (weekday - cal.firstWeekday + 7) % 7
+        let count = cal.range(of: .day, in: .month, for: monthStart)?.count ?? 30
+        var cells: [Date?] = Array(repeating: nil, count: lead)
+        for d in 0..<count { cells.append(cal.date(byAdding: .day, value: d, to: monthStart)) }
+        while cells.count < 42 { cells.append(nil) }   // 6 weeks, fixed height
+        return cells
+    }
+
+    /// Localized weekday initials, ordered from the system's first weekday (日曜/月曜 設定を尊重).
+    private var weekdayHeaders: [String] {
+        let cal = Calendar.current
+        let s = cal.veryShortStandaloneWeekdaySymbols          // index 0 = Sunday
+        return (0..<7).map { s[(cal.firstWeekday - 1 + $0) % 7] }
+    }
+
+    private func monthTitle(_ monthStart: Date) -> String {
+        let cal = Calendar.current
+        let idx = cal.component(.month, from: monthStart) - 1
+        let symbols = cal.standaloneMonthSymbols
+        return (idx >= 0 && idx < symbols.count) ? symbols[idx] : ""
+    }
+
+    /// The heat grid needs one number per day, not the rows behind it. This used to
+    /// fetch every event of the year (≈1.5M rows, text and all) on the main thread
+    /// purely to bucket them by day — SQLite does the GROUP BY now, off-thread.
     func loadYear() {
         let cal = Calendar.current
         let start = displayedYear
         let end = min(cal.date(byAdding: .year, value: 1, to: start) ?? start, Date())
-        guard end > start else { yearCounts = [:]; return }
-        let events = appState.database.fetchEvents(from: start, to: end)
-        var counts: [Date: Int] = [:]
-        for e in events { counts[cal.startOfDay(for: e.timestamp), default: 0] += 1 }
-        yearCounts = counts
+        guard end > start else { yearCounts = [:]; yearMax = 1; return }
+        let database = appState.database
+        let token = beginLoad()
+
+        Task.detached(priority: .userInitiated) {
+            let counts = database.dailyEventCounts(from: start, to: end)
+            let busiest = max(counts.values.max() ?? 1, 1)
+            await MainActor.run {
+                guard finishLoad(token) else { return }
+                yearCounts = counts
+                yearMax = busiest
+            }
+        }
+    }
+
+    /// Drill down from the year view into a specific month (Apple's year→month gesture).
+    private func jumpToMonth(_ monthStart: Date) {
+        let cal = Calendar.current
+        let base = cal.date(from: cal.dateComponents([.year, .month], from: Date())) ?? Date()
+        monthOffset = cal.dateComponents([.month], from: base, to: monthStart).month ?? 0
+        mode = .month
     }
 
     private func jumpToDay(_ date: Date) {
@@ -917,8 +1098,9 @@ extension CalendarWeekView {
     }
 }
 
-// Make TimeBlock work with popover
-extension TimeBlock: @retroactive Hashable {
+// Make TimeBlock work with popover. TimeBlock is declared in this module, so the
+// conformance is not retroactive (and marking it so is an error under Swift 6).
+extension TimeBlock: Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }

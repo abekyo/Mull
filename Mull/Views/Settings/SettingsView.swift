@@ -1,11 +1,12 @@
 import SwiftUI
 import ServiceManagement
 
-/// Settings window — 3 tabs, no redundancy.
+/// Settings window — 4 tabs, no redundancy.
 ///
 ///   General:  Schedule, startup, output size, export destinations
-///   AI:       LLM provider, API keys, connection test
-///   Data:     Permissions, storage, retention, cleanup
+///   AI:       LLM provider, API keys, connection test, MCP client setup
+///   Data:     Permissions, data sources, storage, retention, cleanup
+///   Profile:  What mull knows about you (Insights) — correctable
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
 
@@ -28,6 +29,7 @@ struct SettingsView: View {
                 .tabItem { Label("Profile", systemImage: "person.text.rectangle") }
         }
         .frame(width: 520, height: 520)
+        .tint(DS.moon)   // keep native controls on the warm brand accent
     }
 }
 
@@ -42,6 +44,7 @@ struct GeneralTab: View {
     @AppStorage("exportPath") private var exportPath = "~/mull"
     @AppStorage("obsidianVault") private var obsidianVault = ""
     @AppStorage("autoExport") private var autoExport = false
+    @State private var profileResetDone = false
 
     private let charOptions = [
         (5000, "5K chars — Minimal"),
@@ -117,6 +120,31 @@ struct GeneralTab: View {
                         .font(DS.captionFont)
                 }
             }
+
+            Section("Profile") {
+                Text("The questions you answered at setup. They seed me.pinned.md (placed atop me.md, never overwritten). Capture refines the rest.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Redo profile questions") {
+                        (NSApp.delegate as? AppDelegate)?.showOnboarding(startStep: .profile)
+                    }
+                    Spacer()
+                    Button("Reset answers", role: .destructive) {
+                        OnboardingProfile.reset()
+                        appState.regenerateContextNow()
+                        profileResetDone = true
+                    }
+                    .disabled(!OnboardingProfile.hasAnswers)
+                }
+
+                if profileResetDone {
+                    Label("Profile answers cleared from me.pinned.md", systemImage: "checkmark.circle.fill")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.recording)
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
@@ -135,6 +163,8 @@ struct AITab: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("llmProvider") private var provider = "off"
     @AppStorage("ollamaModel") private var ollamaModel = "llama3.2"
+    @AppStorage("localBaseURL") private var localBaseURL = "http://localhost:1234/v1"
+    @AppStorage("localModel") private var localModel = ""
     @State private var geminiKey = ""
     @State private var claudeKey = ""
     @State private var openaiKey = ""
@@ -150,6 +180,7 @@ struct AITab: View {
                     Text("Off — local rule-based only (no cloud)").tag("off")
                     Text("Gemini Flash (Free)").tag("gemini")
                     Text("Local (Ollama)").tag("local")
+                    Text("Local (OpenAI-compatible — LM Studio, Jan, …)").tag("localopenai")
                     Text("Claude API").tag("claude")
                     Text("OpenAI API").tag("openai")
                 }
@@ -170,10 +201,8 @@ struct AITab: View {
             Section(providerDetailTitle) {
                 switch provider {
                 case "gemini":
-                    SecureField("API Key (optional)", text: $geminiKey)
-                        .onChange(of: geminiKey) { _, v in
-                            KeychainService.save(key: "gemini_api_key", value: v)
-                        }
+                    APIKeyField(placeholder: "API Key (optional)", keychainKey: "gemini_api_key",
+                                text: $geminiKey, onSaved: { testConnection() })
                     if geminiKey.isEmpty && !BundledKeys.gemini.isEmpty {
                         HStack(spacing: DS.xs) {
                             Image(systemName: "checkmark.circle.fill")
@@ -197,20 +226,22 @@ struct AITab: View {
                         }
                     }
                 case "claude":
-                    SecureField("API Key", text: $claudeKey)
-                        .onChange(of: claudeKey) { _, v in
-                            KeychainService.save(key: "claude_api_key", value: v)
-                        }
+                    APIKeyField(placeholder: "API Key (sk-ant-…)", keychainKey: "claude_api_key",
+                                text: $claudeKey, onSaved: { testConnection() })
                     keyNote
                 case "openai":
-                    SecureField("API Key", text: $openaiKey)
-                        .onChange(of: openaiKey) { _, v in
-                            KeychainService.save(key: "openai_api_key", value: v)
-                        }
+                    APIKeyField(placeholder: "API Key (sk-…)", keychainKey: "openai_api_key",
+                                text: $openaiKey, onSaved: { testConnection() })
                     keyNote
                 case "local":
                     TextField("Model", text: $ollamaModel)
                     Text("Requires Ollama running locally.")
+                        .font(DS.captionFont)
+                        .foregroundStyle(.tertiary)
+                case "localopenai":
+                    TextField("Base URL", text: $localBaseURL)
+                    TextField("Model (blank = server's loaded model)", text: $localModel)
+                    Text("Any OpenAI-compatible local server. LM Studio: start its Local Server (default http://localhost:1234/v1) and load a model. Also works with Jan, llama.cpp server, vLLM, LocalAI. Stays on-device.")
                         .font(DS.captionFont)
                         .foregroundStyle(.tertiary)
                 default:
@@ -293,7 +324,7 @@ struct AITab: View {
                                     .foregroundStyle(DS.recording)
                             }
                         } else {
-                            Button("Setup") {
+                            Button("Connect") {
                                 let result = AIToolSetup.setup(tool: tool)
                                 switch result {
                                 case .success(let msg):
@@ -308,6 +339,23 @@ struct AITab: View {
                         }
                     }
                 }
+
+                // Real handshake — spawns the bundled binary and runs MCP initialize.
+                Button {
+                    setupResult = "Testing…"
+                    Task.detached {
+                        let r = AIToolSetup.testConnection()
+                        await MainActor.run {
+                            switch r {
+                            case .success(let m): setupResult = "✓ \(m)"
+                            case .failure(let e): setupResult = "✗ \(e.localizedDescription)"
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Test connection", systemImage: "bolt.horizontal.circle")
+                }
+                .controlSize(.small)
 
                 if let result = setupResult {
                     Text(result)
@@ -325,12 +373,7 @@ struct AITab: View {
             aiTools = AIToolSetup.detectTools()
         }
         .onChange(of: provider) { _, v in
-            switch v {
-            case "gemini": appState.llmProvider = .gemini
-            case "claude": appState.llmProvider = .claude
-            case "openai": appState.llmProvider = .openai
-            default: appState.llmProvider = .local
-            }
+            appState.llmProvider = LLMProvider(rawValue: v) ?? .off
         }
     }
 
@@ -341,6 +384,7 @@ struct AITab: View {
         case "claude": "Claude API"
         case "openai": "OpenAI API"
         case "local": "Ollama"
+        case "localopenai": "Local (OpenAI-compatible)"
         default: ""
         }
     }
@@ -362,7 +406,7 @@ struct AITab: View {
             do {
                 switch provider {
                 case "gemini":
-                    guard let key = KeychainService.load(key: "gemini_api_key"), !key.isEmpty else {
+                    guard let key = KeychainService.loadKey("gemini_api_key") else {
                         testResult = "✗ No API key entered"
                         isTesting = false
                         return
@@ -378,11 +422,11 @@ struct AITab: View {
                         let hasFlash = models.contains { $0.contains("flash") }
                         testResult = hasFlash ? "✓ Gemini Flash available" : "✓ Connected (\(models.count) models)"
                     } else {
-                        testResult = "✗ HTTP \(code)"
+                        testResult = Self.httpFailureMessage(code)
                     }
 
                 case "claude":
-                    guard let key = KeychainService.load(key: "claude_api_key"), !key.isEmpty else {
+                    guard let key = KeychainService.loadKey("claude_api_key") else {
                         testResult = "✗ No API key entered"
                         isTesting = false
                         return
@@ -400,10 +444,10 @@ struct AITab: View {
                     ])
                     let (_, resp) = try await URLSession.shared.data(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                    testResult = code == 200 ? "✓ Connected" : "✗ HTTP \(code)"
+                    testResult = code == 200 ? "✓ Connected" : Self.httpFailureMessage(code)
 
                 case "openai":
-                    guard let key = KeychainService.load(key: "openai_api_key"), !key.isEmpty else {
+                    guard let key = KeychainService.loadKey("openai_api_key") else {
                         testResult = "✗ No API key entered"
                         isTesting = false
                         return
@@ -414,7 +458,31 @@ struct AITab: View {
                     req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
                     let (_, resp) = try await URLSession.shared.data(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                    testResult = code == 200 ? "✓ Connected" : "✗ HTTP \(code)"
+                    testResult = code == 200 ? "✓ Connected" : Self.httpFailureMessage(code)
+
+                case "localopenai":
+                    let base = localBaseURL.trimmingCharacters(in: .whitespaces)
+                    let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
+                    guard let url = URL(string: "\(trimmed)/models") else {
+                        testResult = "✗ Invalid base URL"
+                        isTesting = false
+                        return
+                    }
+                    var req = URLRequest(url: url)
+                    req.timeoutInterval = 10
+                    if let key = KeychainService.loadKey("local_api_key") {
+                        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+                    }
+                    let (data, _) = try await URLSession.shared.data(for: req)
+                    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    let models = (json?["data"] as? [[String: Any]])?.compactMap { $0["id"] as? String } ?? []
+                    if models.isEmpty {
+                        testResult = "✓ Server up, but no model loaded — load one in LM Studio"
+                    } else if localModel.isEmpty || models.contains(where: { $0.hasPrefix(localModel) }) {
+                        testResult = "✓ Ready (\(models.prefix(2).joined(separator: ", ")))"
+                    } else {
+                        testResult = "✗ \(localModel) not loaded. Available: \(models.prefix(3).joined(separator: ", "))"
+                    }
 
                 default:
                     guard let url = URL(string: "http://localhost:11434/api/tags") else { return }
@@ -441,6 +509,104 @@ struct AITab: View {
                 testResult = "✗ \(msg.count > 60 ? String(msg.prefix(60)) + "…" : msg)"
             }
             isTesting = false
+        }
+    }
+
+    /// Status-code-specific guidance — "HTTP 401" tells the user nothing actionable.
+    private static func httpFailureMessage(_ code: Int) -> String {
+        switch code {
+        case 401: return "✗ Key rejected (401) — check the key; it may be revoked or from the wrong account"
+        case 403: return "✗ Access denied (403) — this key lacks permission for the API"
+        case 429: return "✗ Quota or rate limit (429) — check billing / usage caps"
+        case 500...599: return "✗ Provider error (\(code)) — their side; retry in a moment"
+        default: return "✗ HTTP \(code)"
+        }
+    }
+}
+
+// MARK: - API Key Field
+
+/// API-key input done properly:
+/// - trims pasted whitespace/newlines (the invisible cause of "correct key but 401")
+/// - debounces the Keychain write (per-keystroke SecItem writes made typing lag)
+/// - reveal toggle, because you cannot proofread a row of dots
+/// - confirms the save with a masked tail, then auto-runs the connection test via `onSaved`
+struct APIKeyField: View {
+    let placeholder: String
+    let keychainKey: String
+    @Binding var text: String
+    var onSaved: () -> Void = {}
+
+    @State private var revealed = false
+    @State private var saveTask: Task<Void, Never>?
+    @State private var savedTail: String?
+    @State private var saveFailed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.xs) {
+            HStack(spacing: DS.sm) {
+                Group {
+                    if revealed {
+                        TextField(placeholder, text: $text)
+                    } else {
+                        SecureField(placeholder, text: $text)
+                    }
+                }
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .onChange(of: text) { _, value in scheduleSave(value) }
+
+                Button { revealed.toggle() } label: {
+                    Image(systemName: revealed ? "eye.slash" : "eye")
+                        .font(DS.captionFont)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .help(revealed ? "Hide key" : "Show key")
+            }
+
+            if saveFailed {
+                HStack(spacing: DS.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(DS.miniFont)
+                        .foregroundStyle(DS.error)
+                    Text("Could not save to Keychain — the key is not stored.")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.error)
+                }
+                .transition(.opacity)
+            } else if let tail = savedTail {
+                HStack(spacing: DS.xs) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(DS.miniFont)
+                        .foregroundStyle(DS.recording)
+                    Text("Saved to Keychain (…\(tail))")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.recording)
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: savedTail)
+    }
+
+    private func scheduleSave(_ value: String) {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed != value { text = trimmed }   // strip pasted junk *visibly*
+            // Report the real outcome: silently claiming success for a key that
+            // was never stored resurfaces later as a confusing "missing API key".
+            let stored = KeychainService.save(key: keychainKey, value: trimmed)
+            saveFailed = !stored
+            guard stored, !trimmed.isEmpty else { savedTail = nil; return }
+            savedTail = String(trimmed.suffix(4))
+            onSaved()
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            savedTail = nil
         }
     }
 }
@@ -483,6 +649,44 @@ struct DataTab: View {
                 Text("Subject and sender only. Email body is never read.")
                     .font(DS.captionFont)
                     .foregroundStyle(.tertiary)
+            }
+
+            // Per-app exclusion — privacy control. Nothing is captured while an
+            // excluded app is frontmost (keystrokes, clipboard, and window titles).
+            Section("Don't record in these apps") {
+                Text("While one of these is frontmost, mull captures nothing — no keystrokes, clipboard, or window titles.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(.tertiary)
+
+                ForEach(appState.excludedAppList, id: \.id) { app in
+                    HStack {
+                        Text(app.name).font(DS.bodyFont)
+                        Spacer()
+                        if app.id == "com.mull.app" {
+                            Text("always").font(DS.captionFont).foregroundStyle(.tertiary)
+                        } else {
+                            Button {
+                                appState.includeApp(app.id)
+                            } label: {
+                                Image(systemName: "minus.circle.fill").foregroundStyle(DS.error)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Resume recording in \(app.name)")
+                        }
+                    }
+                }
+
+                Menu("Add app…") {
+                    let addable = appState.addableRunningApps
+                    if addable.isEmpty {
+                        Text("No other running apps")
+                    } else {
+                        ForEach(addable, id: \.id) { app in
+                            Button(app.name) { appState.excludeApp(app.id) }
+                        }
+                    }
+                }
+                .font(DS.captionFont)
             }
 
             // External MCP sources (Phase B ingestion)
@@ -592,17 +796,15 @@ struct DataTab: View {
 
     private func clearToday() {
         let start = Calendar.current.startOfDay(for: Date())
-        try? appState.database.dbPool.write { db in
-            try db.execute(sql: "DELETE FROM recording_events WHERE timestamp >= ?", arguments: [start])
-        }
+        // Deletion belongs to the database layer, not to a View writing raw SQL
+        // against the pool — the FTS shadow tables have to stay in step with it.
+        try? appState.database.deleteEvents(since: start)
         appState.todayEventCount = 0
         refresh()
     }
 
     private func clearEvents() {
-        try? appState.database.dbPool.write { db in
-            try db.execute(sql: "DELETE FROM recording_events")
-        }
+        try? appState.database.deleteEvents(since: .distantPast)
         appState.database.vacuum()
         appState.todayEventCount = 0
         refresh()
