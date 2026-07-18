@@ -575,13 +575,15 @@ final class MCPServer {
             try FileManager.default.createDirectory(at: resolved.url.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
             try content.write(to: resolved.url, atomically: true, encoding: .utf8)
+            FilePrivacy.protectFile(at: resolved.url)
             return "Written: ~/mull/\(resolved.relative) (\(content.count) chars)"
         } catch {
             return "Error writing file: \(error.localizedDescription)"
         }
     }
 
-    /// Read any vault .md file. Provenance markers are stripped for clean reading.
+    /// Read any vault .md file. Provenance markers are stripped for clean reading,
+    /// and secret-bearing lines are withheld (see `redactSensitiveLines`).
     private func readFile(path: String) -> String {
         let resolved: VaultPath
         switch resolveVaultPath(path) {
@@ -591,7 +593,51 @@ final class MCPServer {
         guard let content = try? String(contentsOf: resolved.url, encoding: .utf8) else {
             return "Error: could not read ~/mull/\(resolved.relative). Does it exist? Try list_files."
         }
-        return ContextBlockFile.stripMarkers(content)
+        return Self.redactSensitiveLines(ContextBlockFile.stripMarkers(content))
+    }
+
+    /// What the reader sees in place of a withheld line.
+    private static let redactionMarker = "[redacted — withheld by mull's privacy filter]"
+
+    /// Apply the same secret gate to file contents that `search` and `get_relevant`
+    /// apply to event rows.
+    ///
+    /// `list_files` followed by `read_file` was a complete, unfiltered dump of the
+    /// vault to whatever MCP client asked. A .md file is not safer than an event
+    /// row — the vault is assembled FROM those events, so a clipboard secret that
+    /// Selection.rank refused to hand over is sitting verbatim in
+    /// daily/2026-07-19.md, one tool call away.
+    ///
+    /// Filtered line by line rather than whole-file: whole-file means one stray key
+    /// blanks a 400-line daily note and the agent silently loses the day. And a
+    /// withheld line leaves a visible marker rather than vanishing, because an agent
+    /// reading a document with holes in it must be able to tell the holes are there
+    /// — otherwise it reasons confidently about text it never saw.
+    private static func redactSensitiveLines(_ text: String) -> String {
+        var out: [String] = []
+        var withheld = 0
+        var lastWasMarker = false
+
+        for line in text.components(separatedBy: "\n") {
+            guard !line.trimmingCharacters(in: .whitespaces).isEmpty,
+                  SensitiveText.isSensitive(line) else {
+                out.append(line)
+                lastWasMarker = false
+                continue
+            }
+            withheld += 1
+            // Collapse a run of secret lines into one marker: a pasted key block or
+            // a PEM body is dozens of lines, and dozens of identical markers is its
+            // own kind of noise.
+            if !lastWasMarker { out.append(Self.redactionMarker) }
+            lastWasMarker = true
+        }
+
+        guard withheld > 0 else { return text }
+        out.append("")
+        out.append("_\(withheld) line\(withheld == 1 ? " was" : "s were") withheld from this file "
+            + "by mull's privacy filter (addresses, URLs, credentials). Ask the user directly if you need them._")
+        return out.joined(separator: "\n")
     }
 
     /// Provenance-safe write-back: merge the agent's block into the file via the

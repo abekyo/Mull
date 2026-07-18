@@ -23,6 +23,13 @@ final class AppState: ObservableObject {
     /// Clipboard and window title monitoring may still work.
     @Published var isRecordingDegraded = false
     @AppStorage("hasCompletedOnboarding") var hasCompletedOnboarding = false
+    /// Where onboarding got to, so an interrupted setup resumes instead of restarting.
+    ///
+    /// Onboarding is only "complete" when the user reaches the end of it. Quitting
+    /// mid-flow, or closing the window, used to mean either being marked done having
+    /// granted nothing, or starting again from the welcome screen — so this is the
+    /// raw value of `OnboardingView.OnboardingStep` the user last reached.
+    @AppStorage("onboardingStep") var onboardingStep = 0
     let permissions = PermissionService()
     @Published var todayEventCount: Int = 0
     @Published var todayStorageBytes: Int64 = 0
@@ -33,6 +40,47 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(llmProvider.rawValue, forKey: "llmProvider")
         }
+    }
+
+    // MARK: - In-app notices
+    //
+    // Several actions (copy context, import, export, conflict resolution) used to
+    // speak only through a system notification — invisible under Do Not Disturb,
+    // and silent altogether when nothing happened. A notice is the in-app answer:
+    // it says what mull just did, or why it did nothing, in the window the user is
+    // already looking at.
+
+    struct ActionNotice: Identifiable, Equatable {
+        let id = UUID()
+        let text: String
+        var detail: String? = nil
+        /// A file the notice is about — the user can go look at it.
+        var revealURL: URL? = nil
+        /// Something didn't happen. Stays until dismissed.
+        var isProblem: Bool = false
+    }
+
+    @Published var actionNotice: ActionNotice?
+    private var noticeDismissTask: Task<Void, Never>?
+
+    /// Show an in-app notice. Plain confirmations fade on their own; anything the
+    /// user may need to act on (a problem, or a file to go find) waits to be dismissed.
+    func postNotice(_ text: String, detail: String? = nil, revealURL: URL? = nil, isProblem: Bool = false) {
+        let notice = ActionNotice(text: text, detail: detail, revealURL: revealURL, isProblem: isProblem)
+        actionNotice = notice
+        noticeDismissTask?.cancel()
+        guard !isProblem, revealURL == nil else { return }
+        noticeDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            guard let self, self.actionNotice?.id == notice.id else { return }
+            self.actionNotice = nil
+        }
+    }
+
+    func dismissNotice() {
+        noticeDismissTask?.cancel()
+        actionNotice = nil
     }
 
     // MARK: - Summaries
@@ -54,6 +102,15 @@ final class AppState: ObservableObject {
     let proactive: ProactiveEngine
     let proactiveLoop: ProactiveLoop
     let ingestion: IngestionService
+
+    /// The chat transcript, owned here rather than by ChatPanelView.
+    ///
+    /// It used to be a @StateObject on the view, which FullWindowView tears down and
+    /// rebuilds on every sidebar selection change — so clicking Home to check a fact
+    /// and coming back destroyed the whole conversation, with no warning and nothing
+    /// to recover it from. Living on AppState, it survives navigation for as long as
+    /// the app is running.
+    let chat = ChatViewModel()
 
     private var refreshTimer: Timer?
     private var eveningDraftTimer: Timer?
@@ -154,6 +211,16 @@ final class AppState: ObservableObject {
             }
         }
 
+        // A permission going away is the one failure mull cannot let pass quietly:
+        // capture simply stops, the files keep being written (just emptier), and
+        // nothing on screen changes. Someone can lose a week of their record before
+        // they notice the day looks thin.
+        permissions.onRevoked = { [weak self] permission in
+            Task { @MainActor [weak self] in
+                self?.handlePermissionRevoked(permission)
+            }
+        }
+
         // Set default output limit if not configured
         if UserDefaults.standard.object(forKey: "outputMaxChars") == nil {
             UserDefaults.standard.set(50000, forKey: "outputMaxChars")
@@ -208,7 +275,12 @@ final class AppState: ObservableObject {
         // Don't gate on AXIsProcessTrusted — it lies on debug builds.
         // Recording will start and capture what it can.
         // Onboarding itself is handled by AppDelegate.applicationDidFinishLaunching.
-        if hasCompletedOnboarding {
+        //
+        // Also starts for onboarding that was interrupted after the permissions
+        // step: capture legitimately began there, and a user who quit at the cold
+        // read and came back should not silently have a gap in their record until
+        // they get round to clicking Done.
+        if hasCompletedOnboarding || onboardingStep > OnboardingView.OnboardingStep.permissions.rawValue {
             startRecording()
         }
 
@@ -418,6 +490,39 @@ final class AppState: ObservableObject {
         Notifier.shared.send(id: UUID().uuidString, title: title, body: body)
     }
 
+    // MARK: - Permission loss
+
+    /// Say that capture has stopped, and give the user the way back.
+    ///
+    /// Three channels because no single one is reliable at the moment it matters:
+    /// the in-app notice is sticky (it's a problem, so it waits to be dismissed
+    /// rather than fading) but only exists inside the window; the system
+    /// notification reaches the user who is in System Settings or another app; and
+    /// the sheet is the one-click re-grant, shown only on mull's own window so it
+    /// never steals focus from whatever they are actually doing.
+    ///
+    /// Silent during onboarding: the permissions step is already this conversation,
+    /// and interrupting it with an alert about the switch the user is mid-way
+    /// through flipping would be noise.
+    private func handlePermissionRevoked(_ permission: PermissionService.Permission) {
+        guard hasCompletedOnboarding else { return }
+
+        let detail = "mull has stopped recording \(permission.whatStops). "
+            + "Turn \(permission.displayName) back on for mull in System Settings → "
+            + "Privacy & Security to pick it back up."
+        postNotice("\(permission.displayName) was turned off", detail: detail, isProblem: true)
+        sendNotification(title: "mull stopped recording", body: detail)
+        AppDelegate.shared?.presentPermissionRecovery(permission)
+    }
+
+    /// Open the pane for a permission — used by the recovery sheet.
+    func openSettingsFor(_ permission: PermissionService.Permission) {
+        switch permission {
+        case .accessibility: permissions.openAccessibilitySettings()
+        case .inputMonitoring: permissions.openInputMonitoringSettings()
+        }
+    }
+
     func markSummaryRead() {
         hasUnreadSummary = false
     }
@@ -427,7 +532,10 @@ final class AppState: ObservableObject {
     func injectContextIntoFocusedField() {
         Task {
             let contextText = await ContextComposer(database: database).compose()
-            guard !contextText.isEmpty else { return }
+            guard !contextText.isEmpty else {
+                postNotice(Self.nothingToLendTitle, detail: Self.nothingToLendDetail, isProblem: true)
+                return
+            }
             // Already on the main actor (AppState is @MainActor) — no await needed.
             TextInjector.inject(contextText)
             sendNotification(
@@ -441,18 +549,32 @@ final class AppState: ObservableObject {
     func copyContextToClipboard() {
         Task {
             let finalText = await ContextComposer(database: database).compose()
-            guard !finalText.isEmpty else { return }
+            // Nothing composed means mull genuinely has nothing to lend yet — say so
+            // rather than leaving the clipboard silently untouched. The clipboard is
+            // deliberately not cleared: whatever the user had there is still theirs.
+            guard !finalText.isEmpty else {
+                postNotice(Self.nothingToLendTitle, detail: Self.nothingToLendDetail, isProblem: true)
+                return
+            }
 
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(finalText, forType: .string)
 
             let wordCount = finalText.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
+            // In-app first (a system notification is invisible under Do Not Disturb),
+            // notification second for when the window isn't on screen.
+            postNotice("Context copied", detail: "\(wordCount) words about your day — paste into any AI.")
             sendNotification(
                 title: "Context copied",
                 body: "Paste into any AI — \(wordCount) words about your day."
             )
         }
     }
+
+    private static let nothingToLendTitle = "Nothing to lend yet"
+    private static let nothingToLendDetail =
+        "mull hasn't recorded enough today to describe what you're working on. "
+        + "Leave it running a little longer, or check that recording is on in Live."
 
     /// Open the main mull window from anywhere via ⌘+Shift+D
     func openMainWindow() {
@@ -480,6 +602,20 @@ final class AppState: ObservableObject {
         ByteCountFormatter.string(fromByteCount: todayStorageBytes, countStyle: .file)
     }
 
+    /// How many records mull stored today, said as what it is.
+    ///
+    /// `todayEventCount` is a row count — buffered keystroke lines, clipboard
+    /// entries, window and app changes. Rendered large and called "events" it reads
+    /// like a score for the day's work, which it is not: a long think with no typing
+    /// scores near zero. "Captures" names the mechanism instead of implying a
+    /// verdict, and the singular case reads correctly ("1 capture", not "1 events").
+    var todayCaptureLabel: String {
+        let n = todayEventCount
+        if n == 1 { return "1 capture" }
+        let formatted = NumberFormatter.localizedString(from: NSNumber(value: n), number: .decimal)
+        return "\(formatted) captures"
+    }
+
     // MARK: - Data Retention
 
     /// Default retention for a fresh install: 90 days of raw events.
@@ -487,7 +623,7 @@ final class AppState: ObservableObject {
     /// The default used to be "unlimited", which meant the code below early-returned
     /// and a default install grew forever — the doc comment claimed a 7-day auto-prune
     /// that did not exist. 90 days is long enough to cover the review/retrospective
-    /// use cases in PRODUCT.md §2 (a quarter of history) while bounding the file.
+    /// use cases in DIRECTION.md §3 (a quarter of history) while bounding the file.
     /// Summaries and memory files are unaffected by this — they're the durable layer.
     /// The user can still choose "unlimited" explicitly in Settings → Data.
     static let defaultDataRetentionDays = "90"

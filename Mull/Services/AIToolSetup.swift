@@ -83,50 +83,116 @@ struct AIToolSetup {
         guard let binary = mullMCPPath() else { return .failure(SetupError.binaryNotFound) }
         let url = URL(fileURLWithPath: path)
         do {
-            // "No config yet" and "config we could not understand" are NOT the same
-            // thing. The old code used `try?` + `as?` for both, so an unreadable or
-            // malformed file silently became `[:]` — and the write below then
-            // replaced the client's entire config with nothing but mull's entry.
-            // For ~/.claude.json that is every other MCP server AND Claude Code's
-            // per-project state. Absent is fine; unreadable aborts.
-            var config: [String: Any] = [:]
-            let fileExists = fm.fileExists(atPath: url.path)
-            if fileExists {
-                let data: Data
-                do { data = try Data(contentsOf: url) }
-                catch { throw SetupError.configUnreadable(url.lastPathComponent) }
-                if !data.isEmpty {
-                    guard let existing = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-                        throw SetupError.configUnreadable(url.lastPathComponent)
-                    }
-                    config = existing
-                }
-            }
+            var config = try readConfig(at: url)
 
             var servers = config["mcpServers"] as? [String: Any] ?? [:]
             servers["mull"] = ["command": binary, "args": [String]()]
             config["mcpServers"] = servers
 
-            try fm.createDirectory(at: url.deletingLastPathComponent(),
-                                   withIntermediateDirectories: true)
-
-            // Keep a timestamped copy before touching a file we did not author.
-            // If the backup can't be made, don't write — an unrecoverable mistake
-            // in ~/.claude.json is far worse than a failed "Connect" button.
-            if fileExists {
-                let stamp = DateFormatter()
-                stamp.dateFormat = "yyyyMMdd-HHmmss"
-                let backup = url.appendingPathExtension("mull-backup-\(stamp.string(from: Date()))")
-                do { try fm.copyItem(at: url, to: backup) }
-                catch { throw SetupError.backupFailed(backup.lastPathComponent) }
-            }
-
-            let out = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted])
-            try out.write(to: url, options: .atomic)
+            try write(config, to: url)
             return .success("\(toolName) connected — restart \(toolName) to load mull.")
         } catch {
             return .failure(error)
         }
+    }
+
+    // MARK: - Disconnect
+
+    /// Remove mull's entry from a client's MCP config, leaving every other server
+    /// untouched.
+    ///
+    /// Why this exists: "Connect" was a one-way door. Once written, the row became
+    /// a terminal "Connected" badge, so mull could add itself to somebody's AI
+    /// tooling but not take itself back out — the user had to hand-edit JSON to
+    /// undo a button press. A custode hands things back.
+    static func disconnect(tool: AITool) -> Result<String, Error> {
+        let url = URL(fileURLWithPath: tool.configPath)
+        do {
+            var config = try readConfig(at: url)
+            guard var servers = config["mcpServers"] as? [String: Any],
+                  servers["mull"] != nil else {
+                return .failure(SetupError.notConfigured(tool.name))
+            }
+            servers.removeValue(forKey: "mull")
+            // The key stays, now empty: an empty `mcpServers` is what these clients
+            // ship with, and deleting the key outright is a bigger edit than the
+            // user asked for.
+            config["mcpServers"] = servers
+
+            try write(config, to: url)
+            return .success("\(tool.name) disconnected — restart \(tool.name) to drop mull.")
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    // MARK: - Consent preview
+
+    /// The exact JSON mull would merge in, pretty-printed for the confirmation
+    /// sheet — built from the same values the write uses, so the preview cannot
+    /// drift from the deed. Consent to a config edit you were never shown is not
+    /// consent.
+    static func configFragment() -> Result<String, Error> {
+        guard let binary = mullMCPPath() else { return .failure(SetupError.binaryNotFound) }
+        let fragment: [String: Any] = [
+            "mcpServers": ["mull": ["command": binary, "args": [String]()]]
+        ]
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: fragment, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return .failure(SetupError.badResponse)
+        }
+        return .success(text)
+    }
+
+    // MARK: - Config file I/O
+
+    /// Read a client's config, or `[:]` if it doesn't exist yet.
+    ///
+    /// "No config yet" and "config we could not understand" are NOT the same
+    /// thing. The old code used `try?` + `as?` for both, so an unreadable or
+    /// malformed file silently became `[:]` — and the write then replaced the
+    /// client's entire config with nothing but mull's entry. For ~/.claude.json
+    /// that is every other MCP server AND Claude Code's per-project state.
+    /// Absent is fine; unreadable aborts.
+    private static func readConfig(at url: URL) throws -> [String: Any] {
+        guard fm.fileExists(atPath: url.path) else { return [:] }
+        let data: Data
+        do { data = try Data(contentsOf: url) }
+        catch { throw SetupError.configUnreadable(url.lastPathComponent) }
+        guard !data.isEmpty else { return [:] }
+        guard let existing = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw SetupError.configUnreadable(url.lastPathComponent)
+        }
+        return existing
+    }
+
+    /// Back up, then atomically replace. Every path that edits a file mull did not
+    /// author goes through here, so "a backup is written" is true of disconnect as
+    /// well as connect.
+    private static func write(_ config: [String: Any], to url: URL) throws {
+        try fm.createDirectory(at: url.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+
+        // Keep a timestamped copy before touching a file we did not author.
+        // If the backup can't be made, don't write — an unrecoverable mistake
+        // in ~/.claude.json is far worse than a failed button.
+        if fm.fileExists(atPath: url.path) {
+            let stamp = DateFormatter()
+            stamp.dateFormat = "yyyyMMdd-HHmmss"
+            let backup = url.appendingPathExtension("mull-backup-\(stamp.string(from: Date()))")
+            do { try fm.copyItem(at: url, to: backup) }
+            catch { throw SetupError.backupFailed(backup.lastPathComponent) }
+        }
+
+        let out = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted])
+        try out.write(to: url, options: .atomic)
+    }
+
+    /// Where the backup for a given config lands, named for the sheet that has to
+    /// promise it.
+    static func backupDescription(for tool: AITool) -> String {
+        "\(URL(fileURLWithPath: tool.configPath).lastPathComponent).mull-backup-<timestamp>"
     }
 
     // MARK: - Test connection (real handshake)
@@ -244,12 +310,15 @@ struct AIToolSetup {
         case unsupportedTool, binaryNotFound, timedOut, badResponse
         case configUnreadable(String)
         case backupFailed(String)
+        case notConfigured(String)
         var errorDescription: String? {
             switch self {
             case .unsupportedTool: "Unsupported AI tool"
             case .binaryNotFound:  "MullMCP binary not found — build/install it first"
             case .timedOut:        "Server did not respond"
             case .badResponse:     "Unexpected response from server"
+            case .notConfigured(let name):
+                "mull isn't in \(name)'s MCP config — nothing to remove."
             case .configUnreadable(let name):
                 "\(name) exists but couldn't be read as JSON. Nothing was written — "
                     + "fix or move that file, then connect again."

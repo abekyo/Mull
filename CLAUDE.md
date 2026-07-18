@@ -1,5 +1,10 @@
 # mull — Product Specification
 
+> **文書の序列**（2026-07 整理）: 哲学と見え方は `DESIGN-NORTHSTAR.md`、作り方と
+> 判断の根拠は `DIRECTION.md`、製品仕様（＝この文書）はその2つに従属する。
+> 衝突したら **DESIGN-NORTHSTAR > DIRECTION > CLAUDE.md**。
+> `PRODUCT.md` と `ONBOARDING.md` は削除した（理由は DIRECTION.md 付録B）。
+
 ## 1. Identity
 
 - **App Name**: mull
@@ -377,9 +382,15 @@ Design Tokens（`DS`）で統一:
 | エンジン | 機能 |
 |---------|------|
 | AnalyticsEngine | キーワード頻度、アプリ使用比率、時間帯パターン、曜日パターン、言語比率 |
-| FactExtractor | 役割推定、技術スタック検出、プロジェクト推定、ツール嗜好 |
+| ProjectNames | 「この断片はプロジェクト名か」の**唯一の判定**。形（長さ/ファイル名/URL/文）と証拠（あるブラウザの全タイトルに出る断片＝クローム）で判定する。語彙ブロックリストは持たない |
+| FactExtractor | **観測のみ**: 言語比率・実測ツール・プロジェクト名。人物についての推測（役割・技術スタック・ドメイン）は2026-07に削除 |
 | TimeBlockEngine | イベント→時間ブロック集約、「メインでやったこと」推論 |
+| CurrentState | 「今」のアンカー（active entity/app + 直近の高salience信号）。now.md と MCP `whats_active_now` の両方がこれを出す |
 | LiveContextGenerator | me.md / now.md / full.md を60秒ごと自動生成 |
+
+> **原則**: ここが出力していいのは、ユーザーに「この行はこの記録から来た」と示せるものだけ。
+> アプリ一覧から職業を、クリップボードの部分一致から技術スタックを名乗るのは
+> 「観測」ではなく「主張」であり、me.md の先頭に置いてよいものではない（DIRECTION §4/§9.1）。
 
 ### LLM統合（オプション、夜間）
 
@@ -473,9 +484,9 @@ mullだけがやっていること:
 
 ### Next (v1.x) — 分身の最初の仕事【進行中】
 - ✅ 「Today, in your words」: あなたの文体の日報下書き（ReportWriter）
+- ✅ fidelityの実測: 草稿と承認稿の編集距離を承認時に計測・日次で保存（EditDistance / ReportWriter.fidelitySeries）。**無編集承認は文体サンプルに入らない**（provenance記録で構造的に遮断）
 - 先回り: 夕方に自動で下書きが用意されている（開いたらもうある）
 - 根拠の開示: 「この文体は◯◯から学んだ」をカードに表示
-- fidelityの実測: 編集距離が日ごとに縮むことをログで確認
 - ストリーミング応答（Chat / 日報生成の体感品質）
 - Home の肖像化（計器盤からの脱却、NORTHSTAR チェックリスト準拠）
 

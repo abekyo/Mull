@@ -13,7 +13,7 @@ enum BlockSource: String {
 
 /// One unit of curated context. Files are a sequence of these, so mull can update,
 /// append, or protect individual blocks instead of rewriting the whole file.
-/// This is the foundation for the ACE "Curator" pattern (see PRODUCT.md): append /
+/// This is the foundation for the ACE "Curator" pattern (see DIRECTION.md 付録A): append /
 /// diff-curate, tag each block with provenance, never clobber human-touched content.
 struct ContextBlock {
     var id: String

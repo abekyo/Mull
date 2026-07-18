@@ -208,6 +208,14 @@ final class DatabaseService: Sendable {
             }
         }
 
+        // The file that just got created holds every keystroke the user has typed,
+        // in plaintext, and SQLite created it under the process umask (0644 on a
+        // stock account). Lock it down now that the pool — and therefore the WAL
+        // and SHM sidecars — exist. Uses the live pool's path rather than dbPath:
+        // the recovery paths above may have landed on the temp fallback or on the
+        // pre-migration backup, and those hold the same data.
+        FilePrivacy.protectDatabase(atPath: activePool.path)
+
         dbPool = activePool
         isFallback = usedFallback
         fallbackReason = reason
@@ -1050,6 +1058,20 @@ final class DatabaseService: Sendable {
             }
         } catch {
             logger.error("Failed to update memory '\(entry.name)': \(error.localizedDescription)")
+        }
+    }
+
+    /// Delete exactly one memory, keyed by its unique `filePath` — never by
+    /// name. Two memories can share a name, and `DELETE WHERE name=?` would
+    /// wipe them all while removing only one file, orphaning the rest.
+    func deleteMemory(_ entry: MemoryEntry) {
+        do {
+            try dbPool.write { db in
+                try db.execute(sql: "DELETE FROM memory_entries WHERE filePath = ?",
+                               arguments: [entry.filePath])
+            }
+        } catch {
+            logger.error("Failed to delete memory '\(entry.name)': \(error.localizedDescription)")
         }
     }
 

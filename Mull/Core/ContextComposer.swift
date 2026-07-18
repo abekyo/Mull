@@ -1,6 +1,6 @@
 import Foundation
 
-/// Composes the "Copy to AI" / "inject into field" context block.
+/// Composes the "Copy context" / "inject into field" context block.
 ///
 /// This is a context-composition *engine*, not app state, which is why it lives
 /// outside AppState: it reads the database, extracts facts, classifies recent
@@ -25,7 +25,14 @@ struct ContextComposer {
 
     let database: DatabaseService
 
-    /// Build the "Copy to AI" text — a SELECTED, current, self-contained snapshot,
+    /// The line that makes a pasted block self-explanatory wherever it lands.
+    /// Exposed because onboarding composes a starter block from a live read of the
+    /// Mac before any history exists, and that block has to arrive framed the same
+    /// way this one does.
+    static let preamble = "Here is my current context from mull (a tool that records what I work on). "
+        + "Use it to help me without making me re-explain myself.\n"
+
+    /// Build the "Copy context" text — a SELECTED, current, self-contained snapshot,
     /// not a raw full.md dump. It composes the same use-time signals the MCP tools
     /// serve (identity + what you're doing now + where you left off), so a paste
     /// into ChatGPT/Claude is immediately useful with no tools to call. Passively
@@ -36,14 +43,30 @@ struct ContextComposer {
         await Task.detached { [database] in
             var sections: [String] = []
 
-            // 1. Who I am — rule-based identity facts (role, stack, work patterns).
+            // 1. Who I am — the user's own stated facts first, then rule-based ones
+            //    (role, stack, work patterns).
             //    NOT me.md: its header is MCP-oriented boilerplate ("call the tools"),
             //    which is useless once pasted somewhere no tools exist.
+            //
+            //    The pinned layer used to be missing here entirely, which meant the
+            //    seven answers onboarding asks for — role, working language, how the
+            //    AI should reply — were written to me.pinned.md and then left out of
+            //    the one payload the user actually hands an AI. It also left a fresh
+            //    install with nothing to copy at all: inference needs days of events,
+            //    while a stated fact is true the moment it is typed.
+            var identityParts: [String] = []
+            let pinned = Curator.pinnedFacts().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pinned.isEmpty { identityParts.append(pinned) }
+
             let identity = FactExtractor(analytics: AnalyticsEngine(database: database),
                                          database: database)
                 .generateFactSummary(days: 14)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !identity.isEmpty { sections.append("# Who I am\n\n\(identity)") }
+            if !identity.isEmpty { identityParts.append(identity) }
+
+            if !identityParts.isEmpty {
+                sections.append("# Who I am\n\n" + identityParts.joined(separator: "\n\n"))
+            }
 
             // 2. Right now — organized by MODE, not filtered by deletion
             //    (MAP-ARCHITECTURE.md: keep everything, mean it with mode). The lens
@@ -109,9 +132,7 @@ struct ContextComposer {
             guard !sections.isEmpty else { return "" }
 
             // A short preamble so the pasted block is self-explanatory to any AI.
-            let preamble = "Here is my current context from mull (a tool that records what I work on). "
-                + "Use it to help me without making me re-explain myself.\n"
-            var text = preamble + "\n" + sections.joined(separator: "\n\n")
+            var text = Self.preamble + "\n" + sections.joined(separator: "\n\n")
             text = ContextBlockFile.stripMarkers(text)
 
             let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")

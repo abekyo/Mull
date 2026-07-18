@@ -139,7 +139,7 @@ struct KnowledgeEntry: Codable, FetchableRecord, PersistableRecord, Identifiable
 
 /// A behavior prediction mull made about the user, later graded against the log.
 ///
-/// This is how mull gets ground truth in a domain that has none (PRODUCT.md
+/// This is how mull gets ground truth in a domain that has none (DIRECTION.md 付録A
 /// "Epistemics"): we don't predict *preference* ("you should do X" — unverifiable),
 /// we predict *behavior* ("you'll resume X within 2 days" — tomorrow's log
 /// confirms or denies it). Grading these turns proactivity into a measurable,

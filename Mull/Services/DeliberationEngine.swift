@@ -14,7 +14,7 @@ import Foundation
 ///     hand-edited block is detected and protected.
 ///  2. **Observation, not interpretation.** The system prompt forbids judgment
 ///     ("you're avoiding X"). It reports what happened and where to resume,
-///     grounded in the log — the epistemics from PRODUCT.md.
+///     grounded in the log — the epistemics from DIRECTION.md 付録A.
 final class DeliberationEngine {
 
     private let database: DatabaseService

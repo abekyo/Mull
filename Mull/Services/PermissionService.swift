@@ -14,10 +14,41 @@ final class PermissionService: ObservableObject {
 
     @Published var accessibilityGranted = false
     @Published var inputMonitoringGranted = false
-    @Published var eventTapWorking = false
 
-    /// Human-readable status for UI display.
-    @Published var statusMessage = "Checking..."
+    /// Which permission went away. Enough for the caller to name it and to send the
+    /// user back to the right pane.
+    enum Permission {
+        case accessibility
+        case inputMonitoring
+
+        /// The name macOS itself uses, so the sentence mull writes matches the
+        /// switch the user has to go and find.
+        var displayName: String {
+            switch self {
+            case .accessibility: return "Accessibility"
+            case .inputMonitoring: return "Input Monitoring"
+            }
+        }
+
+        /// What stops being recorded the moment it's revoked.
+        var whatStops: String {
+            switch self {
+            case .accessibility: return "window titles and page names"
+            case .inputMonitoring: return "what you type"
+            }
+        }
+    }
+
+    /// Fired once on a granted → revoked transition.
+    ///
+    /// The 5s poll below has always *detected* revocation; nothing ever reacted to
+    /// it, so a permission switched off in System Settings — or dropped by macOS
+    /// after an app update, which it does silently — took capture down and said
+    /// nothing. The user could lose a week before noticing the day was empty.
+    /// Fired only on the transition: a permission that has been off since install
+    /// (someone who skipped it during onboarding) is not a loss and must not
+    /// nag every five seconds.
+    var onRevoked: ((Permission) -> Void)?
 
     private var checkTimer: Timer?
 
@@ -36,9 +67,17 @@ final class PermissionService: ObservableObject {
     }
 
     func checkAll() {
+        // Snapshot before the probes so the transition can be spotted afterwards.
+        // The first call happens inside `init`, before any caller has had the
+        // chance to set `onRevoked`, so a fresh launch can't announce a phantom loss.
+        let hadAccessibility = accessibilityGranted
+        let hadInputMonitoring = inputMonitoringGranted
+
         checkAccessibility()
         checkInputMonitoring()
-        updateStatusMessage()
+
+        if hadAccessibility && !accessibilityGranted { onRevoked?(.accessibility) }
+        if hadInputMonitoring && !inputMonitoringGranted { onRevoked?(.inputMonitoring) }
     }
 
     // MARK: - Accessibility
@@ -90,38 +129,65 @@ final class PermissionService: ObservableObject {
     /// The ONLY reliable way to check Input Monitoring permission:
     /// try to create a CGEvent tap. If it succeeds, permission is granted.
     /// Immediately destroy the test tap.
+    ///
+    /// Deliberately `.listenOnly`: this runs every 5 seconds forever, and a passive
+    /// tap is the check that observes without asking for anything. Asking is a
+    /// separate, user-initiated act — see `requestInputMonitoring()`.
     private func checkInputMonitoring() {
         let testTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,
             eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
-            callback: { _, _, event, _ in Unmanaged.passRetained(event) },
+            callback: { _, _, event, _ in Unmanaged.passUnretained(event) },
             userInfo: nil
         )
 
         if let tap = testTap {
             inputMonitoringGranted = true
-            // Clean up test tap immediately
+            // Tear the probe down properly. `tapEnable(false)` only stops delivery;
+            // the mach port itself lived on, and this function runs every 5 seconds
+            // for the lifetime of the app.
             CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
         } else {
             inputMonitoringGranted = false
         }
     }
 
-    // MARK: - Status Message
+    /// Ask macOS for Input Monitoring, rather than just pointing at the pane.
+    ///
+    /// The `.listenOnly` probe above is invisible to TCC: it neither prompts nor
+    /// registers mull in Privacy & Security → Input Monitoring. So the onboarding
+    /// row used to open a Settings pane in which mull might not be listed at all,
+    /// leaving the user to work out that they had to click "+" and go find the app
+    /// in /Applications — for the single permission the product cannot work without.
+    ///
+    /// A tap that can *alter* events (`.defaultTap`) is what makes the system
+    /// register the app and show its prompt. This creates exactly one, never enables
+    /// it, and invalidates it immediately — no keystroke ever reaches the callback.
+    ///
+    /// Returns true when the tap succeeded, i.e. permission is already granted and
+    /// no prompt will appear; the caller can then fall back to opening Settings.
+    @discardableResult
+    func requestInputMonitoring() -> Bool {
+        let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
+            callback: { _, _, event, _ in Unmanaged.passUnretained(event) },
+            userInfo: nil
+        )
 
-    private func updateStatusMessage() {
-        if inputMonitoringGranted {
-            statusMessage = "All permissions granted"
-            eventTapWorking = true
-        } else if accessibilityGranted {
-            statusMessage = "Input Monitoring permission needed for keystroke recording"
-            eventTapWorking = false
-        } else {
-            statusMessage = "Accessibility and Input Monitoring permissions needed"
-            eventTapWorking = false
+        guard let tap else {
+            inputMonitoringGranted = false
+            return false
         }
+        CGEvent.tapEnable(tap: tap, enable: false)
+        CFMachPortInvalidate(tap)
+        inputMonitoringGranted = true
+        return true
     }
 
     /// Whether we have enough permissions to record anything useful.

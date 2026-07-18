@@ -41,42 +41,6 @@ final class FactExtractorTests: XCTestCase {
         XCTAssertEqual(extractor.generateFactSummary(days: 7), "")
     }
 
-    // MARK: - Role inference
-
-    func testInfersSoftwareDeveloperFromDevToolUsage() {
-        // The "Software developer" profile requires 2+ matching apps in the top 8,
-        // so a single editor is not enough evidence — Xcode AND Terminal are.
-        insertAppSwitches(app: "Xcode", count: 5)
-        insertAppSwitches(app: "Terminal", count: 4)
-
-        let facts = extractor.extractFacts(days: 1)
-        let identity = texts(facts, in: .identity)
-
-        XCTAssertTrue(identity.contains { $0.contains("Software developer") },
-                      "Expected a developer role fact, got: \(identity)")
-        // The fact names its evidence — that disclosure is a product requirement,
-        // not decoration (the user has to be able to see WHY mull decided this).
-        XCTAssertTrue(identity.contains { $0.contains("Xcode") && $0.contains("Terminal") })
-    }
-
-    func testSingleDevAppIsNotEnoughForDeveloperRole() {
-        // minMatch of 2 for the developer profile: one app could be incidental.
-        insertAppSwitches(app: "Xcode", count: 8)
-
-        let identity = texts(extractor.extractFacts(days: 1), in: .identity)
-        XCTAssertFalse(identity.contains { $0.contains("Software developer") })
-    }
-
-    func testInfersDesignerFromSingleDesignApp() {
-        // Designer/Writer/Researcher profiles use minMatch 1 — those apps are far
-        // more specific than "Terminal", so one is sufficient evidence.
-        insertAppSwitches(app: "Figma", count: 6)
-
-        let identity = texts(extractor.extractFacts(days: 1), in: .identity)
-        XCTAssertTrue(identity.contains { $0.contains("Designer") },
-                      "Expected a designer role fact, got: \(identity)")
-    }
-
     // MARK: - Tool / skill inference
 
     func testInfersPrimaryToolsExcludingBrowsers() {
@@ -106,23 +70,14 @@ final class FactExtractorTests: XCTestCase {
         XCTAssertFalse(skills.contains { $0.contains("mull") })
     }
 
-    func testDetectsTechStackFromClipboardContent() {
-        // Tech-stack detection reads clipboard text, not app names — copying SwiftUI
-        // code is stronger evidence of the stack than merely having Xcode open.
-        insertClipboard("VStack { Text(\"hello\") } is the SwiftUI layout I settled on")
-
-        let skills = texts(extractor.extractFacts(days: 1), in: .skills)
-        XCTAssertTrue(skills.contains { $0.hasPrefix("Works with:") && $0.contains("SwiftUI") },
-                      "Expected a SwiftUI stack fact, got: \(skills)")
-    }
-
     // MARK: - Project inference
 
     func testInfersProjectFromRepeatedWindowTitles() {
         // Window titles arrive as "Project — File — App". The extractor keeps the
         // project segment, drops the filename (trailing extension <= 5 chars) and
-        // drops the app name (skipApps). A project needs 5+ mentions to count, so a
-        // file opened once in passing never becomes a claimed project.
+        // drops the app name. A project needs 5+ mentions to count, so a file
+        // opened once in passing never becomes a claimed project. The gate itself
+        // lives in ProjectNames and is tested directly in ProjectNamesTests.
         insertScreenText("PantryApp — ViewController.swift — Xcode", count: 6)
 
         let projects = texts(extractor.extractFacts(days: 1), in: .projects)
@@ -143,8 +98,9 @@ final class FactExtractorTests: XCTestCase {
     }
 
     func testIgnoresPlaceholderWindowTitles() {
-        // "Untitled" and "Welcome to …" are in the skip list — they are UI chrome
-        // that appears constantly and would otherwise dominate the project ranking.
+        // "Untitled" and "Welcome to …" are what a document app titles a window
+        // with no document yet. See ProjectNames.isPlaceholder for why this one
+        // list is defensible where the old per-file blocklists were not.
         insertScreenText("Untitled — Document — Pages", count: 10)
         insertScreenText("Welcome to Xcode — Xcode", count: 10)
 
@@ -155,9 +111,10 @@ final class FactExtractorTests: XCTestCase {
 
     func testIgnoresChatPromptsUsedAsWindowTitles() {
         // Claude Code / ChatGPT put the user's prompt in the window title. Those are
-        // questions, not projects — the extractor drops anything with ？/?/！ or a
-        // Japanese verb ending. Without this, me.md fills up with the user's own
-        // half-typed questions presented as "projects".
+        // questions, not projects. Rejected on shape: a question mark, or (for
+        // Japanese, which has no spaces) hiragana density above 40% — the grammar
+        // that makes a sentence a sentence. Without this, me.md fills up with the
+        // user's own half-typed questions presented as "projects".
         insertScreenText("Refactorがうまくいかない — 修正してください", count: 10)
         insertScreenText("Why is the build failing? — Claude", count: 10)
 
@@ -184,9 +141,9 @@ final class FactExtractorTests: XCTestCase {
                       "Ordinary prose should yield no facts, got: \(facts.map(\.text))")
     }
 
-    func testThinAppUsageProducesNoRoleFact() {
-        // Two switches into an app nobody can classify. No role profile matches, and
-        // one app is below the 2-app floor for a primary-tools fact.
+    func testThinAppUsageProducesNoFacts() {
+        // Two switches into a single app: below the 2-app floor for a
+        // primary-tools fact, and nothing else here is measurable.
         insertAppSwitches(app: "Weather", count: 2)
 
         let facts = extractor.extractFacts(days: 1)
@@ -208,19 +165,20 @@ final class FactExtractorTests: XCTestCase {
     // MARK: - Day window
 
     func testDayWindowExcludesOlderEvents() {
-        // Events from 10 days ago, strong enough to produce a role fact if seen.
+        // Events from 10 days ago, enough app usage to produce a primary-tools
+        // fact if the window reaches them.
         insertAppSwitches(app: "Xcode", count: 5, daysAgo: 10)
         insertAppSwitches(app: "Terminal", count: 5, daysAgo: 10)
 
         // A 1-day window must not see them...
-        let recent = texts(extractor.extractFacts(days: 1), in: .identity)
-        XCTAssertFalse(recent.contains { $0.contains("Software developer") },
+        let recent = texts(extractor.extractFacts(days: 1), in: .skills)
+        XCTAssertFalse(recent.contains { $0.hasPrefix("Primary tools:") },
                        "10-day-old events leaked into a 1-day window: \(recent)")
 
         // ...but a 30-day window must. This is the pair that proves the parameter is
         // actually threaded through to the queries rather than ignored.
-        let wide = texts(extractor.extractFacts(days: 30), in: .identity)
-        XCTAssertTrue(wide.contains { $0.contains("Software developer") },
+        let wide = texts(extractor.extractFacts(days: 30), in: .skills)
+        XCTAssertTrue(wide.contains { $0.hasPrefix("Primary tools:") },
                       "30-day window missed 10-day-old events: \(wide)")
     }
 
@@ -250,7 +208,53 @@ final class FactExtractorTests: XCTestCase {
         XCTAssertEqual(lines.count, facts.count)
         // Markdown bullets — this text is spliced straight into me.md.
         XCTAssertTrue(lines.allSatisfy { $0.hasPrefix("- ") })
-        XCTAssertTrue(summary.contains("Software developer"))
+        XCTAssertTrue(summary.contains("Primary tools:"))
+    }
+
+    // MARK: - Claims mull no longer makes
+    //
+    // Role, tech stack and domain inference were deleted, not tuned. These tests
+    // are the guard rail: each fixture is exactly the shape that used to produce
+    // a confident sentence about the user, and each must now produce silence.
+    // If someone reintroduces any of them, these fail.
+
+    func testNeverClaimsAVocation() {
+        // A week of Xcode and Terminal used to print "Software developer" as the
+        // first line of me.md. Which apps are open is not who someone is.
+        insertAppSwitches(app: "Xcode", count: 40)
+        insertAppSwitches(app: "Terminal", count: 30)
+        insertAppSwitches(app: "Figma", count: 10)
+
+        let all = extractor.extractFacts(days: 1).map(\.text)
+        for vocation in ["Software developer", "Designer", "Writer", "Researcher",
+                         "Content creator", "Business/analyst", "Student"] {
+            XCTAssertFalse(all.contains { $0.contains(vocation) },
+                           "mull must not name a vocation, got: \(all)")
+        }
+    }
+
+    func testNeverClaimsATechStack() {
+        // Copying about a technology is not using it, and mull could never tell
+        // the difference from clipboard text alone.
+        insertClipboard("the SwiftUI layout I settled on uses a VStack")
+        insertClipboard("SwiftUI previews stopped rebuilding after the update")
+        insertClipboard("moved the sheet over to the SwiftUI navigation stack")
+
+        let all = extractor.extractFacts(days: 1).map(\.text)
+        XCTAssertFalse(all.contains { $0.hasPrefix("Works with:") },
+                       "mull must not assert a tech stack, got: \(all)")
+    }
+
+    func testNeverClaimsADomain() {
+        // Two keyword hits from a fixed list used to print "Working on
+        // authentication" into the user's identity file.
+        for _ in 0..<10 {
+            insertClipboard("the auth token refresh and the login session handoff")
+        }
+
+        let all = extractor.extractFacts(days: 1).map(\.text)
+        XCTAssertFalse(all.contains { $0.hasPrefix("Working on ") },
+                       "mull must not assert a domain, got: \(all)")
     }
 
     // MARK: - Helpers

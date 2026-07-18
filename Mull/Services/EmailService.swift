@@ -25,6 +25,58 @@ final class EmailService {
         UserDefaults.standard.bool(forKey: "emailCaptureEnabled")
     }
 
+    // MARK: - Access problems
+    //
+    // Talking to Mail.app raises a macOS Automation prompt, and the old code had
+    // no branch for "the user said no": the script wrapped its whole body in a
+    // bare `try`, `fetchRecent` returned on any error, and the Settings toggle
+    // stayed visibly ON promising a capture that would never happen again for the
+    // life of the install. A silent permanent failure is the worst kind — the
+    // problem is now a value the UI can show.
+
+    /// Why mull can't read mail headers, in the user's terms.
+    /// `Error` so it can travel as the failure of a `Result` from the script runner.
+    enum AccessProblem: Error, Equatable, Sendable {
+        /// The macOS Automation permission was denied (AppleScript error -1743).
+        case automationDenied
+        /// Mail.app has no accounts, so there is no inbox to read.
+        case mailNotConfigured
+        /// Anything else AppleScript reported, verbatim.
+        case scriptFailed(String)
+
+        var message: String {
+            switch self {
+            case .automationDenied:
+                "macOS is blocking mull from controlling Mail. Allow it in System Settings › Privacy & Security › Automation › mull › Mail."
+            case .mailNotConfigured:
+                "Mail.app has no accounts set up, so there is no inbox to read."
+            case .scriptFailed(let detail):
+                "Mail returned an error: \(detail)"
+            }
+        }
+
+        /// Only the Automation case can be re-asked from inside mull; the rest
+        /// need something fixed outside it.
+        var isPermission: Bool { self == .automationDenied }
+    }
+
+    /// AppleScript is not thread-safe and mull now runs it from two places (the
+    /// five-minute poll and the Settings access check), so every Apple event goes
+    /// through one serial queue. Keeping it off the main thread also means the
+    /// Settings window stays alive while macOS puts up the Automation prompt.
+    private static let scriptQueue = DispatchQueue(label: "com.mull.email.applescript")
+
+    /// The last thing that went wrong talking to Mail, or nil if the last attempt
+    /// worked. Static and lock-guarded because the poll writes it from
+    /// `scriptQueue` while Settings reads it on the main thread.
+    private static let problemLock = NSLock()
+    private static var storedProblem: AccessProblem?
+
+    static var lastProblem: AccessProblem? {
+        get { problemLock.lock(); defer { problemLock.unlock() }; return storedProblem }
+        set { problemLock.lock(); storedProblem = newValue; problemLock.unlock() }
+    }
+
     init(database: DatabaseService) {
         self.database = database
     }
@@ -46,36 +98,109 @@ final class EmailService {
     /// Restart if settings changed.
     func refreshState() {
         stop()
-        if isEnabled { start() }
+        // Turning capture off retires the old complaint with it — otherwise the
+        // error row outlives the setting that caused it.
+        if isEnabled { start() } else { Self.lastProblem = nil }
+    }
+
+    /// Ask Mail whether mull can actually read it, raising the Automation prompt
+    /// if it hasn't been answered yet. Returns nil when capture will work.
+    ///
+    /// Deliberately a *static* probe with no side effects beyond `lastProblem`:
+    /// Settings calls it the moment the user opts in, so the toggle can report the
+    /// real answer instead of assuming one.
+    static func checkMailAccess() async -> AccessProblem? {
+        await withCheckedContinuation { continuation in
+            scriptQueue.async {
+                let problem = probeAccounts()
+                lastProblem = problem
+                continuation.resume(returning: problem)
+            }
+        }
+    }
+
+    /// The smallest question that still triggers the Automation prompt, and whose
+    /// answer also distinguishes "denied" from "Mail has no accounts" — two
+    /// failures that look identical from an empty inbox query.
+    private static func probeAccounts() -> AccessProblem? {
+        let script = """
+        tell application "Mail"
+            return (count of accounts)
+        end tell
+        """
+        guard let scriptObj = NSAppleScript(source: script) else {
+            return .scriptFailed("mull could not compile its Mail query.")
+        }
+        var error: NSDictionary?
+        let result = scriptObj.executeAndReturnError(&error)
+        if let error { return problem(from: error) }
+        return result.int32Value > 0 ? nil : .mailNotConfigured
+    }
+
+    /// Map AppleScript's error dictionary onto something a person can act on.
+    /// -1743 is `errAEEventNotPermitted` — the Automation denial, and the whole
+    /// reason this mapping exists.
+    private static func problem(from error: NSDictionary) -> AccessProblem {
+        let code = (error[NSAppleScript.errorNumber] as? Int) ?? 0
+        let message = (error[NSAppleScript.errorMessage] as? String) ?? "unknown error \(code)"
+        switch code {
+        case -1743, -1744:
+            return .automationDenied
+        case -600, -1728:
+            // Mail isn't running/installed, or there is no inbox object to get.
+            return .mailNotConfigured
+        default:
+            return .scriptFailed(message)
+        }
     }
 
     /// Fetch recent emails (last 24h) from Mail.app.
+    ///
+    /// Runs on `scriptQueue`, so a hung or prompting Apple event can't freeze the
+    /// UI. Every mutation of the dedup set happens on that one queue.
     private func fetchRecent() {
         guard isEnabled else { return }
+        Self.scriptQueue.async { [weak self] in
+            guard let self, self.isEnabled else { return }
+            switch Self.runInboxQuery() {
+            case .failure(let problem):
+                Self.lastProblem = problem
+            case .success(let output):
+                Self.lastProblem = nil
+                self.record(output)
+            }
+        }
+    }
 
+    /// Ask Mail for the last 24h of headers. The body is no longer wrapped in a
+    /// blanket `try` — swallowing the error there is what turned a denied prompt
+    /// into a permanently, silently empty capture.
+    private static func runInboxQuery() -> Result<String, AccessProblem> {
         let script = """
         tell application "Mail"
             set output to ""
-            try
-                set recentMessages to (every message of inbox whose date received > (current date) - 86400)
-                repeat with msg in recentMessages
-                    set msgSubject to subject of msg
-                    set msgSender to sender of msg
-                    set msgDate to date received of msg
-                    set output to output & msgSubject & "\\t" & msgSender & "\\t" & (msgDate as string) & "\\n"
-                end repeat
-            end try
+            set recentMessages to (every message of inbox whose date received > (current date) - 86400)
+            repeat with msg in recentMessages
+                set msgSubject to subject of msg
+                set msgSender to sender of msg
+                set msgDate to date received of msg
+                set output to output & msgSubject & "\\t" & msgSender & "\\t" & (msgDate as string) & "\\n"
+            end repeat
             return output
         end tell
         """
 
+        guard let scriptObj = NSAppleScript(source: script) else {
+            return .failure(.scriptFailed("mull could not compile its Mail query."))
+        }
         var error: NSDictionary?
-        guard let scriptObj = NSAppleScript(source: script) else { return }
         let result = scriptObj.executeAndReturnError(&error)
+        if let error { return .failure(problem(from: error)) }
+        return .success(result.stringValue ?? "")
+    }
 
-        guard error == nil, let output = result.stringValue, !output.isEmpty else { return }
-
-        // Parse tab-separated lines
+    /// Turn the tab-separated script output into events.
+    private func record(_ output: String) {
         let lines = output.components(separatedBy: "\n").filter { !$0.isEmpty }
 
         for line in lines {

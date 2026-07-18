@@ -82,9 +82,15 @@ struct TimeBlockEngine {
 
         // Step 4: Settle each block's face on its dominant app (the comment at the top
         // says "dominant" — before this, the first event's app silently won), then label.
+        // Chrome is computed over the whole day first, because the question "is
+        // this segment furniture?" can only be answered by looking at the corpus,
+        // never at one title.
         for i in 0..<blocks.count {
             blocks[i].finalizeDominantApp()
-            blocks[i].label = generateLabel(for: blocks[i])
+        }
+        let chrome = chromeSegments(in: blocks)
+        for i in 0..<blocks.count {
+            blocks[i].label = generateLabel(for: blocks[i], chrome: chrome)
         }
 
         return blocks
@@ -92,14 +98,17 @@ struct TimeBlockEngine {
 
     /// Generate a human-readable label for a time block.
     /// Priority: project name > file name > window title > clipboard > app name
-    private func generateLabel(for block: TimeBlock) -> String {
+    private func generateLabel(for block: TimeBlock, chrome: Set<String>) -> String {
         if let topTitle = block.topWindowTitle {
             let parsed = parseWindowTitle(topTitle, app: block.app)
+            // A segment that is really the app's own furniture is not a project,
+            // whatever position it occupies in the title.
+            let project = parsed.project.flatMap { isValidLabel($0, chrome: chrome) ? $0 : nil }
             // Prefer "Project — File" format if both exist
-            if let project = parsed.project, let file = parsed.file {
+            if let project, let file = parsed.file {
                 return "\(project) — \(file)"
             }
-            if let project = parsed.project {
+            if let project {
                 return project
             }
             if let file = parsed.file {
@@ -387,9 +396,10 @@ extension TimeBlockEngine {
         }
 
         // Step 1: Group blocks by project/task (same label = same task)
+        let chrome = chromeSegments(in: blocks)
         var taskGroups: [String: [TimeBlock]] = [:]
         for block in blocks {
-            let key = normalizeTaskKey(block)
+            let key = normalizeTaskKey(block, chrome: chrome)
             taskGroups[key, default: []].append(block)
         }
 
@@ -398,7 +408,7 @@ extension TimeBlockEngine {
             let totalDuration = blocks.reduce(0.0) { $0 + $1.activeDuration }
             let totalEvents = blocks.reduce(0) { $0 + $1.eventCount }
             let primaryApp = mostCommonApp(in: blocks)
-            let label = bestLabel(for: blocks, key: key)
+            let label = bestLabel(for: blocks, key: key, chrome: chrome)
 
             return ActivitySummary(
                 label: label,
@@ -434,11 +444,11 @@ extension TimeBlockEngine {
 
     /// Normalize block into a task key for grouping.
     /// Same project across Xcode + Code + Terminal = same task.
-    private func normalizeTaskKey(_ block: TimeBlock) -> String {
+    private func normalizeTaskKey(_ block: TimeBlock, chrome: Set<String>) -> String {
         // If we have a parsed title with a project, use that
         if let topTitle = block.topWindowTitle {
             let parsed = parseWindowTitle(topTitle, app: block.app)
-            if let project = parsed.project {
+            if let project = parsed.project, isValidLabel(project, chrome: chrome) {
                 return project.lowercased()
             }
         }
@@ -467,7 +477,7 @@ extension TimeBlockEngine {
         return counts.max(by: { $0.value < $1.value })?.key ?? "Unknown"
     }
 
-    private func bestLabel(for blocks: [TimeBlock], key: String) -> String {
+    private func bestLabel(for blocks: [TimeBlock], key: String, chrome: Set<String>) -> String {
         // Find the most specific label from the longest block
         let sorted = blocks.sorted { $0.duration > $1.duration }
         for block in sorted {
@@ -475,35 +485,39 @@ extension TimeBlockEngine {
                 let parsed = parseWindowTitle(title, app: block.app)
                 // Prefer "Project — File" if both exist
                 if let project = parsed.project, let file = parsed.file {
-                    if isValidLabel(project) { return "\(project) — \(file)" }
+                    if isValidLabel(project, chrome: chrome) { return "\(project) — \(file)" }
                 }
-                if let project = parsed.project, isValidLabel(project) {
+                if let project = parsed.project, isValidLabel(project, chrome: chrome) {
                     return project
                 }
             }
             if let label = sorted.first?.label, !label.isEmpty, label != sorted.first?.app,
-               isValidLabel(label) {
+               isValidLabel(label, chrome: chrome) {
                 return label
             }
         }
         return key.prefix(1).uppercased() + key.dropFirst()
     }
 
-    /// Filter out labels that are Claude Code prompts, emails, or system strings.
-    private func isValidLabel(_ label: String) -> Bool {
-        // Skip Japanese prompts (contain ください, して, etc.)
-        if label.contains("ください") || label.contains("してください") { return false }
-        // Skip question marks (it's a prompt, not a project)
-        if label.contains("?") || label.contains("？") { return false }
-        // Skip email addresses
-        if label.contains("@") && label.contains(".") { return false }
-        // Skip known non-project strings
-        let skipPrefixes = ["Analyze ", "Evaluate ", "Fix ", "Debug ", "Review ",
-                            "Welcome", "Getting Started", "Untitled", "gpt-4", "gpt-3"]
-        if skipPrefixes.contains(where: { label.hasPrefix($0) }) { return false }
-        // Skip if too long (likely a sentence/prompt)
-        if label.count > 40 { return false }
-        return true
+    /// Whether a label may be presented as the thing the user was working on.
+    ///
+    /// Shape comes from `ProjectNames`, shared with `FactExtractor` and `Entity`
+    /// so the three cannot drift apart again. `chrome` is the corpus half: it is
+    /// what stops `元のプロファイル` — Firefox's default profile name, present in
+    /// the title of every Firefox window — from being promoted to a project, as
+    /// it was in the shipped vault. No blocklist can catch that; it is a
+    /// different string in every locale.
+    private func isValidLabel(_ label: String, chrome: Set<String>) -> Bool {
+        if chrome.contains(label) { return false }
+        return ProjectNames.isPlausible(label)
+    }
+
+    /// Chrome segments observed across a set of blocks.
+    private func chromeSegments(in blocks: [TimeBlock]) -> Set<String> {
+        ProjectNames.chrome(in: blocks.compactMap { block in
+            guard let title = block.topWindowTitle else { return nil }
+            return (app: block.app, title: title)
+        })
     }
 }
 
@@ -577,16 +591,22 @@ struct DaySnapshot: Identifiable {
     let isToday: Bool
     var id: Date { date }
 
+    /// The weekday abbreviation in the reader's own language.
+    ///
+    /// `"EEE"` is an English-shaped request — it returned "Sun" on a Japanese Mac
+    /// that writes 日. The standalone symbols are the form meant to appear as a
+    /// column heading rather than inside a sentence, which is exactly the use here.
     var dayName: String {
-        let f = DateFormatter()
-        f.dateFormat = "EEE"
-        return f.string(from: date)
+        let cal = Calendar.current
+        let index = cal.component(.weekday, from: date) - 1
+        return cal.shortStandaloneWeekdaySymbols[index]
     }
 
+    /// The bare day digit. Deliberately not a date *format*: a localised "d" comes
+    /// back as 19日 in Japanese, and this is rendered inside a small fixed circle
+    /// that has room for the number and nothing else.
     var dayNumber: String {
-        let f = DateFormatter()
-        f.dateFormat = "d"
-        return f.string(from: date)
+        String(Calendar.current.component(.day, from: date))
     }
 
     var durationFormatted: String {
@@ -672,9 +692,10 @@ extension TimeBlockEngine {
             let blocks = generateBlocks(for: date)
 
             var dayProjectDuration: [String: (duration: TimeInterval, label: String, app: String)] = [:]
+            let chrome = chromeSegments(in: blocks)
 
             for block in blocks {
-                let key = normalizeTaskKey(block)
+                let key = normalizeTaskKey(block, chrome: chrome)
 
                 var data = accum[key] ?? ProjectAccum(
                     displayName: block.label.isEmpty ? block.app : block.label,

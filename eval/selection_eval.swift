@@ -6,7 +6,8 @@ import Foundation
 //
 // Run:
 //   swiftc -o /tmp/seleval \
-//     Mull/Services/Entity.swift Mull/Services/Signal.swift Mull/Services/Selection.swift \
+//     Mull/Core/ProjectNames.swift Mull/Core/Entity.swift \
+//     Mull/Services/Signal.swift Mull/Services/Selection.swift \
 //     Mull/Services/TestInput.swift Mull/Services/SensitiveText.swift \
 //     eval/selection_eval.swift && /tmp/seleval
 //
@@ -16,7 +17,7 @@ import Foundation
 // MARK: - Shim (matches the real RecordingEvent's shape; no GRDB)
 
 struct RecordingEvent {
-    enum EventType { case screenText, keystroke, clipboard, appSwitch, audio }
+    enum EventType { case screenText, keystroke, clipboard, appSwitch, audio, windowBody }
     var timestamp: Date
     var eventType: EventType
     var appName: String?

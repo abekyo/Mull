@@ -63,7 +63,7 @@ enum LiveContextGenerator {
         l.append("   - `whats_active_now` — current app / project / recent actions. Call this FIRST.")
         l.append("   - `search` — relevance-ranked retrieval, scoped to the current project.")
         l.append("   - `get_projects` — where they left off on each project.")
-        l.append("4. **full.md** — everything, including raw activity. Only when starting a big task.")
+        l.append("4. **full.md** — me.md + now.md + recent activity in one file. Only when starting a big task.")
         l.append("")
         l.append("## The vault")
         l.append("- `me.md`, `now.md`, `full.md` — the 3-layer context above.")
@@ -143,13 +143,13 @@ enum LiveContextGenerator {
         var agentBlocks: [ContextBlock] = []
 
         // From mull memories (if they exist from past LLM runs)
-        let invalidProjects = ["Welcome", "Analyze project structure", "Getting Started",
-                                "Untitled", "Visual Studio Code"]
         for mem in memories where mem.memoryType == .user {
-            // Skip stale/invalid project references
+            // Skip stale/invalid project references. Same shape gate as everywhere
+            // else — this was a fourth, shorter, differently-worded blocklist.
             if mem.description.hasPrefix("Working on:") {
                 let project = mem.description.replacingOccurrences(of: "Working on: ", with: "")
-                if invalidProjects.contains(where: { project.hasPrefix($0) }) { continue }
+                    .trimmingCharacters(in: .whitespaces)
+                if !ProjectNames.isPlausible(project) { continue }
             }
             agentBlocks.append(ContextBlock(
                 id: Curator.memoryBlockID(name: mem.name, description: mem.description),
@@ -200,12 +200,31 @@ enum LiveContextGenerator {
     ) throws {
         var lines: [String] = []
 
-        // Current work-in-progress (what you're doing now, where to resume) is no
-        // longer pre-digested here by rule-based project inference. The AI gets it
-        // at USE-TIME via the `whats_active_now` and `search` MCP tools, anchored on
-        // live state (DIRECTION §4/§9.1). now.md keeps only durable, owned context.
-        lines.append("Current activity: the AI should call the `whats_active_now` / `search` MCP tools.")
-        lines.append("")
+        // What the user is doing right now.
+        //
+        // This section was, for a while, the literal string "Current activity: the
+        // AI should call the `whats_active_now` / `search` MCP tools." That is
+        // correct for Claude Code with MCP wired up, and worthless for every other
+        // reader now.md has — ChatGPT, an editor without MCP, a pasted block, the
+        // user's own eyes. mull's headline promise is that an AI reads this and
+        // knows; shipping an IOU in its place meant the product's central artifact
+        // was ~450 tokens, three of which were the same test keystroke.
+        //
+        // DIRECTION §4/§9.1 is still honoured: what it kills is *lossy rule-based
+        // summary* hardened into the file. `CurrentState` is not a summary — it is
+        // the live anchor itself (active entity, app, and the last few salient
+        // signals), already filtered for secrets and test input, assembled from
+        // rows and regenerated every 60s. Writing it down loses nothing that
+        // calling the tool would return; it only removes the requirement to have a
+        // tool.
+        let state = CurrentState.current(database: database)
+        let activity = state.summary()
+        if activity != "(no recent activity)" {
+            lines.append(activity)
+            lines.append("")
+            lines.append("_Fresher and deeper than this: call `whats_active_now` / `search`._")
+            lines.append("")
+        }
 
         // Active projects from memories
         let projects = memories.filter { $0.memoryType == .project }
@@ -324,17 +343,15 @@ enum LiveContextGenerator {
             let nearestProject: String
         }
 
-        // App/generic names that are NOT project names
-        let invalidProjects: Set<String> = [
-            "Visual Studio Code", "Code", "Xcode", "Cursor", "Zed",
-            "Safari", "Firefox", "Google Chrome", "Chrome", "Arc", "Brave",
-            "Finder", "Terminal", "iTerm2", "Warp", "Ghostty",
-            "Slack", "Discord", "Messages", "Mail", "Zoom", "Teams",
-            "System Settings", "System Preferences", "Activity Monitor",
-            "Welcome", "Getting Started", "Untitled", "New Tab",
-            "Claude", "ChatGPT", "Simulator", "Preview", "Notes",
-            "Bear", "Notion", "Obsidian", "loginwindow",
-        ]
+        // Which segments are projects is `ProjectNames`' job, shared with
+        // FactExtractor / TimeBlockEngine / Entity. The list that used to live
+        // here was one of four that disagreed with each other, and it is how a
+        // Finder window called "Downloads" ended up heading a project section in
+        // full.md — no blocklist can enumerate every folder someone opens.
+        let chrome = ProjectNames.chrome(in: titles.compactMap { event in
+            guard let title = event.textContent, let app = event.appName else { return nil }
+            return (app: app, title: title)
+        })
 
         // Aliases — merge different names for the same project
         let projectAliases: [String: String] = [
@@ -350,22 +367,13 @@ enum LiveContextGenerator {
         // Use the app's Xcode/Code project name pattern: "file — Project"
         let projectTimeline: [(Date, String)] = titles.compactMap { event in
             guard let text = event.textContent, !isMullOutput(text) else { return nil }
-            let separators = [" — ", " - "]
-            for sep in separators {
-                let parts = text.components(separatedBy: sep)
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { $0.count > 2 && $0.count < 40 }
-                // Last part is typically the project/app name in editors
-                if let project = parts.last, !invalidProjects.contains(project) {
-                    return (event.timestamp, normalizeProject(project))
-                }
-                // Fall back to second-to-last if last was an app name
-                if parts.count >= 2, let project = parts.dropLast().last,
-                   !invalidProjects.contains(project) {
-                    return (event.timestamp, normalizeProject(project))
-                }
-            }
-            return nil
+            guard let app = event.appName,
+                  !ProjectNames.contentDrivenApps.contains(app.lowercased()) else { return nil }
+            let parts = ProjectNames.segments(of: text)
+                .filter { !chrome.contains($0) && ProjectNames.isPlausible($0) }
+            // Last part is typically the project name in editors.
+            guard let project = parts.last else { return nil }
+            return (event.timestamp, normalizeProject(project))
         }
 
         // Associate each clipboard entry with the nearest project
@@ -377,8 +385,11 @@ enum LiveContextGenerator {
             if isSensitive(text) { continue }
             if isMullOutput(text) { continue }
 
-            // Dedup
-            let key = String(text.prefix(60).lowercased())
+            // Dedup on the whole item. Keying on the first 60 characters let two
+            // clipboard entries that shared an opening line through as separate
+            // bullets — visible in the shipped full.md as the same checklist
+            // printed twice.
+            let key = text.lowercased()
             guard !seen.contains(key) else { continue }
             seen.insert(key)
 

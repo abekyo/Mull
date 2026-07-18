@@ -6,7 +6,7 @@ import Foundation
 ///   2. updates the agent's own blocks in place,
 ///   3. appends genuinely new facts.
 ///
-/// This is the ACE "Curator" pattern (PRODUCT.md §"borrow ACE's Curator"): the only
+/// This is the ACE "Curator" pattern (DIRECTION.md §6): the only
 /// sanctioned way to write a curated file. Both the 60s rule-based pass
 /// (LiveContextGenerator) and the nightly LLM pass (MullEngine) go through here, so
 /// neither can clobber the other — or the human.
@@ -33,16 +33,56 @@ enum Curator {
 
     /// Read the user's pinned facts (comment + blank lines stripped). Scaffolds the
     /// file once if missing; never overwrites an existing one. Empty if none.
-    static func pinnedFacts() -> String {
+    static func pinnedFacts() -> String { readPinned().text }
+
+    /// Pinned content, split into what was used and what was withheld.
+    ///
+    /// Nothing validated this layer, and it is the most load-bearing text mull
+    /// has: pinned facts are declared authoritative and placed above everything
+    /// else in me.md, which is the first thing any AI reads about the user. The
+    /// shipped vault's `me.pinned.md` contained `ああ / あああ / あああ` —
+    /// keyboard mash, presumably typed once while checking that the file worked —
+    /// and mull had been handing it to every assistant as the user's identity for
+    /// over a month.
+    ///
+    /// Two constraints shape the fix. mull must not keep publishing content that
+    /// says nothing; and mull must not edit a file whose own header promises
+    /// "you own this file, mull NEVER overwrites it". So the filtering happens at
+    /// *read* time — the file on disk is untouched — and the withheld lines are
+    /// returned rather than dropped silently, so a surface can tell the user what
+    /// is being ignored and why. Deleting someone's writing without telling them
+    /// is the one thing a custode may not do.
+    static func readPinned() -> (text: String, withheld: [String]) {
         if !MullDirectory.exists(pinnedFileName) {
             MullDirectory.write(pinnedTemplate, to: pinnedFileName)
         }
-        guard let raw = MullDirectory.read(pinnedFileName) else { return "" }
-        return raw
-            .components(separatedBy: "\n")
-            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw = MullDirectory.read(pinnedFileName) else { return ("", []) }
+        return filterPinned(raw)
+    }
+
+    /// The filtering half of `readPinned`, split out so it can be tested without
+    /// touching the real `~/mull/me.pinned.md` — the test suite runs against the
+    /// user's actual vault directory, and this file is the one thing in it mull
+    /// has promised never to write.
+    static func filterPinned(_ raw: String) -> (text: String, withheld: [String]) {
+        var kept: [String] = []
+        var withheld: [String] = []
+        for line in raw.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#") { continue }
+            if trimmed.isEmpty { kept.append(line); continue }
+            // A pinned fact is a statement about the user. Strip list markers
+            // before judging, so "- ああ" is caught as readily as "ああ".
+            let body = trimmed.drop(while: { $0 == "-" || $0 == "*" || $0 == " " })
+            if TestInput.isLikelyTestInput(String(body)) {
+                withheld.append(trimmed)
+            } else {
+                kept.append(line)
+            }
+        }
+
+        return (kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
+                withheld)
     }
 
     // MARK: - Shared headers for the multi-writer layers
@@ -63,7 +103,7 @@ enum Curator {
     static func fullHeader(timestamp: String) -> String {
         """
         # full.md — complete context
-        _Auto-updated \(timestamp). Everything mull holds. Use when starting a big task._
+        _Auto-updated \(timestamp). me.md + now.md + recent activity in one file. Use when starting a big task._
         _Live blocks (`full:`) refresh every 60s; nightly LLM blocks (`nightly:`) refresh once a day. Edit either — your edits are kept._
         """
     }

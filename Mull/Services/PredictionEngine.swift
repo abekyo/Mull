@@ -6,7 +6,7 @@ import Foundation
 /// but it CAN predict what they'll *do* — and tomorrow's log settles it. This
 /// engine records behavior predictions and later grades them against the actual
 /// record, producing a hit-rate that tells us (and the user) how well mull's
-/// proactivity actually tracks reality. See PRODUCT.md "Epistemics".
+/// proactivity actually tracks reality. See DIRECTION.md 付録A "Epistemics".
 ///
 /// v1 makes one kind of prediction: resumption. When a project goes quiet for a
 /// day or two, mull predicts the user will return to it within a short window.

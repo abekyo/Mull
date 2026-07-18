@@ -16,9 +16,15 @@ final class ConsolidationScheduler {
 
     private let database: DatabaseService
 
-    // Configurable thresholds
-    private let minHoursSinceLast: Double = 24
-    private let minEventsRequired: Int = 50
+    // Configurable thresholds.
+    //
+    // Static, and not private, because these two numbers are the reason a new
+    // install shows nothing written for its first day — and until Home could quote
+    // them, that wait had no explanation anywhere in the UI. A light user sitting
+    // below the event gate saw an empty page indefinitely and no stated reason for
+    // it. A gate the user can't see is indistinguishable from a broken feature.
+    static let minHoursSinceLast: Double = 24
+    static let minEventsRequired: Int = 50
 
     // Scan throttle — minimum 10 minutes between data scans
     private var lastDataScanAt: Date = .distantPast
@@ -65,7 +71,7 @@ final class ConsolidationScheduler {
         guard let lastMull = lock.lastSummaryAt else { return true } // Never consolidated
 
         let hoursSince = Date().timeIntervalSince(lastMull) / 3600
-        return hoursSince >= minHoursSinceLast
+        return hoursSince >= Self.minHoursSinceLast
     }
 
     /// Gate 2: At least `minEventsRequired` new recording events.
@@ -76,7 +82,7 @@ final class ConsolidationScheduler {
         // `lastSummaryAt` stays nil forever, so `since` is .distantPast — fetching
         // rows here meant loading the ENTIRE event table (textContent included)
         // every 10 minutes just to compare a number against a threshold.
-        return database.countEvents(from: since, to: Date()) >= minEventsRequired
+        return database.countEvents(from: since, to: Date()) >= Self.minEventsRequired
     }
 
     /// Gate 3: No other mull process is running (PID check).

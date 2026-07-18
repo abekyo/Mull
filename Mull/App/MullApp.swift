@@ -15,11 +15,16 @@ struct MullApp: App {
         MenuBarExtra {
             MenuBarPanel()
                 .environmentObject(appState)
-                .preferredColorScheme(.light)
+                .mullChrome()
                 .onAppear { appState.markSummaryRead() }
         } label: {
+            // The status item announced as the constant "mull" whatever it was
+            // doing: three icon glyphs (summarizing / paused / recording) and an
+            // unread badge, none of which are words. The label stays "mull" for the
+            // menu bar's own layout; the state rides on the accessibility value.
             Label {
                 Text("mull")
+                    .accessibilityValue(menuBarStateDescription)
             } icon: {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: menuBarIconName)
@@ -38,8 +43,22 @@ struct MullApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
-                .preferredColorScheme(.light)
+                .mullChrome()
         }
+    }
+
+    /// The words for what `menuBarIconName` and the badge say in shape and colour.
+    private var menuBarStateDescription: String {
+        var state: String
+        if appState.isSummarizing {
+            state = "Writing tonight's summary"
+        } else if appState.isPaused {
+            state = "Paused"
+        } else {
+            state = "Recording"
+        }
+        if appState.hasUnreadSummary { state += ", unread summary" }
+        return state
     }
 
     private var menuBarIconName: String {
@@ -49,13 +68,60 @@ struct MullApp: App {
     }
 }
 
+// MARK: - Settings routing
+//
+// A deep link into Settings has to be able to say *which* page it means. A
+// message that asks you to choose an AI provider and then drops you on General
+// is a small dishonesty: it points somewhere and opens somewhere else.
+//
+// The tab order here mirrors `SettingsView`'s `TabView` exactly. If a tab is
+// ever added or reordered there, this enum moves with it.
+
+enum SettingsTab: Int, Hashable, CaseIterable {
+    case general = 0
+    case ai = 1
+    case data = 2
+    case profile = 3
+}
+
+/// Carries "open Settings *there*" from any call site to the Settings window.
+///
+/// It is a separate object from AppState because it is pure navigation intent —
+/// nothing here is recorded, persisted, or part of what mull knows about you.
+@MainActor
+final class SettingsRouter: ObservableObject {
+    static let shared = SettingsRouter()
+    /// The tab Settings should be showing. Bind this to `TabView(selection:)`.
+    @Published var selected: SettingsTab = .general
+    private init() {}
+}
+
 // MARK: - AppDelegate — manages real NSWindows directly
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var mainWindow: NSWindow?
     var onboardingWindow: NSWindow?
-    var appState: AppState?
+
+    /// The work the launch wanted to do, held back only until there is an AppState to
+    /// do it with.
+    ///
+    /// Both windows need `appState`, and `appState` arrives from the App scene's first
+    /// body evaluation, which may or may not have happened by the time AppKit calls
+    /// `applicationDidFinishLaunching`. This used to be papered over with a 0.3s sleep,
+    /// which meant every first launch opened onto a third of a second of nothing —
+    /// a wait that was too long when SwiftUI was ready immediately and would still have
+    /// been a race had it been slow. The assignment itself is the signal, so the window
+    /// opens on the exact instant it becomes possible and not a frame later.
+    var appState: AppState? {
+        didSet {
+            guard appState != nil, let open = pendingLaunchWindow else { return }
+            pendingLaunchWindow = nil
+            open()
+        }
+    }
+    private var pendingLaunchWindow: (() -> Void)?
+
     static var shared: AppDelegate?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -67,16 +133,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
+        let openFirstWindow: () -> Void
         if !hasCompletedOnboarding {
-            // Delay to let SwiftUI create AppState first
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self.showOnboarding()
-            }
+            // Pick up where they left off. Onboarding can end without being finished
+            // — quit mid-flow, closed window, skipped permissions — and restarting
+            // from the welcome screen each time asks the user to re-read a pitch they
+            // have already read to get back to the one step they still owe.
+            let saved = UserDefaults.standard.integer(forKey: "onboardingStep")
+            let startStep = OnboardingView.OnboardingStep(rawValue: saved) ?? .welcome
+            openFirstWindow = { [weak self] in self?.showOnboarding(startStep: startStep) }
         } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self.showMainWindow()
-            }
+            openFirstWindow = { [weak self] in self?.showMainWindow() }
         }
+
+        if appState != nil {
+            openFirstWindow()
+        } else {
+            pendingLaunchWindow = openFirstWindow
+        }
+
+        installSetupMenuItem()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -98,7 +174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let appState else { return }
         let view = FullWindowView()
             .environmentObject(appState)
-            .preferredColorScheme(.light)
+            .mullChrome()
 
         let controller = NSHostingController(rootView: view)
 
@@ -111,7 +187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = ""
         window.contentViewController = controller
         // Ivory page + a quiet, integrated title bar with no visible title text.
-        window.backgroundColor = NSColor(red: 0.949, green: 0.929, blue: 0.882, alpha: 1)
+        window.backgroundColor = NSColor(DS.canvas)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.appearance = NSAppearance(named: .aqua)
@@ -131,7 +207,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // SettingsView in our own NSWindow, exactly like the main window.
     var settingsWindow: NSWindow?
 
-    func showSettings() {
+    /// Open Settings, optionally on a specific tab.
+    ///
+    /// The tab is set *before* the window is built so a first open lands on the
+    /// right page rather than visibly jumping to it. Passing nil leaves whatever
+    /// page the user was last on alone — reopening Settings from a neutral place
+    /// shouldn't yank them somewhere.
+    func showSettings(tab: SettingsTab? = nil) {
+        if let tab { SettingsRouter.shared.selected = tab }
+
         if let existing = settingsWindow {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -140,7 +224,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let appState else { return }
         let view = SettingsView()
             .environmentObject(appState)
-            .preferredColorScheme(.light)
+            .mullChrome()
         let controller = NSHostingController(rootView: view)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
@@ -150,7 +234,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Settings"
         window.contentViewController = controller
-        window.backgroundColor = NSColor(red: 0.949, green: 0.929, blue: 0.882, alpha: 1)
+        window.backgroundColor = NSColor(DS.canvas)
         window.appearance = NSAppearance(named: .aqua)
         window.center()
         window.isReleasedWhenClosed = false
@@ -163,33 +247,164 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showOnboarding(startStep: OnboardingView.OnboardingStep = .welcome) {
         guard let appState else { return }
+
+        // Already up (a second "Finish setup" click): bring it forward rather than
+        // building a second window over the first.
+        if let existing = onboardingWindow {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
         let view = OnboardingView(isPresented: .constant(true), startStep: startStep)
             .environmentObject(appState)
-            .preferredColorScheme(.light)
+            .mullChrome()
 
         let controller = NSHostingController(rootView: view)
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
+        // The window takes its size from the content rather than being told one.
+        //
+        // It used to be built at a hard-coded 460×520 around a view whose own frame is
+        // 500×560, with no `.resizable` — so 40 points of width and 40 of height were
+        // cropped off a screen the user cannot scroll, and the "Skip for now" line and
+        // the primary button at the foot of several steps were simply not reachable.
+        // `NSWindow(contentViewController:)` sizes itself to the hosting controller's
+        // fitting size, so the two numbers can no longer disagree, and resizing is
+        // allowed so a larger text size has somewhere to go.
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable, .resizable]
         window.title = "Welcome to mull"
-        window.contentViewController = controller
-        window.backgroundColor = NSColor(red: 0.949, green: 0.929, blue: 0.882, alpha: 1)
+        window.backgroundColor = NSColor(DS.canvas)
         window.appearance = NSAppearance(named: .aqua)
         window.center()
         window.isReleasedWhenClosed = false
+        // The red button is a real exit and has to run the real teardown.
+        //
+        // SwiftUI's `.interactiveDismissDisabled()` on the view does nothing to an
+        // AppKit window, so closing here used to bypass `finishOnboarding()`
+        // entirely: `onboardingWindow` stayed non-nil (so nothing could reopen it),
+        // `showMainWindow()` never ran, and the user was left in a menu-bar-only app
+        // that had been granted nothing and recorded nothing, with no way back to
+        // setup for the rest of the session. Closing is allowed — being stranded by
+        // it is not.
+        window.delegate = self
         window.makeKeyAndOrderFront(nil)
 
         self.onboardingWindow = window
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// The finished path: onboarding is done, so the window goes and the app opens.
     func closeOnboarding() {
-        onboardingWindow?.close()
+        guard let window = onboardingWindow else {
+            refreshSetupMenuItem()
+            showMainWindow()
+            return
+        }
         onboardingWindow = nil
+        // Teardown is already running; the delegate must not run it a second time.
+        window.delegate = nil
+        window.close()
+        refreshSetupMenuItem()
         showMainWindow()
+    }
+
+    /// The unfinished path: the user closed the window themselves.
+    ///
+    /// Same teardown as `closeOnboarding()` — window released, main window opened —
+    /// but `hasCompletedOnboarding` deliberately stays false, so the step they left
+    /// is where they resume, both from the menu item and on next launch.
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === onboardingWindow else { return }
+        onboardingWindow = nil
+        refreshSetupMenuItem()
+        showMainWindow()
+
+        if appState?.hasCompletedOnboarding == false {
+            appState?.postNotice(
+                "Setup isn't finished",
+                detail: "mull is recording only what it already has permission for. "
+                    + "Pick it back up from mull → Finish Setting Up mull.",
+                isProblem: true
+            )
+        }
+    }
+
+    // MARK: - "Finish setup" — the way back into an abandoned onboarding
+    //
+    // Skipping the permissions step is a legitimate choice, but it used to be a
+    // one-way door: onboarding marked itself complete on the way out and never
+    // offered itself again, leaving a keystroke recorder that records no
+    // keystrokes and never asks again. This menu item is the standing offer.
+
+    private var setupMenuItem: NSMenuItem?
+    private var setupMenuSeparator: NSMenuItem?
+
+    /// SwiftUI builds the main menu as the scenes come up, so at the top of
+    /// `applicationDidFinishLaunching` there may be nothing to insert into yet.
+    ///
+    /// Waiting a fixed 0.3s for it was both too long (the menu is usually already
+    /// there) and not actually a guarantee (nothing promises it will be there after
+    /// any particular interval). So: try now, and if the menu hasn't been built, try
+    /// again on the next turn of the run loop until it has. It lands on the first turn
+    /// where the insert can succeed. The attempt budget only exists so a hypothetical
+    /// menu-less build cannot spin forever.
+    private func installSetupMenuItem(attemptsRemaining: Int = 60) {
+        guard setupMenuItem == nil else { return }
+        guard let appMenu = NSApp.mainMenu?.items.first?.submenu else {
+            guard attemptsRemaining > 0 else { return }
+            DispatchQueue.main.async { self.installSetupMenuItem(attemptsRemaining: attemptsRemaining - 1) }
+            return
+        }
+        let item = NSMenuItem(title: "Finish Setting Up mull…",
+                              action: #selector(resumeOnboarding),
+                              keyEquivalent: "")
+        item.target = self
+        let separator = NSMenuItem.separator()
+        appMenu.insertItem(item, at: 0)
+        appMenu.insertItem(separator, at: 1)
+        setupMenuItem = item
+        setupMenuSeparator = separator
+        refreshSetupMenuItem()
+    }
+
+    /// Present only while there is something to finish. Held by reference rather
+    /// than by index — the app menu is SwiftUI's, and its contents move.
+    func refreshSetupMenuItem() {
+        let done = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        setupMenuItem?.isHidden = done
+        setupMenuSeparator?.isHidden = done
+    }
+
+    @objc private func resumeOnboarding() {
+        let saved = UserDefaults.standard.integer(forKey: "onboardingStep")
+        showOnboarding(startStep: OnboardingView.OnboardingStep(rawValue: saved) ?? .welcome)
+    }
+
+    // MARK: - Permission recovery
+
+    /// One click back to the pane that re-grants a permission mull just lost.
+    ///
+    /// A sheet on mull's own window rather than a free-standing modal: the user is
+    /// most likely somewhere else entirely (often in System Settings, having just
+    /// flipped the switch), and an alert that seizes the foreground to tell them
+    /// what they already know is exactly the nagging the design north star rules
+    /// out. With no window on screen, the in-app notice and the system notification
+    /// carry it instead — this simply doesn't fire.
+    func presentPermissionRecovery(_ permission: PermissionService.Permission) {
+        guard let window = mainWindow, window.isVisible, window.attachedSheet == nil else { return }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "mull stopped recording \(permission.whatStops)"
+        alert.informativeText = "\(permission.displayName) is no longer granted to mull. "
+            + "Turning it back on picks up where the record left off — nothing already "
+            + "kept is affected."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Not Now")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.appState?.openSettingsFor(permission)
+        }
     }
 }

@@ -229,7 +229,7 @@ final class ProactiveEngine: NSObject {
             // Heavy DB work off main thread
             let engine = TimeBlockEngine(database: db)
             let cache = engine.projectSnapshots(days: 14)
-            // Only push observations, never interpretations/judgments (PRODUCT.md "Epistemics").
+            // Only push observations, never interpretations/judgments (DIRECTION.md 付録A "Epistemics").
             let patterns = BehaviorPatternEngine(database: db).detectPatterns()
                 .filter { $0.autoSurfaceable }
             let upcoming = cal.upcomingEvents(limit: 1)

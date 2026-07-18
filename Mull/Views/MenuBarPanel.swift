@@ -6,18 +6,32 @@ import SwiftUI
 /// Just: status + 3 actions.
 ///
 ///   1. Recording status (running / paused / events count)
-///   2. Copy to AI (one click)
-///   3. Open Dashboard (⇧⌘D)
+///   2. Copy context (one click)
+///   3. Open mull (⇧⌘D)
 ///   4. Pause / Resume
 struct MenuBarPanel: View {
     @EnvironmentObject var appState: AppState
     @State private var showCopied = false
-    @State private var captureText = ""
+    /// The capture draft outlives the panel. The panel is dismissed by anything —
+    /// Escape, a click outside, another app taking focus — and half a thought is
+    /// still the user's, not ours to throw away. It comes back on the next open.
+    @AppStorage("menuBarCaptureDraft") private var captureText = ""
     @State private var captureSaved = false
     @FocusState private var captureFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
+            // Escape closes the panel and leaves the draft alone. Bound explicitly
+            // because the field editor's own cancelOperation *clears the field*, which
+            // read as "Escape deleted what I typed". A key equivalent is resolved
+            // before the field editor sees the key, so this wins.
+            Button("") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+
             // Permission banner — only on setup
             if !appState.permissions.inputMonitoringGranted || !appState.permissions.accessibilityGranted {
                 permissionBanner
@@ -39,10 +53,12 @@ struct MenuBarPanel: View {
             Divider()
 
             // Actions
-            VStack(spacing: 2) {
+            VStack(spacing: DS.hair) {
                 panelButton(
                     icon: showCopied ? "checkmark" : "doc.on.clipboard",
-                    label: showCopied ? "Copied!" : "Copy to AI",
+                    // "Copy to AI" frames the record as feed handed to a machine.
+                    // You are lending your own context; the label says so.
+                    label: showCopied ? "Copied" : "Copy context",
                     hint: "⇧⌘C",
                     accent: true
                 ) {
@@ -54,8 +70,8 @@ struct MenuBarPanel: View {
                 }
 
                 panelButton(
-                    icon: "square.grid.2x2",
-                    label: "Open Dashboard",
+                    icon: "macwindow",
+                    label: "Open mull",
                     hint: "⇧⌘D",
                     accent: false
                 ) {
@@ -74,16 +90,15 @@ struct MenuBarPanel: View {
                 HStack(spacing: DS.sm) {
                     ProgressView()
                         .controlSize(.mini)
-                    Text(appState.mullProgress ?? "Summarizing...")
+                    Text(appState.mullProgress ?? "Summarizing…")
                         .font(DS.captionFont)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(DS.inkDim)
                 }
                 .padding(.horizontal, DS.lg)
                 .padding(.vertical, DS.sm)
             }
         }
         .frame(width: DS.panelWidth)
-        .tint(DS.moon)   // keep native controls on the warm brand accent
     }
 
     // MARK: - Quick Capture
@@ -96,6 +111,9 @@ struct MenuBarPanel: View {
             Image(systemName: captureSaved ? "checkmark.circle.fill" : "square.and.pencil")
                 .font(DS.bodyFont)
                 .foregroundStyle(captureSaved ? DS.recording : DS.moon)
+                // The glyph flipping to a checkmark is the only confirmation that a
+                // capture landed — the field clears either way.
+                .accessibilityLabel(captureSaved ? "Saved to your inbox" : "Quick capture")
 
             TextField("Capture a thought…", text: $captureText)
                 .textFieldStyle(.plain)
@@ -106,10 +124,23 @@ struct MenuBarPanel: View {
             if !captureText.isEmpty {
                 Text("↵")
                     .font(DS.microFont)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(DS.inkFaint)
             }
         }
-        .onAppear { captureFocused = true }
+        // The focus grab is no longer unconditional. When a permission is missing the
+        // banner above is what the panel is for, and dropping the caret into a capture
+        // field would send the first keystroke of a reaction into the vault. Otherwise
+        // the field takes focus so an unfinished draft can simply be carried on.
+        .onAppear { captureFocused = permissionsSettled }
+    }
+
+    private var permissionsSettled: Bool {
+        appState.permissions.inputMonitoringGranted && appState.permissions.accessibilityGranted
+    }
+
+    /// Close the panel without touching the draft.
+    private func dismiss() {
+        NSApp.keyWindow?.close()
     }
 
     private func commitCapture() {
@@ -131,21 +162,45 @@ struct MenuBarPanel: View {
                 .frame(width: 8, height: 8)
                 .shadow(color: statusColor.opacity(0.5), radius: appState.isRecording && !appState.isPaused ? 4 : 0)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(statusLabel)
-                    .font(DS.bodyMedium)
-                Text("\(appState.todayEventCount) events today")
+            VStack(alignment: .leading, spacing: DS.hair) {
+                // A degraded state is not a caption, it is a thing to fix — so the line
+                // that names it is the control that opens the pane that fixes it.
+                if appState.isRecordingDegraded && !appState.isPaused {
+                    Button { appState.permissions.openInputMonitoringSettings() } label: {
+                        HStack(spacing: DS.xs) {
+                            Text("Limited — open Input Monitoring")
+                                .font(DS.bodyMedium)
+                            Image(systemName: "arrow.up.forward.app")
+                                .font(.system(size: 9))
+                        }
+                        .foregroundStyle(DS.moon)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("mull's keyboard tap is not delivering events — open the system pane")
+                } else {
+                    Text(statusLabel)
+                        .font(DS.bodyMedium)
+                }
+                Text("\(appState.todayCaptureLabel) today")
                     .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(DS.inkFaint)
                     .monospacedDigit()
+                    .help("Stored records — keystroke buffers, clipboard entries, window and app changes. Not a measure of what you did.")
             }
 
             Spacer()
 
             Text(appState.todayStorageFormatted)
                 .font(DS.microFont)
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(DS.inkGhost)
         }
+        // Paused and degraded draw the same amber dot, so the colour never
+        // distinguished all four states even for someone who can see it. The
+        // spoken value is `statusLabel`, which does.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recording status")
+        .accessibilityValue(statusLabel)
     }
 
     private var statusColor: Color {
@@ -165,6 +220,10 @@ struct MenuBarPanel: View {
     // MARK: - Panel Button
 
     // MARK: - Pause control (real — stops capture; timed or until-resume)
+    //
+    // The control names the state's *exit*, never an action the state cannot take.
+    // Offering "Pause Recording" while nothing is recording was the panel describing
+    // a world it wasn't in.
 
     @ViewBuilder
     private var pauseControl: some View {
@@ -177,6 +236,16 @@ struct MenuBarPanel: View {
             ) {
                 appState.resumeCapture()
             }
+        } else if !appState.isRecording {
+            // Stopped: the only move is to start again.
+            panelButton(
+                icon: "record.circle",
+                label: "Start Recording",
+                hint: nil,
+                accent: false
+            ) {
+                appState.startRecording()
+            }
         } else {
             Menu {
                 Button("Pause for 15 minutes") { appState.pauseCapture(for: 15 * 60) }
@@ -187,14 +256,14 @@ struct MenuBarPanel: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .foregroundStyle(.primary)
+            .foregroundStyle(DS.ink)
         }
     }
 
     /// "resumes 14:30" when a timed pause is active.
     private var resumeHint: String? {
         guard let ends = appState.pauseEndsAt else { return nil }
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("jmm")
         return "until \(f.string(from: ends))"
     }
 
@@ -224,7 +293,7 @@ struct MenuBarPanel: View {
                 if let hint {
                     Text(hint)
                         .font(DS.miniMedium)
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(DS.inkGhost)
                 }
             }
             .padding(.horizontal, DS.md)
@@ -235,7 +304,7 @@ struct MenuBarPanel: View {
             )
         }
         .buttonStyle(.plain)
-        .foregroundStyle(accent ? DS.moon : .primary)
+        .foregroundStyle(accent ? DS.moon : DS.ink)
     }
 
     // MARK: - Permission Banner
@@ -279,7 +348,7 @@ struct MenuBarPanel: View {
                     .font(DS.bodyFont)
                 Text(detail)
                     .font(DS.captionFont)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(DS.inkFaint)
             }
 
             Spacer()

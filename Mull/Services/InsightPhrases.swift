@@ -1,11 +1,21 @@
 import Foundation
 
-/// Barnum effect — turn generic data patterns into personal-feeling insights.
+/// Plain-language readings of the rule-based statistics.
 ///
 /// "Peak hours: 11:00, 14:00"
-///   → "You tend to hit your stride late morning. Your second wind comes after lunch."
+///   → "Your busiest hour was 11:00, with 14:00 close behind."
 ///
-/// Same data. Feels like it was written just for you.
+/// These lines report a measurement in words. They do not grade the day, praise the
+/// user, or name a personality: mull can see that the busiest hour was 06:00, but
+/// "you're an early riser" is a claim about a person, made from a clock. §1 Custode
+/// forbids the 所有者面 of "we analyzed you"; §1 Cultura forbids the chirpy
+/// productivity register that turns a number into a compliment.
+///
+/// The rule when adding a line here: state the observation and stop. Prefer the
+/// concrete measurement ("06:40 is this week's average start") over the label
+/// ("early riser"). If a sentence would still make sense about someone else's data,
+/// it is a horoscope, not an observation.
+///
 /// All rule-based. No LLM.
 struct InsightPhrases {
 
@@ -15,21 +25,23 @@ struct InsightPhrases {
         let peak = hourly.sorted { $0.eventCount > $1.eventCount }.first
         guard let p = peak, p.eventCount > 0 else { return nil }
 
+        let hour = String(format: "%02d:00", p.hour)
+
         switch p.hour {
         case 5...8:
-            return "You're an early riser — your most productive hours are before most people open their laptops."
+            return "Your busiest hour was \(hour), before most working days start."
         case 9...11:
-            return "Late morning is your power zone. You tend to do your deepest work before lunch."
+            return "Your busiest hour was \(hour), late morning."
         case 12...13:
-            return "You work through lunch — your focus peaks when others are taking breaks."
+            return "Your busiest hour was \(hour), over the middle of the day."
         case 14...16:
-            return "Your afternoon sessions are your strongest. You build momentum as the day goes on."
+            return "Your busiest hour was \(hour), in the afternoon."
         case 17...19:
-            return "You're an end-of-day finisher. Your best output comes in the final stretch."
+            return "Your busiest hour was \(hour), toward the end of the day."
         case 20...23:
-            return "You're a night owl. Your deepest focus happens when the world gets quiet."
+            return "Your busiest hour was \(hour), in the evening."
         case 0...4:
-            return "Late nights are your element. You do your most focused work in the small hours."
+            return "Your busiest hour was \(hour), overnight."
         default:
             return nil
         }
@@ -37,54 +49,80 @@ struct InsightPhrases {
 
     // MARK: - Weekday Pattern
 
-    static func weekdayInsight(weekday: [WeekdayStat]) -> String? {
+    /// `windowDays` is the span the buckets were summed over, which the caller
+    /// chose when it asked for the pattern. Without it there is no way to tell an
+    /// empty weekday from one the window has not reached.
+    static func weekdayInsight(weekday: [WeekdayStat], windowDays: Int = 7) -> String? {
         // Weekday encoding: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat.
+        //
+        // A bucket sums every occurrence of its weekday inside the window, so a
+        // weekday the window has not come round to yet sits at zero for want of
+        // having happened — and "Nothing was recorded on Friday", said on a
+        // Wednesday, is a claim about the future. Only weekdays that actually
+        // elapsed are considered, today excluded because it is still running.
+        let elapsed = elapsedWeekdayCounts(windowDays: windowDays)
+        let sampled = weekday.filter { (elapsed[$0.weekday] ?? 0) > 0 }
+
         // Need enough days with data before claiming a weekly rhythm — on a new
         // install most weekdays legitimately have zero events (no data yet), and
         // a zero must not be read as "a day off."
-        let daysWithData = weekday.filter { $0.eventCount > 0 }.count
+        let daysWithData = sampled.filter { $0.eventCount > 0 }.count
         guard daysWithData >= 4,
-              let busiest = weekday.max(by: { $0.eventCount < $1.eventCount }),
-              let quietest = weekday.min(by: { $0.eventCount < $1.eventCount }),
-              busiest.eventCount > 0 else { return nil }
+              let busiest = sampled.max(by: { $0.eventCount < $1.eventCount }),
+              let quietest = sampled.min(by: { $0.eventCount < $1.eventCount }),
+              busiest.eventCount > 0,
+              busiest.weekday != quietest.weekday else { return nil }
 
         if busiest.weekday == 1 || busiest.weekday == 7 { // Sun or Sat
-            return "Interestingly, you're most active on \(busiest.name) — weekends are your productive time."
+            return "\(busiest.name) carried the most activity of any day this week."
         }
 
-        // A genuine zero-event day (any weekday) once there's enough data to tell.
+        // An elapsed zero is still ambiguous: a day off, or a day mull was not
+        // running. It is worth saying only as the single gap in an otherwise
+        // complete week — several zeros side by side describe patchy recording,
+        // which is a fact about the recorder and not about the week.
         if quietest.eventCount == 0 {
-            return "You take \(quietest.name) completely off. Clear boundaries between work and rest."
+            guard daysWithData == sampled.count - 1 else {
+                return "\(busiest.name) carried more than any other day recorded."
+            }
+            if (elapsed[quietest.weekday] ?? 0) > 1 {
+                return "No \(quietest.name) in this window carries a record."
+            }
+            return "Nothing was recorded on \(quietest.name)."
         }
 
-        if busiest.weekday == 2 { // Monday
-            return "You hit the ground running on Mondays. You start the week with the most energy."
-        }
+        return "\(busiest.name) was the busiest day, \(quietest.name) the quietest."
+    }
 
-        if busiest.weekday == 6 { // Friday
-            return "Fridays are your power day. You push hardest before the weekend."
+    /// How many times each weekday came and went inside the window. Today is left
+    /// out: it is half-lived, and a quiet morning is not an empty day.
+    private static func elapsedWeekdayCounts(windowDays: Int, now: Date = Date()) -> [Int: Int] {
+        let calendar = Calendar.current
+        var counts: [Int: Int] = [:]
+        for offset in 1...max(windowDays, 1) {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
+            counts[calendar.component(.weekday, from: day), default: 0] += 1
         }
-
-        return "Your \(busiest.name)s tend to be the most intense. \(quietest.name)s are your quieter days."
+        return counts
     }
 
     // MARK: - Language Mix
 
     static func languageInsight(mix: LanguageMix) -> String? {
         if mix.japanesePercent > 40 && mix.englishPercent > 40 {
-            return "You operate in two languages naturally — switching between Japanese and English throughout the day."
+            return "Your text splits roughly evenly between Japanese and English."
         }
 
         if mix.codePercent > 20 {
-            return "A significant portion of your work is in code. You think in programming logic."
+            return "About \(Int(mix.codePercent))% of what you typed was code."
         }
 
         if mix.japanesePercent > 70 {
-            return "Your work is primarily in Japanese. You think and communicate in your native language."
+            return "\(Int(mix.japanesePercent))% of what you typed was Japanese."
         }
 
         if mix.englishPercent > 70 && mix.japanesePercent > 5 {
-            return "You work mainly in English, but Japanese appears in your communication."
+            return "Mostly English (\(Int(mix.englishPercent))%), with some Japanese."
         }
 
         return nil
@@ -96,21 +134,21 @@ struct InsightPhrases {
         guard let top = apps.first else { return nil }
 
         if top.percentage > 70 {
-            return "You're deeply committed to \(top.appName) — it's your primary workspace, and you rarely leave it."
+            return "\(top.appName) accounted for \(Int(top.percentage))% of your recorded time."
         }
 
-        if apps.count >= 3 {
+        if apps.count >= 3, top.percentage < 40 {
             let topThree = apps.prefix(3).map(\.appName).joined(separator: ", ")
-            if apps[0].percentage < 40 {
-                return "You spread your time across tools — \(topThree). You're a multi-tool operator."
-            }
+            // The figure is the leader's own share. Hung on "none of them above",
+            // it becomes a ceiling the leader is standing on top of.
+            return "Your time was spread across \(topThree), the largest share \(Int(top.percentage))%."
         }
 
-        if apps.contains(where: { ["Slack", "Discord", "Teams", "Zoom"].contains($0.appName) }) {
-            return "Your day includes both deep work and communication. You balance building with collaborating."
+        if let comm = apps.first(where: { ["Slack", "Discord", "Teams", "Zoom"].contains($0.appName) }) {
+            return "\(Int(comm.percentage))% of your time was in \(comm.appName)."
         }
 
-        return "\(top.appName) is your home base — where you spend the most time."
+        return "\(top.appName) took the most time, at \(Int(top.percentage))%."
     }
 
     // MARK: - Focus Style
@@ -119,19 +157,20 @@ struct InsightPhrases {
         let hours = totalDuration / 3600
 
         if mainActivities == 1 && hours > 2 {
-            return "You have the ability to maintain deep focus. Single-tasking for \(Int(hours))+ hours is rare."
+            let minutes = Int(totalDuration.truncatingRemainder(dividingBy: 3600) / 60)
+            return "One activity accounted for all \(Int(hours))h \(minutes)m recorded."
         }
 
         if mainActivities >= 4 {
-            return "You're a context-switcher — comfortable moving between multiple projects in one day."
+            return "\(mainActivities) separate activities today."
         }
 
         if mainActivities == 2 {
-            return "You tend to structure your day around two main themes. Balanced, not scattered."
+            return "Two activities today."
         }
 
         if hours > 6 {
-            return "A long day of active work. You put in the hours when it matters."
+            return "\(Int(hours)) hours of recorded activity."
         }
 
         return nil
@@ -143,20 +182,6 @@ struct InsightPhrases {
         guard keywords.count >= 3 else { return nil }
 
         let topThree = keywords.prefix(3).map(\.word)
-
-        // Check for patterns
-        let devWords = Set(["swift", "func", "struct", "class", "view", "controller", "storyboard", "api", "error", "debug"])
-        let devMatches = topThree.filter { devWords.contains($0.lowercased()) }
-        if devMatches.count >= 2 {
-            return "Your vocabulary this week is deeply technical. You're in builder mode."
-        }
-
-        let planWords = Set(["plan", "design", "todo", "review", "meeting", "discuss", "decide"])
-        let planMatches = topThree.filter { planWords.contains($0.lowercased()) }
-        if planMatches.count >= 2 {
-            return "Your recent focus has been on planning and coordination, not just execution."
-        }
-
-        return "The themes in your work this week: \(topThree.joined(separator: ", "))."
+        return "Most frequent words this week: \(topThree.joined(separator: ", "))."
     }
 }

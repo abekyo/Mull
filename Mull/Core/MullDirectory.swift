@@ -147,6 +147,10 @@ enum MullDirectory {
                 try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             }
             try content.write(to: url, atomically: true, encoding: .utf8)
+            // Re-applied on every write, not once at creation: the atomic write
+            // above replaces the file with a freshly created one, so whatever
+            // permissions the previous inode carried are gone.
+            FilePrivacy.protectFile(at: url)
             return true
         } catch {
             logger.error("Failed to write \(relativePath): \(error.localizedDescription)")

@@ -187,15 +187,33 @@ final class SearchServiceTests: XCTestCase {
         }
     }
 
-    /// Rows stay compact: long matches are capped and newlines flattened, so one hit
+    /// Rows stay compact: long matches are windowed and newlines flattened, so one hit
     /// can never push the rest of the timeline off screen.
+    ///
+    /// The bound is asserted as a bound rather than as an exact length. The row used
+    /// to be `raw.prefix(120)` and this test pinned that 120 — so it described the
+    /// implementation, not the requirement, and went red the moment the snippet became
+    /// match-centred (which is strictly better: a row now visibly contains the query).
+    /// What must hold is that the row is short and single-line.
     func testHighlightCapsLengthAndFlattensNewlines() {
         let raw = String(repeating: "migration notes ", count: 40) + "\ntrailing line"
         let result = SearchService.highlighted(raw, query: "migration")
         let text = String(result.characters)
 
-        XCTAssertEqual(text.count, 120)
+        // radius each side of the term, plus the term, plus at most two ellipses.
+        XCTAssertLessThanOrEqual(text.count, 2 * 60 + "migration".count + 2)
+        XCTAssertLessThan(text.count, raw.count)
         XCTAssertFalse(text.contains("\n"))
+    }
+
+    /// The window is placed around the match, not at the head of the text: a row whose
+    /// visible text does not contain the query reads as a broken search.
+    func testHighlightWindowsAroundAMatchFarIntoTheText() {
+        let raw = String(repeating: "unrelated filler ", count: 60) + "migration notes"
+        let text = String(SearchService.highlighted(raw, query: "migration").characters)
+
+        XCTAssertTrue(text.localizedCaseInsensitiveContains("migration"))
+        XCTAssertTrue(text.hasPrefix("…"))
     }
 
     func testHighlightWithEmptyQueryLeavesTextPlain() {

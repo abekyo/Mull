@@ -305,7 +305,7 @@ struct BehaviorPattern: Identifiable {
 
     /// How grounded the pattern is — drives whether mull may *push* it.
     ///
-    /// PRODUCT.md "Epistemics": observations are facts in the log and are safe
+    /// DIRECTION.md 付録A "Epistemics": observations are facts in the log and are safe
     /// to surface directly. Interpretations are judgments with no ground truth
     /// (§3.6: users don't want to be judged) — they may appear in-app for the
     /// user to consider, but mull must NOT auto-notify them.

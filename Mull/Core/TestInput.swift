@@ -57,7 +57,21 @@ enum TestInput {
         // E. The same character repeated 5+ times ("aaaaa").
         if hasLongCharRun(text) { return true }
 
+        // F. A whole short line that is one character repeated ("ああ", "あああ",
+        //    "!!"). Rule E only fires at five, which is why `ああ / あああ /
+        //    あああ` sat at the top of the shipped me.md — as the user's pinned,
+        //    authoritative identity — for over a month. Bounded to short lines so
+        //    it cannot touch real prose.
+        if text.count <= 12, isSingleRepeatedCharacter(text) { return true }
+
         return false
+    }
+
+    /// A string of 2+ characters that are all the same (ignoring whitespace).
+    private static func isSingleRepeatedCharacter(_ text: String) -> Bool {
+        let chars = text.filter { !$0.isWhitespace }
+        guard chars.count >= 2, let first = chars.first else { return false }
+        return chars.allSatisfy { $0 == first }
     }
 
     private static func hasConsecutiveSingleLetters(_ text: String) -> Bool {

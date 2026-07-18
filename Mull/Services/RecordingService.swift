@@ -30,6 +30,7 @@ final class RecordingService {
     private var clipboardTimer: Timer?
     private var windowTitleTimer: Timer?
     private var windowBodyTimer: Timer?
+    private var browserURLTimer: Timer?
     private var lastWindowBody = ""
     private var healthCheckTimer: Timer?
 
@@ -103,6 +104,8 @@ final class RecordingService {
         startWindowBodyMonitor()
         print("[mull] Window body monitor started")
 
+        startBrowserURLMonitor()
+
         startKeystrokeCapture()
         // CGEvent tap creation logs its own success/failure
 
@@ -137,6 +140,8 @@ final class RecordingService {
         windowTitleTimer = nil
         windowBodyTimer?.invalidate()
         windowBodyTimer = nil
+        browserURLTimer?.invalidate()
+        browserURLTimer = nil
 
         recordAppSession()
     }
@@ -200,7 +205,7 @@ final class RecordingService {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("[mull] ⚠️ CGEvent tap creation FAILED")
+            print("[mull] CGEvent tap creation FAILED")
             print("[mull] → Grant 'Input Monitoring' in System Settings → Privacy & Security → Input Monitoring")
             print("[mull] → Clipboard and window title recording will still work without this")
             return false
@@ -343,9 +348,11 @@ final class RecordingService {
                 }
             }
 
-            // Append browser URL if this is a browser app
+            // Append the browser URL if one arrived since the last title event.
+            // Read from cache — never fetched inline here; see the browser URL
+            // monitor below for why this timer must not touch AppleScript.
             let enriched: String
-            if let url = self.getBrowserURL() {
+            if let url = self.takePendingBrowserURL() {
                 enriched = "\(title) | \(url)"
             } else {
                 enriched = title
@@ -380,46 +387,114 @@ final class RecordingService {
         }
     }
 
-    /// Get the current URL from the active browser tab via AppleScript.
-    /// Works with Safari, Chrome, Firefox, Arc, Brave, Edge.
+    // MARK: - 3c. Browser URL Monitor
+    //
+    // The URL used to be read inline from the 5-second window-title timer, on the
+    // main run loop, with a synchronous NSAppleScript Apple Event into
+    // Safari/Chrome/Arc. A synchronous Apple Event blocks until the TARGET app
+    // answers, and a browser that is busy, showing a modal, still launching, or
+    // sitting behind a TCC prompt does not answer for seconds — mull's entire UI
+    // froze along with it, up to twelve times a minute.
+    //
+    // So: fetch on its own 30s cadence (a URL does not need 5-second resolution —
+    // the same interval the window-body monitor already uses), run the Apple Event
+    // off the main thread, and let the fast timer read an answer that is always
+    // already sitting in a variable.
+    //
+    // Thread-safety: only the NSAppleScript call itself leaves the main thread.
+    // Every piece of shared state below (`lastBrowserURL`, `pendingBrowserURL`,
+    // `browserFetchInFlight`) is read and written on the main thread only, like the
+    // rest of this class.
+
+    /// Serial and off-main. Serial so two ticks can never have Apple Events in
+    /// flight at once: NSAppleScript is not thread-safe, and one stuck browser
+    /// should stall this queue, not pile up on it.
+    private static let browserQueue = DispatchQueue(label: "com.mull.browser-url", qos: .utility)
+
+    /// Most recent URL seen, for dedupe and for `lastBrowserURLPublic`.
     private var lastBrowserURL: String = ""
 
-    private func getBrowserURL() -> String? {
+    /// A newly-changed URL waiting to be attached to the next title event.
+    /// Consumed once, mirroring the old behaviour where `getBrowserURL()` returned
+    /// nil for a URL it had already reported.
+    private var pendingBrowserURL: String?
+
+    private var browserFetchInFlight = false
+
+    private func startBrowserURLMonitor() {
+        browserURLTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            self?.fetchBrowserURL()
+        }
+        // Warm the cache now rather than leaving the first half-minute of browsing
+        // unattributed.
+        fetchBrowserURL()
+        print("[mull] Browser URL monitor started")
+    }
+
+    private func takePendingBrowserURL() -> String? {
+        defer { pendingBrowserURL = nil }
+        return pendingBrowserURL
+    }
+
+    /// Decide on the main thread, run the Apple Event off it, publish back on it.
+    private func fetchBrowserURL() {
+        guard isRunning, !isPaused, !isExcludedApp() else { return }
+
+        // A private/incognito window's URL must never be read at all, let alone
+        // cached. The title timer used to make this check before ever calling in;
+        // now that the fetch has its own clock, the check has to live here too or
+        // incognito browsing leaks out through `lastBrowserURLPublic`.
+        if let title = currentWindowTitle, PrivateBrowsing.isPrivate(title) {
+            lastBrowserURL = ""
+            pendingBrowserURL = nil
+            return
+        }
+
+        guard !browserFetchInFlight, let script = browserURLScript() else { return }
+        browserFetchInFlight = true
+
+        Self.browserQueue.async {
+            let url = Self.runBrowserURLScript(script)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.browserFetchInFlight = false
+                guard let url, url != self.lastBrowserURL else { return }
+                self.lastBrowserURL = url
+                self.pendingBrowserURL = url
+            }
+        }
+    }
+
+    /// AppleScript source for the frontmost browser, or nil if the front app isn't
+    /// one we can ask. Touches NSWorkspace, so it stays on the main thread.
+    /// Works with Safari, Chrome, Arc, Brave, Edge (Firefox exposes no URL).
+    private func browserURLScript() -> String? {
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bundleID = app.bundleIdentifier else { return nil }
 
-        let script: String?
-
         switch bundleID {
         case "com.apple.Safari", "com.apple.SafariTechnologyPreview":
-            script = "tell application \"Safari\" to get URL of current tab of front window"
+            return "tell application \"Safari\" to get URL of current tab of front window"
 
         case "com.google.Chrome", "com.google.Chrome.canary",
              "com.brave.Browser", "com.microsoft.edgemac",
              "company.thebrowser.Browser": // Arc
             let appName = app.localizedName ?? "Google Chrome"
-            script = "tell application \"\(appName)\" to get URL of active tab of front window"
-
-        case "org.mozilla.firefox":
-            // Firefox doesn't support AppleScript for URL — skip
-            return nil
+            return "tell application \"\(appName)\" to get URL of active tab of front window"
 
         default:
+            // Firefox included: it doesn't support AppleScript for URL.
             return nil
         }
+    }
 
-        guard let appleScript = script else { return nil }
-
+    /// The blocking part. Static and argument-only so it cannot reach instance
+    /// state from the background queue.
+    private static func runBrowserURLScript(_ source: String) -> String? {
+        guard let scriptObj = NSAppleScript(source: source) else { return nil }
         var error: NSDictionary?
-        guard let scriptObj = NSAppleScript(source: appleScript) else { return nil }
         let result = scriptObj.executeAndReturnError(&error)
-
         guard error == nil, let url = result.stringValue, !url.isEmpty else { return nil }
-
-        // Skip if same URL as last time
-        guard url != lastBrowserURL else { return nil }
-        lastBrowserURL = url
-
         return url
     }
 

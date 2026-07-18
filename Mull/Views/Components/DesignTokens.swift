@@ -1,17 +1,20 @@
 import SwiftUI
+import AppKit
 
 /// Design tokens — single source of truth for all visual constants.
 ///
 /// Typography: 5 levels with clear hierarchy
 /// Spacing: 4px grid
-/// Radius: 3 tiers
+/// Radius: 6 tiers
 /// Colors: semantic + accent gradients
 /// Shadows: 2 tiers for depth
 enum DS {
 
     // MARK: - Typography (8 levels, strict hierarchy)
     //
+    //   pageTitle 30pt semibold    — the word a page opens with
     //   hero     28pt bold         — large numbers, empty states
+    //   subtitle 14pt              — sheet/panel headers, onboarding steps
     //   title    15pt semibold     — section titles, card headers
     //   body     13pt regular      — primary text
     //   bodyMed  13pt medium       — emphasized body text
@@ -21,23 +24,94 @@ enum DS {
     //   micro    10pt monospaced   — timestamps, code, data
     //   mini      9pt regular      — tags, evidence, minimal text
     //   miniMed   9pt medium       — mini labels, badges
-    //   tiny      8pt regular      — sparkline labels, extreme compact
+    //   miniMono  9pt monospaced   — counts and codes inside a mini row
+    //
+    // There is no tier below 9pt. An 8pt tier existed (`tinyFont`) and it carried
+    // real content — sparkline labels, filter chips — at a size that is under the
+    // floor of what most people can read. It is gone; `tinyFont` is kept only as an
+    // alias onto the 9pt tier so no call site had to change to stop being 8pt.
 
-    static let heroFont = Font.system(size: 28, weight: .bold)
-    static let titleFont = Font.system(size: 15, weight: .semibold)
-    static let bodyFont = Font.system(size: 13)
-    static let bodyMedium = Font.system(size: 13, weight: .medium)
-    static let smallFont = Font.system(size: 12)
-    static let smallMedium = Font.system(size: 12, weight: .medium)
-    static let captionFont = Font.system(size: 11)
-    static let captionMedium = Font.system(size: 11, weight: .medium)
-    static let microFont = Font.system(size: 10, design: .monospaced)
-    static let miniFont = Font.system(size: 9)
-    static let miniMedium = Font.system(size: 9, weight: .medium)
-    static let miniBold = Font.system(size: 9, weight: .bold)
-    static let tinyFont = Font.system(size: 8)
+    // MARK: Dynamic Type
+    //
+    // Every token below scales with the system text size. SwiftUI has no
+    // `Font.system(size:relativeTo:)` — the *only* factory that produces a
+    // scaling font at an exact point size is `Font.custom(_:size:relativeTo:)`,
+    // so the tokens are built from the system UI font *by name*. These two names
+    // are the documented ones `NSFont.systemFont(ofSize:)` and
+    // `NSFont.monospacedSystemFont(ofSize:weight:)` report, and they resolve back
+    // to the real system faces. Do not "simplify" them to `.SFNS-Regular` or a
+    // bare `.AppleSystemUIFontMonospaced`: both silently fall back to Times New
+    // Roman / Helvetica.
+    //
+    // `relativeTo:` picks the text style each token *rides on*, chosen so the ratio
+    // to that style's own size is ~1. That is what makes the scaling proportional
+    // rather than lurching.
 
-    static let labelFont = Font.system(size: 11, weight: .medium)
+    private static let systemFontName = ".AppleSystemUIFont"
+    private static let monoFontName = ".AppleSystemUIFontMonospaced-Regular"
+    private static let monoBoldFontName = ".AppleSystemUIFontMonospaced-Bold"
+
+    private static func scaled(
+        _ size: CGFloat,
+        _ style: Font.TextStyle,
+        _ weight: Font.Weight = .regular
+    ) -> Font {
+        Font.custom(systemFontName, size: size, relativeTo: style).weight(weight)
+    }
+
+    private static func scaledMono(
+        _ size: CGFloat,
+        _ style: Font.TextStyle,
+        bold: Bool = false
+    ) -> Font {
+        Font.custom(bold ? monoBoldFontName : monoFontName, size: size, relativeTo: style)
+    }
+
+    /// The one size above `heroFont` — the printed title a page opens with
+    /// ("Today"). Lighter in weight than the hero number, because it is a word and
+    /// not a measurement. Named rather than inlined so the two screens that open
+    /// this way cannot drift a point apart from each other.
+    static let pageTitleFont = scaled(30, .largeTitle, .semibold)
+    static let heroFont = scaled(28, .largeTitle, .bold)
+    /// Onboarding / first-run display tier. These are the only screens that open
+    /// with a spoken sentence rather than a measurement, so they sit above the
+    /// dashboard scale. Named because they were five different literals across one
+    /// file, none of which scaled.
+    static let displayFont = scaled(20, .title2, .semibold)
+    static let headlineFont = scaled(18, .title2, .semibold)
+
+    static let titleFont = scaled(15, .title3, .semibold)
+    static let titleMedium = scaled(15, .title3, .medium)
+    static let titleRegular = scaled(15, .title3)
+    static let subtitleFont = scaled(14, .title3)
+    static let subtitleMedium = scaled(14, .title3, .medium)
+    static let subtitleSemibold = scaled(14, .title3, .semibold)
+    static let bodyFont = scaled(13, .body)
+    static let bodyMedium = scaled(13, .body, .medium)
+    static let smallFont = scaled(12, .callout)
+    static let smallMedium = scaled(12, .callout, .medium)
+    static let captionFont = scaled(11, .subheadline)
+    static let captionMedium = scaled(11, .subheadline, .medium)
+    static let microFont = scaledMono(10, .footnote)
+    /// `microFont`'s emphasis tier — same size *and* same design, so a highlighted
+    /// cell (today's column in the week strip) keeps the exact metrics of the cells
+    /// beside it. A bold non-monospaced 10pt here was the reason one column sat a
+    /// point off from its neighbours.
+    static let microBold = scaledMono(10, .footnote, bold: true)
+    static let miniFont = scaled(9, .caption2)
+    static let miniMedium = scaled(9, .caption2, .medium)
+    static let miniBold = scaled(9, .caption2, .bold)
+    /// 9pt monospaced — the mini tier's figures. Digits in a chip or an evidence
+    /// row have to column up with each other; `miniFont` does not tabulate.
+    static let miniMono = scaledMono(9, .caption2)
+    /// A keycap or a literal command, set at body size in the mono face.
+    static let codeFont = scaledMono(13, .body, bold: true)
+
+    /// Retired 8pt tier, now an alias onto the 9pt tier. Kept so existing call
+    /// sites keep compiling; prefer `miniFont` in new code.
+    static let tinyFont = miniFont
+
+    static let labelFont = scaled(11, .subheadline, .medium)
     static let labelTracking: CGFloat = 0.5
 
     // MARK: - Reading surface (editor + rendered markdown)
@@ -45,15 +119,22 @@ enum DS {
     // Borrowed from Crane MD §4: a reading/writing surface breathes more than the
     // dense dashboard. Generous measure, ~1.5 line-height, 1行目 = title. These are
     // the ONLY large type sizes — they belong to the editor, not the chrome.
-    static let readTitleFont = Font.system(size: 22, weight: .bold)      // 1行目 / # heading
-    static let readH2Font = Font.system(size: 17, weight: .semibold)     // ##
-    static let readH3Font = Font.system(size: 15, weight: .semibold)     // ###
-    static let readFont = Font.system(size: 15)                          // body — read & write
+    static let readTitleFont = scaled(22, .title, .bold)                 // 1行目 / # heading
+    static let readH2Font = scaled(17, .title2, .semibold)               // ##
+    static let readH3Font = scaled(15, .title3, .semibold)               // ###
+    static let readFont = scaled(15, .title3)                            // body — read & write
     static let readLineSpacing: CGFloat = 7                              // ≈1.46 line-height at 15pt
     static let readMeasure: CGFloat = 680                                // max line length (40–75 chars)
     static let readMargin: CGFloat = 24                                  // = xl; wider than dashboard
 
     // MARK: - Spacing (4px grid)
+
+    /// The single sub-grid step. A label stacked directly on its value reads as one
+    /// object, and 4px is already too much air for that — but "too much air" was
+    /// being solved ad hoc with 1, 2 and 3 in different files, so the same two-line
+    /// cell came out a point or two taller on Home than in the menu bar. One value,
+    /// used everywhere that pairing occurs, and nothing between it and `xs`.
+    static let hair: CGFloat = 2
 
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
@@ -64,6 +145,9 @@ enum DS {
 
     // MARK: - Radius (softer, more organic)
 
+    static let radiusXs: CGFloat = 2      // hairline bars, progress rules
+    static let radiusChip: CGFloat = 3    // pills, chips, skeleton bars
+    static let radiusInset: CGFloat = 6   // small inset panels
     static let radiusSm: CGFloat = 8
     static let radiusMd: CGFloat = 12
     static let radiusLg: CGFloat = 16
@@ -84,26 +168,58 @@ enum DS {
     /// Hairline rule — warm umber at low opacity. The structural signature.
     static let hairline = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.12)
 
-    /// Tobacco — the single accent. A thread, never a fill. (Named `moon` for
-    /// call-site compatibility; it is no longer moonlight.)
+    /// Tobacco — the single accent. A thread, never a fill.
+    ///
+    /// The name is a fossil: this token was moonlight when the app was the dark
+    /// "Nocturne" palette. It is kept only so every call site did not have to
+    /// change when the app moved to daylight. Read `moon` as "the accent" —
+    /// warm lamplight on paper, never a cool night blue.
     static let moon = Color(red: 0.580, green: 0.447, blue: 0.196)     // #945F32
     static let moonDim = Color(red: 0.46, green: 0.36, blue: 0.18)
 
     /// Text tiers (warm espresso, never pure black).
+    ///
+    /// The opacities are contrast budgets, not taste. Composited over `canvas`
+    /// (#F2EDE1) and measured against WCAG 2.1 AA (4.5:1 for text this size):
+    ///
+    ///     ink       1.00  #393127  10.94:1  ✅
+    ///     inkDim    0.78  #625A4F   5.79:1  ✅
+    ///     inkFaint  0.70  #71695E   4.61:1  ✅
+    ///     inkGhost  0.22  #C9C4B8   1.49:1  ❌ — non-text only, by contract
+    ///
+    /// `inkDim` was 0.62 (3.72:1) and `inkFaint` was 0.36 (1.99:1). Neither was an
+    /// accent: `inkFaint` is what `sectionLabel()` paints every section header in
+    /// the app with, and 1.99:1 is roughly the contrast of a watermark. The two
+    /// text tiers are necessarily closer together now — you cannot fit three
+    /// legible lightnesses of one hue on ivory — so the hierarchy under `ink`
+    /// leans on weight, case and tracking (as `sectionLabel()` already did) rather
+    /// than on fading toward the page.
+    ///
+    /// The palette is daylight-only (`mullChrome()` pins `.preferredColorScheme(.light)`),
+    /// so these are single fixed values with no dark-mode counterpart to check.
     static let ink = Color(red: 0.224, green: 0.192, blue: 0.149)            // #393127
-    static let inkDim = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.62)
-    static let inkFaint = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.36)
+    static let inkDim = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.78)
+    static let inkFaint = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.70)
+    /// The fourth tier — the warm answer to `.quaternary`. Axis ticks, disabled
+    /// glyphs, decoration that must be present without being read. **Never text**:
+    /// at 1.49:1 it is below every readability threshold there is, which is the
+    /// point — it is a rule or a tick, and it is exempt from AA because it carries
+    /// no information a reader has to recover.
+    static let inkGhost = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.22)
 
     // MARK: - Earth palette (one harmonious family — warm, muted, low-sat)
     //
     // Cucinelli is not a rainbow. Every accent is a natural dye drawn from the
-    // same earth as the tobacco anchor: ochre, olive, clay, slate, plum, taupe.
+    // same earth as the tobacco anchor: ochre, olive, clay, plum, taupe.
     // Nothing competes with the ink or the page; the whole screen reads tonal.
 
     static let camel     = Color(red: 0.72, green: 0.54, blue: 0.24)  // #B88A3D — lighter tobacco
     static let olive     = Color(red: 0.43, green: 0.46, blue: 0.29)  // #6E7549 — greyed green
     static let clay      = Color(red: 0.66, green: 0.36, blue: 0.26)  // #A85C42 — terracotta
-    static let slate     = Color(red: 0.42, green: 0.49, blue: 0.53)  // #6B7D87 — the one cool note, muted
+    /// The one cool note, muted — held in reserve. Deliberately NOT wired to
+    /// anything high-frequency: a single cool colour on ivory reads as a defect
+    /// once it is repeated, so it marks one rare thing (the me.md leaf) and no more.
+    static let slate     = Color(red: 0.42, green: 0.49, blue: 0.53)  // #6B7D87
     static let plum      = Color(red: 0.52, green: 0.36, blue: 0.42)  // #855C6B — greyed rosewood
     static let dustyRose = Color(red: 0.68, green: 0.45, blue: 0.44)  // #AD7370 — faded clay rose
     static let taupe     = Color(red: 0.55, green: 0.51, blue: 0.45)  // #8C8273 — warm neutral
@@ -117,10 +233,12 @@ enum DS {
 
     // MARK: - Event Type Colors
     //
-    // Used in LiveTab, HomeTab, InsightsTab for event type indicators.
+    // Used in LiveTab, HomeTab, ProfileTab for event type indicators.
     // Never use raw .blue/.orange/.green — always go through these.
 
-    static let eventKeystroke = slate      // the single cool note
+    // Keystrokes are by far the most-rendered event in a keystroke logger, so this
+    // one gets the quietest warm neutral — present everywhere, loud nowhere.
+    static let eventKeystroke = taupe
     static let eventClipboard = camel
     static let eventWindow = olive
     static let eventApp = plum
@@ -152,16 +270,22 @@ enum DS {
     /// Generate a consistent color for any app name.
     /// Well-known apps map to the earth palette; everything else gets a muted
     /// hash-based dye. No raw system colors — nothing breaks the tonal family.
+    /// Curated by *role*, so the colour carries meaning rather than being an
+    /// arbitrary tag — and so no single dye ends up owning half the screen.
     static func appColor(_ name: String) -> Color {
         switch name {
-        case "Xcode", "Safari", "Mail", "Zoom", "Preview", "Cursor": return slate
-        case "Code", "Visual Studio Code", "Figma", "Slack", "Obsidian",
-             "Simulator", "Teams", "Discord": return plum
-        case "Firefox", "Illustrator", "Notes": return camel
-        case "Chrome", "Google Chrome", "Messages",
-             "Terminal", "iTerm2", "Warp", "Ghostty": return olive
-        case "Arc", "Photoshop": return dustyRose
-        case "Finder", "Notion": return taupe
+        // Editors & IDEs — where the work gets made.
+        case "Xcode", "Cursor", "Code", "Visual Studio Code", "Simulator": return plum
+        // Browsers.
+        case "Safari", "Arc", "Chrome", "Google Chrome", "Firefox": return camel
+        // Terminals.
+        case "Terminal", "iTerm2", "Warp", "Ghostty": return olive
+        // Communication.
+        case "Mail", "Slack", "Messages", "Teams", "Discord", "Zoom": return clay
+        // Design tools.
+        case "Figma", "Photoshop", "Illustrator": return dustyRose
+        // Files, notes & reading.
+        case "Finder", "Notion", "Obsidian", "Notes", "Preview": return taupe
         default: break
         }
 
@@ -169,15 +293,69 @@ enum DS {
         return colorFromHash(name)
     }
 
+    // MARK: - The warm band (shared clamp for every generated colour)
+    //
+    // Any colour mull did not choose by hand — an unknown app's hash dye, a
+    // calendar's tint imported from macOS — is folded into this arc before it is
+    // ever drawn. Two arcs, 120° of wheel in total:
+    //
+    //   20°–120°   amber → ochre → olive
+    //   340°–360°  clay → rose
+    //
+    // Everything between (the blues, cyans, indigos, greens) is unreachable by
+    // construction, which is what makes "nothing breaks the tonal family" true
+    // rather than aspirational.
+
+    private static let warmArcPrimary = (start: 20.0, span: 100.0)   // amber → olive
+    private static let warmArcClay    = (start: 340.0, span: 20.0)   // clay → rose
+    private static let warmSpan = warmArcPrimary.span + warmArcClay.span   // 120°
+
+    /// Muted-dye saturation range — a natural dye, not a crayon.
+    private static let warmSaturation: ClosedRange<Double> = 0.16...0.34
+    /// Brightness range that stays readable on the ivory page.
+    private static let warmBrightness: ClosedRange<Double> = 0.44...0.60
+
+    /// Fold a position on the full colour wheel (0..<1) into the warm band.
+    /// Monotonic within each arc, so distinct inputs stay distinct outputs.
+    static func warmHue(_ position: Double) -> Double {
+        let wrapped = position - position.rounded(.down)          // → 0..<1
+        let p = wrapped * warmSpan
+        let degrees = p < warmArcPrimary.span
+            ? warmArcPrimary.start + p
+            : warmArcClay.start + (p - warmArcPrimary.span)
+        return degrees.truncatingRemainder(dividingBy: 360) / 360
+    }
+
+    /// Bring an arbitrary colour into mull's family: its hue is folded into the
+    /// warm band and its saturation/brightness are capped to the muted-dye range.
+    /// Distinct source colours stay distinguishable; none of them stay cold.
+    static func warmed(_ cgColor: CGColor) -> Color {
+        guard let rgb = NSColor(cgColor: cgColor)?.usingColorSpace(.sRGB) else {
+            return taupe
+        }
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        rgb.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+
+        // A greyscale source has no hue to preserve — give it the neutral dye.
+        guard s > 0.02 else { return taupe }
+
+        return Color(
+            hue: warmHue(Double(h)),
+            saturation: min(max(Double(s), warmSaturation.lowerBound), warmSaturation.upperBound),
+            brightness: min(max(Double(b), warmBrightness.lowerBound), warmBrightness.upperBound)
+        )
+    }
+
     /// Deterministic color from string hash. Same app name → always same color.
-    /// Warm bias — saturation is moderate, brightness is high. Feels friendly.
+    /// The hue is drawn from the warm band only, so an unknown app can never
+    /// land on a cold blue/indigo/cyan the curated palette would never use.
     private static func colorFromHash(_ string: String) -> Color {
         var hash: UInt64 = 5381
         for char in string.utf8 {
             hash = ((hash << 5) &+ hash) &+ UInt64(char)
         }
 
-        let hue = Double(hash % 360) / 360.0
+        let hue = warmHue(Double(hash % 360) / 360.0)
         let saturation = 0.16 + Double((hash >> 8) % 18) / 100.0  // 0.16-0.34 (muted — a natural dye, not a crayon)
         let brightness = 0.44 + Double((hash >> 16) % 16) / 100.0  // 0.44-0.60 (readable on ivory)
 
@@ -188,12 +366,26 @@ enum DS {
 // MARK: - View Extensions
 
 extension View {
-    /// The night canvas behind a whole surface.
-    func nocturneCanvas() -> some View {
-        self.background(DS.canvas.ignoresSafeArea())
+    /// Every window root wears this and nothing else does.
+    ///
+    /// `.tint` used to be applied per-view (nine call sites, five of them inside
+    /// OnboardingView alone), which meant any screen whose author forgot it drew
+    /// its native controls — toggles, pickers, progress bars, text selection — in
+    /// whatever accent the user picked in System Settings. On an ivory page a
+    /// stray system blue is the loudest thing on screen. Applying it once at the
+    /// root of each scene makes "the accent is tobacco" true by construction:
+    /// there is no screen left that can forget.
+    ///
+    /// `.preferredColorScheme(.light)` rides along for the same reason — the
+    /// palette is daylight-only, and it was previously repeated at every root.
+    func mullChrome() -> some View {
+        self
+            .tint(DS.moon)
+            .preferredColorScheme(.light)
     }
 
-    /// A faint moonlight glow behind a hero element.
+    /// A faint tobacco wash behind a hero element — warm lamplight falling across
+    /// the page from the top-left, not a glow in the dark.
     func moonGlow(_ intensity: Double = 0.16) -> some View {
         self.background(
             RadialGradient(
@@ -204,7 +396,8 @@ extension View {
         )
     }
 
-    /// Standard card — a surface lifted off the night with a hairline edge.
+    /// Standard card — a surface lifted a shade off the ivory page, edged with a
+    /// hairline like a faint pencil rule.
     func mullCard(isHovered: Bool = false) -> some View {
         self
             .padding(DS.md)
@@ -218,7 +411,7 @@ extension View {
             )
     }
 
-    /// Hero card — a surface touched by moonlight.
+    /// Hero card — the same lifted surface, warmed by a breath of tobacco.
     func mullHeroCard() -> some View {
         self
             .padding(DS.xl)
@@ -236,7 +429,7 @@ extension View {
             )
     }
 
-    /// Section label style — letterspaced moonlight, quiet.
+    /// Section label style — letterspaced, faint, quiet.
     func sectionLabel() -> some View {
         self
             .font(DS.labelFont)
@@ -262,7 +455,7 @@ private struct ShimmerModifier: ViewModifier {
                 LinearGradient(
                     colors: [
                         .clear,
-                        Color.primary.opacity(0.04),
+                        DS.ink.opacity(0.04),
                         .clear,
                     ],
                     startPoint: .leading,

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// "This week" — seven day bars plus the week-over-week comparison.
 ///
@@ -7,10 +8,26 @@ import SwiftUI
 /// panel that always reads "down 70%" teaches the reader to ignore it.
 ///
 /// Stateless by construction — it renders exactly the snapshots handed to it, so
-/// the 14-day analysis stays owned by `HomeTab`.
+/// the 14-day analysis stays owned by `HomeTab`. A click on a day is handed back
+/// out through `onSelectDay` for the same reason: this view knows which day was
+/// pressed and nothing whatever about where days are read.
 struct WeekSection: View {
     let days: [DaySnapshot]
     let comparison: WeekComparison?
+    /// Supplied by the owner when a day has somewhere to go. Absent by default, and
+    /// when it is absent the columns stay inert rather than offering a click that
+    /// leads nowhere.
+    var onSelectDay: ((Date) -> Void)?
+
+    @State private var hoveredDay: Date?
+
+    /// A week with nothing in it at all. It is drawn, not hidden — a section that
+    /// vanishes reads as a broken feature, and a new reader never learns the section
+    /// exists. But seven flat stubs and a table of zeroes read as broken too, so an
+    /// empty week says so in words and keeps only its shape.
+    private var isEmpty: Bool {
+        days.allSatisfy { $0.totalDuration <= 0 }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.md) {
@@ -24,8 +41,14 @@ struct WeekSection: View {
                 }
             }
 
-            // Week-over-week comparison
-            if let comp = comparison {
+            if isEmpty {
+                Text("Nothing recorded this week yet — mull fills this in as you work.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkDim)
+            } else if let comp = comparison {
+                // Only offered against a week there is something to weigh. Against an
+                // empty one every figure is 0 and every delta is −100%, which says
+                // nothing true about the reader.
                 Divider()
 
                 comparisonView(comp)
@@ -36,39 +59,68 @@ struct WeekSection: View {
 
     private func dayColumn(_ day: DaySnapshot) -> some View {
         let maxBar: CGFloat = 60
-        let maxDuration = days.map(\.totalDuration).max() ?? 1
+        let maxDuration = max(days.map(\.totalDuration).max() ?? 1, 1)
         let barHeight = day.totalDuration > 0 ? max(6, day.totalDuration / maxDuration * maxBar) : 3
+        let isHovered = hoveredDay == day.date && onSelectDay != nil
 
         return VStack(spacing: DS.xs) {
             Text(day.mainProject ?? "")
                 .font(DS.tinyFont)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(DS.inkFaint)
                 .lineLimit(1)
                 .frame(height: 10)
 
             Text(day.durationFormatted)
                 .font(DS.miniMedium)
-                .foregroundStyle(day.isToday ? DS.moon : .secondary)
+                .foregroundStyle(day.isToday ? DS.moon : DS.inkDim)
                 .frame(height: 12)
 
             // Fixed-height track with the bar pinned to the bottom, so every bar grows
             // upward from a shared zero baseline (not centred, which made them spill both ways).
             ZStack(alignment: .bottom) {
                 Color.clear.frame(height: maxBar)
-                RoundedRectangle(cornerRadius: 3)
+                RoundedRectangle(cornerRadius: DS.radiusChip)
                     .fill(day.isToday ? DS.moon : DS.moon.opacity(day.totalDuration > 0 ? 0.4 : 0.08))
                     .frame(height: barHeight)
             }
 
             Text(day.dayName)
-                .font(day.isToday ? Font.system(size: 10, weight: .bold) : DS.microFont)
-                .foregroundStyle(day.isToday ? .primary : .tertiary)
+                .font(day.isToday ? DS.microBold : DS.microFont)
+                .foregroundStyle(day.isToday ? DS.ink : DS.inkFaint)
 
             Text(day.dayNumber)
                 .font(DS.miniFont)
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(DS.inkGhost)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.xs)
+        // The whole column is the target, not just the bar — a quiet day's bar is
+        // three points tall, which is no target at all.
+        .background(
+            RoundedRectangle(cornerRadius: DS.radiusInset)
+                .fill(isHovered ? DS.moon.opacity(0.07) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { onSelectDay?(day.date) }
+        .onHover { hovering in
+            guard onSelectDay != nil else { return }
+            if hovering {
+                hoveredDay = day.date
+                NSCursor.pointingHand.push()
+            } else {
+                if hoveredDay == day.date { hoveredDay = nil }
+                NSCursor.pop()
+            }
+        }
+        .onDisappear {
+            if hoveredDay == day.date {
+                hoveredDay = nil
+                NSCursor.pop()
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(onSelectDay != nil ? .isButton : [])
+        .accessibilityHint(onSelectDay != nil ? "Opens this day in the calendar" : "")
     }
 
     private func comparisonView(_ comp: WeekComparison) -> some View {
@@ -95,7 +147,7 @@ struct WeekSection: View {
                 let deepDelta = comp.thisWeekDeepBlocks - comp.lastWeekDeepBlocks
                 stat(
                     label: "Deep work (2h+)",
-                    value: "\(comp.thisWeekDeepBlocks) blocks",
+                    value: pluralized(comp.thisWeekDeepBlocks, "block"),
                     delta: deepDelta != 0 ? (deepDelta > 0 ? "+\(deepDelta)" : "\(deepDelta)") : nil,
                     deltaUp: deepDelta >= 0
                 )
@@ -115,15 +167,15 @@ struct WeekSection: View {
     }
 
     private func stat(label: String, value: String, delta: String?, deltaUp: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: DS.hair) {
             Text(label)
                 .font(DS.miniFont)
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(DS.inkGhost)
 
             HStack(spacing: DS.xs) {
                 Text(value)
                     .font(DS.bodyMedium)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(DS.ink)
 
                 if let delta {
                     Text(delta)

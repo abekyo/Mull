@@ -1,15 +1,31 @@
 import Foundation
 
-/// Rule-based fact extraction from recorded events.
-/// No LLM needed. Pure pattern matching + counting.
+/// Rule-based facts about the user, from recorded events. No LLM.
 ///
-/// Turns raw data into structured facts like:
-///   "Primary language: Swift"
-///   "Currently working on: PantryApp (Storyboard refactor)"
-///   "Most productive: 14:00-16:00"
-///   "Communication style: bilingual (Japanese/English)"
+/// **What this may and may not say.** Everything here is an *observation* that
+/// can be pointed at the rows it came from:
 ///
-/// These facts go into me.md, making AI understand the user from day one.
+///   "Primary language: Japanese"          — measured over 200+ characters of prose
+///   "Primary tools: Xcode + Terminal"     — measured share of tracked activity
+///   "Working on: PantryApp"             — a name seen 5+ times in window titles
+///
+/// It used to also emit *inferences about the person*, and those are gone
+/// (DIRECTION §4/§9.1: what dies is rule-based summary hardened into me.md, not
+/// structure). Specifically removed:
+///
+///   - **Role** ("Software developer", "Designer"…). A vocation guessed from which
+///     apps are open. Even scored and capped at one, it is a claim mull cannot
+///     support: the evidence is an app list, and the output is a sentence about
+///     who someone is. It sat in the first line an AI read about the user.
+///   - **Tech stack** ("Works with: React, Vercel"). Guessed from clipboard
+///     substrings. Copying a Stack Overflow answer is not a skill.
+///   - **Domain** ("Working on authentication", "Writing tests"). Two keyword
+///     hits from a fixed list, in a keyword table that is already noisy.
+///
+/// The rule for adding anything here: if mull cannot show the user the rows that
+/// produced the line, it does not belong in their identity file. An AI that
+/// wants to know what the user is doing right now calls `whats_active_now` /
+/// `search`, which read live rows instead of a month-old guess.
 struct FactExtractor {
 
     let analytics: AnalyticsEngine
@@ -20,11 +36,9 @@ struct FactExtractor {
         var facts: [Fact] = []
 
         facts.append(contentsOf: extractLanguageFacts(days: days))
-        facts.append(contentsOf: extractRoleFacts(days: days))
+        facts.append(contentsOf: extractAppFacts(days: days))
         facts.append(contentsOf: extractProjectFacts(days: days))
-        facts.append(contentsOf: extractWorkPatternFacts(days: days))
         facts.append(contentsOf: extractToolFacts(days: days))
-        facts.append(contentsOf: extractTopicFacts(days: days))
 
         return facts
     }
@@ -79,42 +93,22 @@ struct FactExtractor {
         return facts
     }
 
-    // MARK: - Role (inferred from app usage)
+    // MARK: - Apps actually used
 
-    private func extractRoleFacts(days: Int) -> [Fact] {
-        let apps = analytics.appUsage(days: days)
-        let topApps = Set(apps.prefix(8).map(\.appName))
+    /// Observations about which apps the user works in. Not a vocation.
+    ///
+    /// This replaces `extractRoleFacts`, which turned an app list into a sentence
+    /// about who someone is ("Software developer", "Designer") and put it in the
+    /// first line of me.md. Naming the tools is the part mull can actually
+    /// support; naming the person was the part it could not.
+    private func extractAppFacts(days: Int) -> [Fact] {
+        let topAppNames = Set(analytics.appUsage(days: days).prefix(8).map(\.appName))
         var facts: [Fact] = []
-
-        // Role detection — check multiple profiles, pick the best match
-        let roleProfiles: [(role: String, apps: Set<String>, minMatch: Int)] = [
-            ("Software developer", Set(["Xcode", "Code", "IntelliJ IDEA", "Android Studio",
-                                         "Terminal", "iTerm2", "Warp", "Ghostty", "Cursor",
-                                         "Zed", "Sublime Text", "Simulator"]), 2),
-            ("Designer", Set(["Figma", "Sketch", "Adobe XD", "Photoshop", "Illustrator",
-                               "Canva", "Affinity Designer", "Pixelmator Pro"]), 1),
-            ("Writer", Set(["Google Docs", "Microsoft Word", "Pages", "Ulysses",
-                             "iA Writer", "Scrivener", "Bear", "Typora"]), 1),
-            ("Researcher", Set(["Zotero", "Mendeley", "Papers", "DEVONthink",
-                                 "Preview", "Books"]), 1),
-            ("Content creator", Set(["Final Cut Pro", "DaVinci Resolve", "Premiere Pro",
-                                      "Logic Pro", "GarageBand", "OBS", "ScreenFlow"]), 1),
-            ("Business/analyst", Set(["Microsoft Excel", "Numbers", "Google Sheets",
-                                       "Tableau", "Power BI"]), 1),
-            ("Student", Set(["Anki", "Quizlet", "GoodNotes", "Notability"]), 1),
-        ]
-
-        for profile in roleProfiles {
-            let overlap = topApps.intersection(profile.apps)
-            if overlap.count >= profile.minMatch {
-                facts.append(Fact(.identity, "\(profile.role) (primary tools: \(overlap.sorted().joined(separator: ", ")))"))
-            }
-        }
 
         // Note-taking / knowledge management
         let knowledgeApps = Set(["Notion", "Obsidian", "Roam Research", "Logseq",
                                   "Apple Notes", "Notes", "Craft", "Evernote"])
-        let knowledgeOverlap = topApps.intersection(knowledgeApps)
+        let knowledgeOverlap = topAppNames.intersection(knowledgeApps)
         if !knowledgeOverlap.isEmpty {
             facts.append(Fact(.skills, "Uses \(knowledgeOverlap.sorted().joined(separator: ", ")) for notes/knowledge"))
         }
@@ -122,7 +116,7 @@ struct FactExtractor {
         // Communication
         let commApps = Set(["Slack", "Discord", "Teams", "Zoom", "Messages", "Mail",
                              "LINE", "WhatsApp", "Telegram", "WeChat"])
-        let commOverlap = topApps.intersection(commApps)
+        let commOverlap = topAppNames.intersection(commApps)
         if commOverlap.count >= 2 {
             facts.append(Fact(.skills, "Active communicator (\(commOverlap.sorted().joined(separator: ", ")))"))
         }
@@ -130,119 +124,37 @@ struct FactExtractor {
         return facts
     }
 
-    // MARK: - Projects (inferred from window titles + clipboard)
+    // MARK: - Projects (names seen repeatedly in window titles)
 
     private func extractProjectFacts(days: Int) -> [Fact] {
         let since = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
         let events = database.fetchEvents(from: since, to: Date())
         var facts: [Fact] = []
 
-        // Extract project names from window titles
-        // Real projects: "PantryApp — ViewController.swift — Xcode"
-        // NOT projects: chat messages, UI placeholders, long sentences
-        var projectMentions: [String: Int] = [:]
-
-        let skipPatterns = [
-            "Queue another", "Untitled", "Welcome to", "Getting Started",
-            "Welcome", "Analyze project", "Visual Studio Code",
-            "gpt-4", "gpt-3", "claude", "Summarize", "Summary",
-            "Evaluate", "Fix ", "Debug", "Review",
-            "⌘", "？", "？", "！", "。", "、",  // Japanese punctuation = chat, not project
-        ]
-        let skipApps = Set(["Xcode", "Code", "Terminal", "Safari", "Firefox", "Chrome",
-                            "Finder", "Simulator", "System Settings", "mull",
-                            "Google Chrome", "Arc", "Brave Browser"])
-
-        for event in events where event.eventType == .screenText {
-            guard let text = event.textContent else { continue }
-
-            // Skip if text looks like a sentence, prompt, or question
-            if text.count > 50 { continue }
-            if text.contains("？") || text.contains("?") || text.contains("！") { continue }
-            // Skip Claude Code session titles (prompts being used as window titles)
-            if text.contains("ください") || text.contains("して") || text.contains("を") { continue }
-            // Skip email addresses used as window titles
-            if text.contains("@") && text.contains(".") { continue }
-
-            let separators = [" — ", " - "]
-            for sep in separators {
-                let parts = text.components(separatedBy: sep)
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { part in
-                        guard part.count > 2 && part.count < 30 else { return false }
-                        guard !skipApps.contains(part) else { return false }
-                        // Skip if matches skip patterns
-                        guard !skipPatterns.contains(where: { part.contains($0) }) else { return false }
-                        // Skip if it looks like a filename
-                        if part.contains(".") && part.split(separator: ".").last?.count ?? 0 <= 5 { return false }
-                        // Must look like a project name: starts with uppercase or is a known pattern
-                        let first = part.first ?? Character(" ")
-                        return first.isUppercase || first.isNumber
-                    }
-
-                for part in parts {
-                    projectMentions[part, default: 0] += 1
-                }
+        // Project names: one shared gate (`ProjectNames`), not a local blocklist.
+        // What used to be here was ~40 lines of hand-collected strings the author
+        // had personally been annoyed by, plus `if text.contains("を")` — which
+        // discarded every window title containing the Japanese object particle,
+        // i.e. most real Japanese file and document names.
+        let observations: [(app: String, title: String)] = events
+            .filter { $0.eventType == .screenText }
+            .compactMap { event in
+                guard let title = event.textContent, let app = event.appName else { return nil }
+                return (app: app, title: title)
             }
-        }
 
-        let topProjects = projectMentions
-            .filter { $0.value >= 5 }
-            .sorted { $0.value > $1.value }
-            .prefix(3)
-
-        for (project, _) in topProjects {
-            facts.append(Fact(.projects, "Working on: \(project)"))
-        }
-
-        // Detect domain-specific tools/frameworks from clipboard content
-        let textContent = events
-            .filter { $0.eventType == .clipboard }
-            .compactMap(\.textContent)
-            .joined(separator: " ")
-
-        var detectedTools: [String] = []
-        let toolPatterns: [(pattern: String, label: String)] = [
-            // Development
-            ("Storyboard", "UIKit/Storyboard"), ("SwiftUI", "SwiftUI"),
-            ("UIViewController", "UIKit"), ("React", "React"),
-            ("NextJS", "Next.js"), ("flutter", "Flutter"),
-            ("tailwind", "Tailwind CSS"), ("vercel", "Vercel"),
-            // Design
-            ("Figma", "Figma"), ("Auto Layout", "Auto Layout"),
-            // Data / Analytics
-            ("VLOOKUP", "Excel/Sheets"), ("pivot table", "Excel/Sheets"),
-            ("SELECT.*FROM", "SQL"), ("pandas", "Python/pandas"),
-            // Writing / Content
-            ("WordPress", "WordPress"), ("Markdown", "Markdown"),
-            // Marketing
-            ("Google Analytics", "Google Analytics"), ("SEO", "SEO"),
-            ("Search Console", "Search Console"),
-        ]
-
-        for (pattern, label) in toolPatterns {
-            if textContent.range(of: pattern, options: .caseInsensitive) != nil {
-                if !detectedTools.contains(label) {
-                    detectedTools.append(label)
-                }
-            }
-        }
-
-        if !detectedTools.isEmpty {
-            facts.append(Fact(.skills, "Works with: \(detectedTools.joined(separator: ", "))"))
+        for candidate in ProjectNames.rank(observations, minMentions: 5).prefix(3) {
+            facts.append(Fact(.projects, "Working on: \(candidate.name)"))
         }
 
         return facts
     }
 
-    // MARK: - Work Patterns
-
-    private func extractWorkPatternFacts(days: Int) -> [Fact] {
-        // Removed: "Most productive hours" and "Busiest day" were dashboard
-        // analytics, not context — they don't change an AI's answer. (Peak hours
-        // can still drive proactive timing in the Insights UI; just not me.md.)
-        return []
-    }
+    // Removed with no replacement: "Most productive hours" / "Busiest day"
+    // (dashboard analytics — they don't change an AI's answer), tech-stack
+    // detection from clipboard substrings, and domain guessing from keyword
+    // overlap. Peak hours still drive proactive timing in the Insights UI; they
+    // just aren't asserted about the user in me.md.
 
     // MARK: - Tool Preferences
 
@@ -263,54 +175,6 @@ struct FactExtractor {
         if workApps.count >= 2 {
             let names = workApps.map(\.appName).joined(separator: " + ")
             facts.append(Fact(.skills, "Primary tools: \(names)"))
-        }
-
-        return facts
-    }
-
-    // MARK: - Topics (from keywords)
-
-    private func extractTopicFacts(days: Int) -> [Fact] {
-        let keywords = analytics.topKeywords(days: days, limit: 10)
-        var facts: [Fact] = []
-
-        // Extract meaningful topic clusters
-        let topWords = keywords.map(\.word)
-
-        // Detect domain from keywords — covers all professions
-        let domainHints: [(keywords: [String], fact: String)] = [
-            // Health
-            (["calorie", "nutrition", "diet", "health", "weight", "bmi"], "Working in health/nutrition domain"),
-            // Finance
-            (["revenue", "budget", "forecast", "profit", "expense", "invoice"], "Working on finance/accounting"),
-            (["trading", "forex", "indicator", "chart", "candle", "signal"], "Working on trading/markets"),
-            // Development
-            (["payment", "stripe", "billing", "subscription"], "Working on payment integration"),
-            (["auth", "login", "oauth", "session"], "Working on authentication"),
-            (["deploy", "ci", "pipeline", "docker"], "Working on deployment"),
-            (["test", "spec", "assert", "mock"], "Writing tests"),
-            // Design
-            (["design", "layout", "color", "font", "spacing", "wireframe"], "Working on design"),
-            (["prototype", "mockup", "component", "figma"], "Working on prototyping"),
-            // Writing
-            (["chapter", "draft", "manuscript", "editor", "publish"], "Working on writing/publishing"),
-            (["blog", "article", "content", "post", "seo"], "Working on content/SEO"),
-            // Marketing
-            (["campaign", "conversion", "funnel", "ads", "marketing"], "Working on marketing"),
-            (["analytics", "traffic", "engagement", "impression"], "Working on analytics"),
-            // Education
-            (["lecture", "assignment", "exam", "study", "course"], "Working on education/learning"),
-            // Research
-            (["paper", "citation", "methodology", "hypothesis", "experiment"], "Working on research"),
-        ]
-
-        for (hints, fact) in domainHints {
-            let matches = topWords.filter { word in
-                hints.contains { word.lowercased().contains($0) }
-            }
-            if matches.count >= 2 {
-                facts.append(Fact(.projects, fact))
-            }
         }
 
         return facts

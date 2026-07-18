@@ -86,4 +86,48 @@ final class CuratorTests: XCTestCase {
         XCTAssertTrue(merged.contains("Alpha"))
         XCTAssertTrue(merged.contains("Beta"), "non-prefix facts must both survive")
     }
+
+    // MARK: - Pinned facts
+
+    // me.pinned.md is declared authoritative and placed above everything else in
+    // me.md, so it is the first thing any AI reads about the user — and nothing
+    // validated it. The shipped vault contained `ああ / あああ / あああ`, keyboard
+    // mash typed once to check the file worked, and mull handed it to every
+    // assistant as the user's identity for over a month.
+
+    func testKeyboardMashIsNotPublishedAsIdentity() {
+        let result = Curator.filterPinned("ああ\nあああ\n- Founder; FX trading is the priority.")
+
+        XCTAssertEqual(result.text, "- Founder; FX trading is the priority.")
+        XCTAssertEqual(result.withheld, ["ああ", "あああ"])
+    }
+
+    func testWithheldLinesAreReturnedNotDropped() {
+        // Filtering silently would be the worse failure: the user writes a line,
+        // watches it vanish from me.md, and has no way to learn why. Every line
+        // mull declines must come back so a surface can show it.
+        let result = Curator.filterPinned("aaaaa\n- Primary working language: Japanese.")
+
+        XCTAssertFalse(result.withheld.isEmpty, "a withheld line must be reported")
+        XCTAssertTrue(result.text.contains("Japanese"))
+    }
+
+    func testListMarkersDoNotSmuggleMashThrough() {
+        // "- ああ" and "ああ" are the same non-fact; the marker must be stripped
+        // before judging, not treated as content.
+        XCTAssertEqual(Curator.filterPinned("- ああ").text, "")
+    }
+
+    func testCommentsAndRealFactsSurvive() {
+        let raw = """
+        # this is the template comment
+        - Founder running several businesses.
+        - Primary working language: Japanese.
+        """
+        let result = Curator.filterPinned(raw)
+
+        XCTAssertTrue(result.withheld.isEmpty, "no real fact may be withheld: \(result.withheld)")
+        XCTAssertTrue(result.text.contains("Founder running several businesses."))
+        XCTAssertFalse(result.text.contains("template comment"))
+    }
 }

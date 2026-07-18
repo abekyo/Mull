@@ -193,3 +193,71 @@ embedding改善は4要素の一部にすぎない。効く順は以下。
 4. **1本の先回りループ end-to-end**（駆動部＋選択＋成果物手渡し＋Curator書き戻し）
 5. 評価20本（並行で早く）
 6. Curator 堅牢化は通底の最優先
+
+
+---
+
+## 付録A. Epistemics — 正解の無い領域で提案する根拠
+
+> PRODUCT.md から回収。PRODUCT.md 自体は削除した（v2/v3 は本文書が上書き済み、
+> UI/学び の章は CLAUDE.md と重複）が、この章だけは**コード内の11箇所が参照しており、
+> かつ他のどこにも書かれていない**。ここが正本。
+
+### Epistemics — proposing without ground truth
+The hardest question: Fragment/ACE works in procurement because there's a **verifiable** correct answer (invoice matches or it doesn't). Personal personality/behavior has **no ground truth**. So on what basis does mull "execute" and "propose"? Answer: **don't chase a correct answer — it doesn't exist. Use four substitutes.**
+
+**1. The user is the oracle — proposals are A/B tests.**
+mull doesn't assert truth; it floats a hypothesis and lets the user's reaction become the answer, after the fact.
+- accepted → it was right; reinforce.
+- ignored → it was wrong; suppress.
+The "correct answer" emerges per-user, empirically, over time. (This is ACE's Reflector/Curator, but the reward signal is *user acceptance*, not task success.)
+
+**2. Observation, not interpretation (most important).**
+The safe form of "proposal" in a no-truth domain is to stick to facts in the log and avoid judgment.
+- ❌ interpretation (no ground truth, painful when wrong): "You're avoiding this project." (§3.6 already proved judgment fails — users don't want to be judged.)
+- ✅ observation (a verifiable fact in the record): "You've reopened this file 5 times this week." / "You got stuck here last week — still unresolved?"
+Observations are checkable against the log, so the "correctness problem" disappears, and **the user's own brain supplies the meaning.** A proposal is not "say the right thing" — it's "place past-you in front of present-you at the right moment." That IS the "how do you know that?" mechanism.
+
+**3. Predict behavior, not preference — manufacture ground truth.**
+"What's right for this person" (preference/norm) is unverifiable. But "what this person will do next" (behavior) shows up in tomorrow's log — **verifiable.**
+- unverifiable: "You should do this task."
+- verifiable: "After lunch you'll return to the PantryApp work." → check the log tomorrow.
+By predicting *behavior* instead of *preference*, mull can self-grade its proactivity against the log. It's the only way to create ground truth in a domain that has none — you fabricate it by predicting observable future behavior.
+
+**4. Match execution to confidence × reversibility.**
+With no ground truth, the safety mechanism is **reversibility**, not correctness. Only auto-execute actions whose error cost is ~zero.
+
+| Confidence | Kind | Form of execution |
+|-----------|------|-------------------|
+| High | fact in log | **assert it** — "you did X" |
+| Medium | pattern | **place as observation** — "you tend to… on Thursdays" |
+| Low | interpretation / prediction | **make it a question** — "still on your mind?" |
+| — | irreversible action | **don't** |
+
+This is the *logical* basis for mull stopping at "organize" and never reaching "execute." Fragment can execute because its answers are verifiable; mull's domain is unverifiable, so irreversible execution is forbidden. **§3.6's "no execution" stance isn't philosophy — it's forced by the absence of ground truth.**
+
+**Net:** mull is not a machine that outputs "the right answer." It's a machine that **places the right question and the right fact at the right moment.** The user produces the answer.
+
+### 但し書き（2026-07 追記）— B との衝突を明示しておく
+
+上の④は「正解が存在しないから不可逆な実行は禁止」と結論している。一方 CLAUDE.md §2 の
+Final Goal は **B（実行する分身）**を採り、§3.6 の憲法で「下書きまで・発火は常に主」と
+している。**この2つは同じ結論に別の理由で到達しているだけで、矛盾はしていない**:
+
+- Epistemics ④: 不可逆な実行を禁じる（根拠＝ground truth の不在）
+- 分身の憲法 1: 送信・実行・公開の最後の一押しは常に人間（根拠＝dignity）
+
+つまり分身が広げてよいのは**下書きの範囲**であって、実行の自動化ではない。
+「分身に進んだから ④ は失効した」という読み方をしないこと。失効していない。
+
+---
+
+## 付録B. 削除したドキュメント（2026-07）
+
+| 文書 | 理由 |
+|------|------|
+| `PRODUCT.md` | v2/v3 は本文書が明示的に上書き済み。UI/ターゲット/学びの章は CLAUDE.md と重複。唯一固有だった Epistemics は付録A に回収 |
+| `ONBOARDING.md` | 「Fortune Teller Strategy」— cold reading / **Barnum効果** / framing の実装指示書。コード側は既に正しい判断で撤退済み（`InsightPhrases.swift:9`「他人のデータについても意味が通る文は、観測ではなく星占いだ」）だが、仕様書だけが残り、次の書き手に再導入を指示する状態だった。DESIGN-NORTHSTAR の「尊厳」と同居できない |
+
+北極星は **DIRECTION.md（どう作るか）** と **DESIGN-NORTHSTAR.md（どう見せるか）**、
+製品仕様は **CLAUDE.md** の3本。衝突したら DESIGN-NORTHSTAR > DIRECTION > CLAUDE.md。

@@ -15,8 +15,9 @@ extension TimeBlock {
 }
 
 extension ActivitySummary {
-    /// The dominant block's colour; `.secondary` for an activity with no blocks.
-    var color: Color { blocks.first?.color ?? .secondary }
+    /// The dominant block's colour; the faint ink tier for an activity with no
+    /// blocks (not `.secondary`, which is a cold system grey).
+    var color: Color { blocks.first?.color ?? DS.inkFaint }
 }
 
 extension ProjectSnapshot {
@@ -24,7 +25,14 @@ extension ProjectSnapshot {
 }
 
 extension CalendarEvent {
-    /// The owning calendar's tint. The model carries a `CGColor` so it stays free
-    /// of SwiftUI; this is the SwiftUI form the views actually draw with.
-    var color: Color { Color(cgColor: calendarColor) }
+    /// The owning calendar's tint, brought into mull's family.
+    ///
+    /// The model carries a `CGColor` so it stays free of SwiftUI; this is the
+    /// SwiftUI form the views actually draw with. It is deliberately *not* the raw
+    /// EventKit colour: macOS hands out saturated system red/blue/green/purple,
+    /// and painting those straight onto the ivory canvas was the single largest
+    /// source of cold colour in the app. `DS.warmed` folds each calendar's hue
+    /// into the warm band and caps its saturation and brightness — so two
+    /// calendars still read as two calendars, but both belong to the page.
+    var color: Color { DS.warmed(calendarColor) }
 }

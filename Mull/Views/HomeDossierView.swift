@@ -1,33 +1,38 @@
 import SwiftUI
 
-// MARK: - Custode palette & serif (Cucinelli, in daylight)
+// MARK: - Dossier aliases & serif (Cucinelli, in daylight)
 //
-// Cucinelli is not nocturnal. It is Umbrian daylight on ivory stone, undyed
-// cashmere, linen, the warm cream of a fine book's page. So this surface is a
-// LIT PAGE — warm ivory, espresso ink, one tobacco thread — and it stays that
-// way regardless of system appearance, the way a good book is ivory whether the
-// room is bright or dark. (This is a deliberate break from the app's cool
-// Nocturne; if we commit to Cucinelli, Nocturne itself is the next thing to
-// reconsider.)
+// This block used to be a second palette: it re-declared the ivory page, the
+// espresso ink, the tobacco accent and the hairline as fresh literals, several of
+// them byte-identical to the tokens in DesignTokens.swift. That is two sources of
+// truth for the same colour, and the accent in particular would have drifted the
+// first time anyone tuned one of them.
 //
-// Additive tokens — they do not touch the existing Nocturne tokens.
+// The app-wide palette moved to daylight, so the duplicates are now plain aliases
+// onto the canonical DS tokens, and the shades that are just an opacity of a
+// canonical colour are expressed that way. Only the genuinely new things — the
+// raised paper, the luxurious rhythm, the serif — are declared here.
 extension DS {
 
     // Warm ivory page — the cream of fine paper / undyed cashmere.
-    static let paperBg       = Color(red: 0.949, green: 0.929, blue: 0.882)  // #F2EDE1
+    static let paperBg = canvas                                              // = DS.canvas
+    /// The one shade with no DS equivalent: a *darker* paper, where `surface` is lighter.
     static let paperBgRaised = Color(red: 0.925, green: 0.902, blue: 0.847)  // #ECE6D8
 
     // Espresso ink — warm, never harsh black.
-    static let umberInk   = Color(red: 0.224, green: 0.192, blue: 0.149)     // #393127
-    static let umberDim   = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.60)
-    static let umberFaint = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.34)
+    static let umberInk   = ink                                              // = DS.ink
+    // Held one notch under the canonical text tiers, but no longer under the
+    // contrast floor: these were 0.60 (3.53:1) and 0.34 (1.92:1) on the ivory page,
+    // which is a watermark, not body copy. See the budget on `DS.inkDim`.
+    static let umberDim   = ink.opacity(0.76)   // 5.47:1 on canvas — a hair under DS.inkDim (0.78)
+    static let umberFaint = ink.opacity(0.70)   // 4.61:1 on canvas — = DS.inkFaint
 
     // Tobacco / camel — the single accent. A thread, never a fill.
-    static let tobacco    = Color(red: 0.580, green: 0.447, blue: 0.196)     // #945F32-ish ochre
-    static let tobaccoDim = Color(red: 0.580, green: 0.447, blue: 0.196).opacity(0.66)
+    static let tobacco    = moon                                             // = DS.moon
+    static let tobaccoDim = moon.opacity(0.66)
 
     // Warm taupe hairline — barely there.
-    static let paperRule  = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.12)
+    static let paperRule  = hairline                                         // = DS.hairline
 
     // Luxurious rhythm — far past the 4px dashboard grid. Space is the material.
     static let airColumn: CGFloat  = 600   // narrow, confident column
@@ -44,15 +49,34 @@ extension DS {
 
 // MARK: - HomeDossierView
 //
+// ⚠️ DESIGN STUDY — NOT SHIPPED. This view is not routed into the app: nothing
+// constructs `HomeDossierView` outside its own `#Preview`, and the live Home
+// surface is `HomeTab`. It renders entirely from the hard-coded `Dossier.sample`
+// below, so every name, project and duration you see here is invented — none of
+// it comes from the database, and editing this file changes nothing a user sees.
+// It exists to hold the visual argument while the real Home catches up.
+//
+// To ship it, someone has to (a) write `Dossier.live(from:)` against
+// ProjectSnapshot + me.md and (b) route Home to it. Until both are done, treat
+// this as a drawing, not as UI.
+//
 // Home as a DIGNIFIED DOSSIER — a private monograph about you, kept by a
 // custodian. A lit ivory page with vast margins, an espresso serif, and one
 // tobacco thread. Luxury here is restraint and air: most of the page is left
 // empty on purpose. No cards, no chrome, no emoji — ink on paper.
-//
-// Self-contained mock: renders from `Dossier.sample` so it previews without
-// services. Wire `Dossier.live(from:)` to ProjectSnapshot + me.md to ship.
 struct HomeDossierView: View {
     let dossier: Dossier
+
+    /// What "Amend" does. Optional, and the control is drawn only when it is
+    /// supplied — a deliberate constraint rather than a convenience.
+    ///
+    /// The footer places amendment as the reader's one act of sovereignty over a
+    /// record kept about them, and it used to be `Button { }` — an empty closure.
+    /// A dead button is worse here than no button: it says the record is yours to
+    /// correct and then refuses. Because this view is a design study that nothing
+    /// routes yet, that would have shipped the instant someone wired it up. Making
+    /// the affordance conditional on real behaviour means it cannot.
+    var onAmend: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -123,10 +147,22 @@ struct HomeDossierView: View {
         VStack(alignment: .leading, spacing: DS.xl) {
             sectionRule("The Present Chapter")
 
-            VStack(spacing: DS.lg) {
-                ForEach(dossier.chapters) { c in
-                    leaderRow(title: c.title, detail: c.detail, trailing: c.duration,
-                              emphasis: c == dossier.chapters.first)
+            // A day with nothing in it is a real state, not a bug, and this page is
+            // the one surface that can say so without apologising: a custodian with
+            // an empty page says the page is empty. Rendering an unlabelled void
+            // instead — which is what an unguarded ForEach over no chapters does —
+            // reads as a failure to load.
+            if dossier.chapters.isEmpty {
+                Text("Nothing has been entered for today yet.")
+                    .font(DS.serif(17))
+                    .italic()
+                    .foregroundStyle(DS.umberDim)
+            } else {
+                VStack(spacing: DS.lg) {
+                    ForEach(dossier.chapters) { c in
+                        leaderRow(title: c.title, detail: c.detail, trailing: c.duration,
+                                  emphasis: c == dossier.chapters.first)
+                    }
                 }
             }
 
@@ -198,14 +234,17 @@ struct HomeDossierView: View {
                     .font(DS.serif(14)).italic()
                     .foregroundStyle(DS.umberDim)
                 Spacer()
-                Button { } label: {
-                    HStack(spacing: DS.xs) {
-                        Image(systemName: "pencil").font(.system(size: 11))
-                        Text("Amend").font(.system(size: 12, weight: .medium))
+                if let onAmend {
+                    Button(action: onAmend) {
+                        HStack(spacing: DS.xs) {
+                            Image(systemName: "pencil").font(DS.captionFont)
+                            Text("Amend").font(DS.smallMedium)
+                        }
+                        .foregroundStyle(DS.tobacco)
                     }
-                    .foregroundStyle(DS.tobacco)
+                    .buttonStyle(.plain)
+                    .help("Edit this record")
                 }
-                .buttonStyle(.plain)
             }
             .padding(.top, DS.xs)
             Text("A custodian keeps; it does not own. This record is kept for the person you are becoming.")

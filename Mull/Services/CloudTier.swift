@@ -5,7 +5,7 @@ import Foundation
 /// bookkeeping.
 ///
 /// **For a default-configuration user this tier produces nothing.** The LLM is
-/// off by default (PRODUCT.md §9: "LLMは既定でOff"), and with `llmProvider == .off`
+/// off by default (CLAUDE.md §9: "LLMは既定でOff"), and with `llmProvider == .off`
 /// both DeliberationEngine and SynthesisEngine fail their first `LLMClient.complete`
 /// call and return empty — so no `03_projects/*.md` briefing and no folder
 /// `index.md` is ever written. PredictionEngine is rule-based and does keep
@@ -44,7 +44,7 @@ final class CloudTier {
 
         // Epistemics: grade yesterday's behavior predictions against the log,
         // then place fresh bets. This is how proactivity earns a hit-rate
-        // instead of guessing (PRODUCT.md "Epistemics").
+        // instead of guessing (DIRECTION.md 付録A "Epistemics").
         let predictor = PredictionEngine(database: database)
         _ = predictor.gradeDuePredictions()
         predictor.recordResumePredictions()

@@ -61,6 +61,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.isGrammarCheckingEnabled = false
         textView.smartInsertDeleteEnabled = false
 
+        // ⌘F inside a note. The whole pitch is that these md files are the product,
+        // and until now finding a word in an open one was simply not possible — the
+        // keystroke did nothing at all, which in an app whose sidebar offers a
+        // cross-file search reads as "the app is broken" rather than "that feature
+        // isn't here". The find bar is AppKit's own, so ⌘F / ⌘G / ⌘E all work and
+        // it matches every other macOS text view the user knows.
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
+
         // Nocturne surface: transparent so DS.canvas shows through; moonlight caret.
         textView.drawsBackground = false
         textView.insertionPointColor = MD.moon
