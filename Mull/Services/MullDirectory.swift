@@ -140,4 +140,31 @@ enum MullDirectory {
     static func exists(_ relativePath: String) -> Bool {
         FileManager.default.fileExists(atPath: root.appendingPathComponent(relativePath).path)
     }
+
+    /// Absolute URL for a path inside the vault. Prefer `read`/`write`; use this
+    /// only where a URL is genuinely required (file coordination, NSWorkspace).
+    static func url(for relativePath: String) -> URL {
+        root.appendingPathComponent(relativePath)
+    }
+
+    /// Markdown files directly inside a vault subdirectory, as vault-relative
+    /// paths, sorted. `index.md` is excluded — it is folder scaffolding written
+    /// by FolderOntology, not content.
+    static func markdownFiles(in relativeDir: String) -> [String] {
+        let dir = root.appendingPathComponent(relativeDir, isDirectory: true)
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {
+            return []
+        }
+        return names
+            .filter { $0.hasSuffix(".md") && $0 != "index.md" }
+            .sorted()
+            .map { "\(relativeDir)/\($0)" }
+    }
+
+    /// Delete the entire vault. Only for the explicit "delete everything" action
+    /// in Settings — everything else should delete a specific file.
+    static func deleteEverything() throws {
+        try FileManager.default.removeItem(at: root)
+        status = .directoryMissing
+    }
 }

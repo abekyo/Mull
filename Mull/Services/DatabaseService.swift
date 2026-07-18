@@ -133,6 +133,16 @@ final class DatabaseService: Sendable {
             fatalError("[mull] Cannot create a database at any location. Disk full or permissions denied.")
         }
 
+        // Serialize migration across processes. The app and the MullMCP binary
+        // each open this same file at startup, so without a lock both can run
+        // ALTER TABLE at once: one gets SQLITE_BUSY, fails, and drops into the
+        // destructive recovery path below while the other is still attached.
+        // flock is advisory, but every entrant is ours, and the kernel releases
+        // it if a holder dies. The migrator is idempotent, so the process that
+        // waits simply finds nothing left to apply.
+        let migrationLock = Self.acquireMigrationLock(dbPath: dbPath)
+        defer { Self.releaseMigrationLock(migrationLock) }
+
         // Migrate BEFORE publishing the pool. On failure the pool must be closed
         // before the files are touched: unlinking a database that an open
         // DatabasePool still holds leaves the app writing to a deleted inode
@@ -186,6 +196,32 @@ final class DatabaseService: Sendable {
         dbPool = activePool
         isFallback = usedFallback
         fallbackReason = reason
+    }
+
+    // MARK: - Cross-process migration lock
+
+    /// Take an exclusive advisory lock on `<dbPath>.migrate.lock`, blocking until
+    /// it is available. Returns -1 if the lock could not be taken, in which case
+    /// the caller proceeds unlocked — a possible race is still better than
+    /// refusing to start.
+    private static func acquireMigrationLock(dbPath: String) -> Int32 {
+        let fd = open(dbPath + ".migrate.lock", O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else {
+            logger.warning("Could not open the migration lock; migrating unlocked.")
+            return -1
+        }
+        if flock(fd, LOCK_EX) != 0 {
+            logger.warning("Could not take the migration lock; migrating unlocked.")
+            close(fd)
+            return -1
+        }
+        return fd
+    }
+
+    private static func releaseMigrationLock(_ fd: Int32) {
+        guard fd >= 0 else { return }
+        flock(fd, LOCK_UN)
+        close(fd)
     }
 
     /// Open a database at an explicit path, with the same schema and pragmas as
@@ -436,6 +472,23 @@ final class DatabaseService: Sendable {
             // Purge text belonging to rows that were deleted before the triggers existed.
             try db.execute(sql: "INSERT INTO daily_summaries_fts(daily_summaries_fts) VALUES('rebuild')")
             try db.execute(sql: "INSERT INTO knowledge_entries_fts(knowledge_entries_fts) VALUES('rebuild')")
+        }
+
+        migrator.registerMigration("v8_drop_unused_signal_indexes") { db in
+            // v5/v6 indexed entity/contentType/mode with the stated intent of
+            // moving facet filtering into SQL. That never happened: no query in
+            // the codebase filters on these columns — `fetchCandidates` narrows
+            // by timestamp/FTS and `Selection` facets in Swift, deliberately, so
+            // that rows written before the columns existed still match via
+            // recompute. Three B-trees on a multi-million-row table were being
+            // maintained on every captured event for zero reads.
+            //
+            // Bring them back together with the query that uses them.
+            for name in ["recording_events_on_entity",
+                         "recording_events_on_contentType",
+                         "recording_events_on_mode"] {
+                try db.execute(sql: "DROP INDEX IF EXISTS \(name)")
+            }
         }
 
         // ── Future migrations go here ──

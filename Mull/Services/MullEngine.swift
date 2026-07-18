@@ -20,10 +20,10 @@ final class MullEngine {
     private let dataScanInterval: TimeInterval = 10 * 60 // 10 minutes
 
     // Paths
-    private var mullOutputDir: URL {
-        let home = fileManager.homeDirectoryForCurrentUser
-        return home.appendingPathComponent("mull", isDirectory: true)
-    }
+    /// The vault root — via MullDirectory, which owns the legacy migration and
+    /// the writability gate. Rebuilding the path here meant a relocated vault
+    /// would be seen by some writers and not others.
+    private var mullOutputDir: URL { MullDirectory.root }
 
     private var dailyDir: URL {
         let formatter = DateFormatter()

@@ -28,8 +28,10 @@ final class MCPServer {
 
     init(database: DatabaseService) {
         self.database = database
-        self.mullDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("mull")
+        // Through MullDirectory, not a second hand-built path: it owns the
+        // ~/Whatly → ~/mull migration and the writability gate, and a vault that
+        // moves must move for every reader at once.
+        self.mullDir = MullDirectory.root
     }
 
     /// Sent in the `initialize` response so the agent is oriented before its

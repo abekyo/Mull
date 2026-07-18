@@ -151,10 +151,18 @@ final class ChatViewModel: ObservableObject {
             ctx.append("=== now.md ===\n\(ContextBlockFile.stripMarkers(now))")
         }
         ctx.append("=== THIS WEEK'S RECORDED ACTIVITY (last 7 days, observed by mull) ===\n\(weeklyDigest)")
-        for project in projectFiles() {
-            if let body = MullDirectory.read(project) {
-                ctx.append("=== \(project) ===\n\(body)")
-            }
+
+        // Project briefs, most recently touched first and bounded. This used to
+        // inline every file in 03_projects/ at full length with no cap, so the
+        // system prompt — re-sent on every turn — grew with the size of the
+        // vault rather than the size of the question.
+        var projectBudget = Self.projectContextBudget
+        for project in recentProjectFiles(limit: Self.maxProjectFiles) {
+            guard projectBudget > 0, let body = MullDirectory.read(project) else { continue }
+            let clipped = String(body.prefix(min(projectBudget, Self.maxCharsPerProject)))
+            projectBudget -= clipped.count
+            let truncated = clipped.count < body.count ? "\n… (truncated)" : ""
+            ctx.append("=== \(project) ===\n\(clipped)\(truncated)")
         }
         let context = ctx.isEmpty
             ? "(no mull context generated yet)"
@@ -278,13 +286,24 @@ final class ChatViewModel: ObservableObject {
         return "\(history)\nUser: \(latest)"
     }
 
-    private func projectFiles() -> [String] {
+    /// Caps on how much project context rides along on every turn. The system
+    /// prompt is re-sent with each message, so this bounds cost and latency to
+    /// the question rather than to how many projects have accumulated.
+    private static let maxProjectFiles = 5
+    private static let maxCharsPerProject = 4_000
+    private static let projectContextBudget = 12_000
+
+    /// The most recently modified project briefs — recency is the best available
+    /// proxy for "what this person is actually working on now".
+    private func recentProjectFiles(limit: Int) -> [String] {
         let fm = FileManager.default
-        let root = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("mull/03_projects", isDirectory: true)
-        guard let names = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
-        return names.filter { $0.hasSuffix(".md") && $0 != "index.md" }
-            .sorted().map { "03_projects/\($0)" }
+        let paths = MullDirectory.markdownFiles(in: "03_projects")
+        let byRecency = paths.sorted { a, b in
+            let da = (try? fm.attributesOfItem(atPath: MullDirectory.url(for: a).path)[.modificationDate] as? Date) ?? nil
+            let db = (try? fm.attributesOfItem(atPath: MullDirectory.url(for: b).path)[.modificationDate] as? Date) ?? nil
+            return (da ?? .distantPast) > (db ?? .distantPast)
+        }
+        return Array(byRecency.prefix(limit))
     }
 }
 

@@ -816,8 +816,7 @@ struct DataTab: View {
         appState.todaySummary = nil
         appState.todayEventCount = 0
         appState.loadRecentSummaries()
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("mull")
-        try? FileManager.default.removeItem(at: dir)
+        try? MullDirectory.deleteEverything()
         refresh()
     }
 }
