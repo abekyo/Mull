@@ -5,9 +5,14 @@ import AppKit
 /// Phase 1: Subject + sender only. Body is never read.
 ///
 /// Privacy: OFF by default. User must opt-in in Settings → Data.
+/// **Main-actor isolated**, for the same reason as `RecordingService`: this is a
+/// capture channel with a 5-minute poll timer and mutable dedupe state, and the
+/// only thing that legitimately leaves the main actor is the AppleScript call on
+/// `scriptQueue`. That separation was a convention; now it is checked.
+@MainActor
 final class EmailService {
 
-    private let database: DatabaseService
+    private let database: CaptureDatabase
     private var pollTimer: Timer?
     private var lastFetchDate: Date = Date()
     /// Dedup keys for emails already recorded, bounded so a long-running session with a
@@ -82,7 +87,7 @@ final class EmailService {
         set { problemLock.lock(); storedProblem = newValue; problemLock.unlock() }
     }
 
-    init(database: DatabaseService) {
+    init(database: CaptureDatabase) {
         self.database = database
     }
 

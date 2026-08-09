@@ -163,7 +163,15 @@ final class LLMClient {
     private func callGemini(system: String?, prompt: String, options: Options) async throws -> String {
         let apiKey = try apiKey("gemini_api_key", provider: "Gemini")
 
-        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\(apiKey)") else {
+        // The key goes in a header, not in `?key=`. Google accepts both, but a URL
+        // is the part of a request that gets written down — proxy logs, URLSession
+        // metrics, a crash report's last-request field, the address bar of anyone
+        // who pastes it to debug. A header is not secret, it is just not habitually
+        // recorded. (It also removes an interpolation of unescaped user input into
+        // a URL string: a key carrying a reserved character made `URL(string:)`
+        // return nil, which surfaced as "Invalid Gemini API URL" — a message that
+        // sends you looking at everything except your key.)
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent") else {
             throw mullError.llmFailed("Invalid Gemini API URL")
         }
 
@@ -171,6 +179,7 @@ final class LLMClient {
         request.httpMethod = "POST"
         request.timeoutInterval = options.timeout ?? 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
         var body: [String: Any] = [
             "contents": [

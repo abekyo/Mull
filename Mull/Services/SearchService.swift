@@ -1,4 +1,10 @@
-import SwiftUI
+import Foundation
+
+// No `import SwiftUI`. This is the search layer, and it was the only file below
+// Mull/Views that reached for it — for two members, `SearchHit.Kind.color` and
+// `SearchService.highlighted`, both of which are presentation. They now live in
+// Mull/Views/SearchPresentation.swift. What is left here is what "search" means,
+// and it compiles without a UI framework, like the rest of Core and Services.
 
 // MARK: - Search hit
 
@@ -41,17 +47,6 @@ struct SearchHit: Identifiable, Hashable {
             }
         }
 
-        var color: Color {
-            switch self {
-            case .typed: DS.eventKeystroke
-            case .copied: DS.eventClipboard
-            case .window: DS.eventWindow
-            case .document: DS.taupe
-            case .app: DS.eventApp
-            case .audio: DS.eventAudio
-            case .schedule: DS.moon
-            }
-        }
     }
 }
 
@@ -106,7 +101,7 @@ enum SearchService {
     /// `truncated` says the rows are a capped slice rather than the whole answer, so
     /// the view can say "the first N of more" instead of letting N read as "all there
     /// is". It is deliberately a flag and not a total: counting the matches behind the
-    /// cap needs a COUNT over the same FTS/LIKE predicate, and `DatabaseService` has no
+    /// cap needs a COUNT over the same FTS/LIKE predicate, and `MCPDatabase` has no
     /// such method (`countEvents` counts a time window, not a query).
     struct Results {
         let hits: [SearchHit]
@@ -140,7 +135,7 @@ enum SearchService {
     ///
     /// Blocking — call from a detached task.
     static func search(query: String,
-                       database: DatabaseService,
+                       database: MCPDatabase,
                        calendar: CalendarService,
                        range: SearchRange = .all) -> Results {
         let (events, truncated) = matchingEvents(query: query, range: range, database: database)
@@ -154,7 +149,7 @@ enum SearchService {
     /// and pass the range the reader has chosen — otherwise the fetch is unbounded and
     /// the narrowing is back to being a filter over a capped slice.
     static func gather(query: String,
-                       database: DatabaseService,
+                       database: MCPDatabase,
                        calendar: CalendarService) -> (hits: [SearchHit], summaries: [DailySummary]) {
         let r = search(query: query, database: database, calendar: calendar, range: .all)
         return (r.hits, r.summaries)
@@ -175,7 +170,7 @@ enum SearchService {
     /// is now honest, because the range itself came back whole.
     private static func matchingEvents(query: String,
                                        range: SearchRange,
-                                       database: DatabaseService) -> (events: [RecordingEvent], truncated: Bool) {
+                                       database: MCPDatabase) -> (events: [RecordingEvent], truncated: Bool) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ([], false) }
         let cutoff = range.cutoff
@@ -280,7 +275,9 @@ enum SearchService {
     /// The terms a query marks. One definition, used by both `snippet` (which decides
     /// *where* to cut) and `highlighted` (which decides *what* to mark) — if the two
     /// disagreed, a row could be windowed around a word it then refused to emphasise.
-    private static func terms(in query: String) -> [String] {
+    /// Internal rather than private: SearchPresentation highlights the same terms
+    /// this splits, and there must be exactly one definition of what a term is.
+    static func terms(in query: String) -> [String] {
         query.split(separator: " ").map(String.init).filter { !$0.isEmpty }
     }
 
@@ -314,28 +311,6 @@ enum SearchService {
             + (upper < flat.endIndex ? "…" : "")
     }
 
-    /// Render the matched text with the query terms emphasised (moonlight, medium), so the
-    /// eye lands on *why* this row matched. Case-insensitive; windowed to keep rows compact.
-    static func highlighted(_ raw: String, query: String) -> AttributedString {
-        let text = snippet(raw, query: query)
-        var result = AttributedString(text)
-        for term in terms(in: query) {
-            var from = text.startIndex
-            while let r = text.range(of: term, options: .caseInsensitive, range: from..<text.endIndex) {
-                if let lo = AttributedString.Index(r.lowerBound, within: result),
-                   let hi = AttributedString.Index(r.upperBound, within: result) {
-                    result[lo..<hi].foregroundColor = DS.moon
-                    // `captionFont`'s emphasis tier, not a hand-written 11pt. The row
-                    // renders in `DS.captionFont`; a literal size here would sit on a
-                    // different baseline the moment that token moved, and the line
-                    // would jitter mid-sentence. Same pairing as microFont/microBold.
-                    result[lo..<hi].font = DS.captionMedium
-                }
-                from = r.upperBound
-            }
-        }
-        return result
-    }
 
     /// Today / Yesterday / the date — the day header for a timeline group.
     ///

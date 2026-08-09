@@ -4,12 +4,12 @@ import Foundation
 ///
 /// One always-available field (the menu-bar panel) drops a thought into the vault
 /// with zero ceremony: no file picker, no "where should this go", no save button.
-/// It lands in `09_inbox/captures.md`, a file NO agent ever writes — so it is
+/// It lands in `inbox.md`, a file NO agent ever writes — so it is
 /// Round-trip safe by construction (原則6): the Curator can never clobber it, and
 /// nothing here normalises bytes the user typed. mull routes it later; capture stays cheap.
 enum QuickCapture {
 
-    static let relativePath = "09_inbox/captures.md"
+    static let relativePath = VaultLayout.inboxFile
 
     private static let header = """
     # Captures

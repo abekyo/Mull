@@ -16,27 +16,9 @@ import Foundation
 // behind RecordingEvent.id). Both are fixed — containsCJK now lives in
 // Mull/Core/TextScript.swift — and CI runs run.sh so it cannot rot silently again.
 
-// MARK: - Shim (matches the real RecordingEvent's shape; no GRDB)
-
-struct RecordingEvent {
-    enum EventType { case screenText, keystroke, clipboard, appSwitch, audio, windowBody }
-    // Back-pointer into _raw. Left nil: these cases are synthetic, and the eval
-    // scores by text, not by identity.
-    var id: Int64? = nil
-    var timestamp: Date
-    var eventType: EventType
-    var appName: String?
-    var windowTitle: String?
-    var textContent: String?
-    // #4 capture-time columns. Left nil here so the eval exercises Selection's
-    // recompute fallback (same path as pre-backfill rows).
-    var entity: String? = nil
-    var contentType: String? = nil
-    var salience: Double? = nil
-    // MODE axis. Left nil so the eval exercises Mode's recompute path, the same
-    // way entity/contentType/salience do.
-    var mode: String? = nil
-}
+// The RecordingEvent shim, the baseline strategies and the metrics live in
+// eval/EvalCore.swift, shared with eval/real/real_eval.swift so the two harnesses
+// cannot drift apart and report incomparable numbers.
 
 // MARK: - Case model + builders
 
@@ -295,74 +277,92 @@ let cases: [EvalCase] = [
         ev(10080, "redis pool exhausted last quarter too", title: "Old.swift — LegacyApp"),
     ], query: "redis pool", anchor: "Mull", k: 1,
        gold: ["redis pool exhausted under load"]),
+
+    // ---- 29-32: shapes taken from a REAL log, not invented ----
+    //
+    // Cases 1-28 were written by the person who wrote the ranker, after they
+    // wrote it, and the ranker scores 1.000 on all of them. The four below came
+    // the other way round: eval/real/ was pointed at four windows of an actual
+    // mull database (1,493 events, 2026-06-10 and 2026-08-08), gold was labelled
+    // by hand BEFORE running anything, and mull scored F1 0.220. These are the
+    // failures that produced that number, transcribed to neutral content so they
+    // can ship and run in CI — the corpus stays on the machine it came from.
+    //
+    // They are `.gap`: known-failing, and the list of what is still broken. A gap
+    // that starts passing should be moved up into the guardrails above.
+
+    // 29. GAP — capture polls the window title every 5 seconds, so one session
+    // lands in the log a dozen times over. On the real window six of eight slots
+    // went to six byte-identical copies of one title, and the two clipboard notes
+    // that held the actual answer were never reached: they share no words with
+    // the query, so the lexical gate drops them. There is no dedup anywhere in
+    // Selection — `scored` can and does return the same string N times.
+    EvalCase(name: "duplicate-flood", events: [
+        ev(3, "open source feasibility check — mull", title: "Code — Mull", kind: .screenText),
+        ev(4, "open source feasibility check — mull", title: "Code — Mull", kind: .screenText),
+        ev(5, "open source feasibility check — mull", title: "Code — Mull", kind: .screenText),
+        ev(6, "open source feasibility check — mull", title: "Code — Mull", kind: .screenText),
+        ev(7, "open source feasibility check — mull", title: "Code — Mull", kind: .screenText),
+        ev(8, "open source feasibility check — mull", title: "Code — Mull", kind: .screenText),
+        ev(9,  "blocker 2: a clean clone cannot build — project.yml configFiles", title: "Notes — Mull"),
+        ev(10, "blocker 4: the commit email address", title: "Notes — Mull"),
+    ], query: "open source", anchor: "Mull", k: 8, gold: [
+        "open source feasibility check — mull",
+        "blocker 2: a clean clone cannot build — project.yml configFiles",
+        "blocker 4: the commit email address",
+    ], role: .gap),
+
+    // 30. GAP — mull records the clipboard, so a question the user pasted into an
+    // agent IS an event. It matches its own query perfectly and ranks first: the
+    // agent is handed its own question back as context. This one cannot be
+    // imagined into a synthetic corpus — nobody writes their own query into the
+    // events list — and it appeared the first time the ranker met a real log.
+    EvalCase(name: "query-echo", events: [
+        ev(1, "What was I mainly working on this week?"),
+        ev(40, "shipped the retry rewrite and closed the flaky test", title: "Notes — Mull"),
+        ev(55, "decided to drop the second calendar column", title: "Notes — Mull"),
+    ], query: "What was I mainly working on this week?", anchor: "Mull", k: 3, gold: [
+        "shipped the retry rewrite and closed the flaky test",
+        "decided to drop the second calendar column",
+    ], role: .gap),
+
+    // 31. GAP — the same thought copied three times across fifteen minutes, each
+    // version longer than the last, which is simply how a person drafts. All
+    // three rank; the complete one came third. Two of three slots bought nothing,
+    // because nothing checks whether one result is contained in another.
+    EvalCase(name: "subsumption", events: [
+        ev(20, "stepping into the judgment layer"),
+        ev(15, "stepping into the judgment layer is probably necessary in the end, but what this product"),
+        ev(3,  "stepping into the judgment layer is probably necessary in the end, but what this product actually does is hard to see, and stepping in risks losing trust through off-target suggestions"),
+    ], query: "judgment layer", anchor: "Dream", k: 3, gold: [
+        "stepping into the judgment layer is probably necessary in the end, but what this product actually does is hard to see, and stepping in risks losing trust through off-target suggestions",
+    ], role: .gap),
+
+    // 32. GAP — `Entity.from` reads the trailing segment of a window title, so a
+    // browser tab gets filed under the BROWSER PROFILE, not the project. On the
+    // real window the one page that actually held mull's icon drafts was filed
+    // under the Firefox profile name, scored entityMatch 0 against the Mull
+    // anchor, and lost every slot to repeats of an in-anchor session title —
+    // while another project's icon work leaked in on lexical overlap alone.
+    EvalCase(name: "entity-junk-profile", events: [
+        ev(5, "app icon design work — mull", title: "Code — Mull", kind: .screenText),
+        ev(6, "app icon design work — mull", title: "Code — Mull", kind: .screenText),
+        ev(7, "app icon design work — mull", title: "Code — Mull", kind: .screenText),
+        ev(8, "mull icon draft: tree rings — Default Profile", title: "Firefox — Default Profile", kind: .screenText),
+        ev(9, "app icon prototype — OtherApp", title: "Code — OtherApp", kind: .screenText),
+    ], query: "icon draft", anchor: "Mull", k: 3,
+       gold: ["mull icon draft: tree rings — Default Profile"], role: .gap),
 ]
 
-// MARK: - Strategies
-//
-// A benchmark with one competitor measures nothing: whatever mull scores, there
-// is no number it had to beat. These are the alternatives mull's whole premise
-// is an argument against (README, "Does context actually help?"). Selection has
-// to beat all three on the same cases or the premise is unsupported.
+// The strategies (mull / full-context / recency-only / entity-only) and the
+// metrics live in eval/EvalCore.swift — shared with the real-log harness.
 
-enum Strategy: String, CaseIterable {
-    case mull           = "mull"
-    case fullContext    = "full-context"   // dump everything — the ETH paper's subject
-    case recencyOnly    = "recency-only"   // "just show me the last N things"
-    case entityOnly     = "entity-only"    // "just show me this project"
-}
-
-/// Selection truncates and trims; baselines must be scored on the same strings
-/// or the gold-set comparison silently misses.
-private func normalized(_ e: RecordingEvent) -> String? {
-    guard let t = e.textContent?.trimmingCharacters(in: .whitespacesAndNewlines), t.count >= 2 else { return nil }
-    return String(t.prefix(200))
-}
-
-func retrieve(_ s: Strategy, _ c: EvalCase) -> [String] {
-    let newestFirst = c.events.sorted { $0.timestamp > $1.timestamp }
-    switch s {
-    case .mull:
-        return Selection.rank(events: c.events, query: c.query,
-                              entity: c.entity, anchor: c.anchor ?? c.entity,
-                              type: c.type, now: now, since: 7 * 86_400, limit: c.k)
-            .map(\.text)
-    case .fullContext:
-        // No ranking, no limit, no filtering — including none of mull's secret
-        // and test-input exclusions. That is what "just give the model the
-        // context" actually means, and its cost belongs in the comparison.
-        return newestFirst.compactMap(normalized)
-    case .recencyOnly:
-        return newestFirst.prefix(c.k).compactMap(normalized)
-    case .entityOnly:
-        let scope = (c.entity ?? c.anchor)?.lowercased()
-        return newestFirst
-            .filter { e in
-                guard let scope else { return true }
-                return Entity.from(e.windowTitle ?? e.textContent ?? "")?.lowercased() == scope
-            }
-            .prefix(c.k).compactMap(normalized)
+extension EvalCase {
+    var need: Need {
+        Need(events: events, query: query, entity: entity, anchor: anchor,
+             type: type, k: k, now: now, since: 7 * 86_400)
     }
 }
-
-// MARK: - Metrics
-
-struct Score { var p = 0.0, r = 0.0, mrr = 0.0 }
-
-func score(retrieved: [String], gold: Set<String>) -> Score {
-    let hit = Set(retrieved).intersection(gold)
-    // An empty gold set means "the right answer is silence". Returning nothing
-    // then is a perfect score, not a zero — the old formula scored it 0 and would
-    // have punished the ranker for being correctly quiet.
-    if gold.isEmpty { return retrieved.isEmpty ? Score(p: 1, r: 1, mrr: 1) : Score(p: 0, r: 1, mrr: 0) }
-    var rr = 0.0
-    for (i, t) in retrieved.enumerated() where gold.contains(t) { rr = 1.0 / Double(i + 1); break }
-    return Score(p: retrieved.isEmpty ? 0 : Double(hit.count) / Double(retrieved.count),
-                 r: Double(hit.count) / Double(gold.count),
-                 mrr: rr)
-}
-
-func f1(_ p: Double, _ r: Double) -> Double { (p + r) == 0 ? 0 : 2 * p * r / (p + r) }
-
 
 // MARK: - Convergence: does correcting mull improve it?
 //
@@ -451,27 +451,22 @@ func printConvergence() {
           : "  ⚠ corrections did NOT improve the ranking — the loop is not connected")
 }
 
-func pad(_ s: String, _ width: Int) -> String {
-    s.count >= width ? s + " " : s + String(repeating: " ", count: width - s.count)
-}
-
 // MARK: - Run
 
 @main
 struct SelectionEval {
     static func main() {
-        let n = Double(cases.count)
-
         // Per-case detail for mull only; baselines are summarised below.
         print("case                              P     R    MRR   retrieved")
         print(String(repeating: "-", count: 68))
-        var failures: [String] = []
+        var openGaps: [String] = []
+        var regressions: [String] = []
         for c in cases {
-            let retrieved = retrieve(.mull, c)
+            let retrieved = retrieve(.mull, c.need)
             let s = score(retrieved: retrieved, gold: c.gold)
             let hits = Set(retrieved).intersection(c.gold).count
             let perfect = s.p == 1 && s.r == 1
-            if !perfect { failures.append(c.name) }
+            if !perfect { (c.role == .gap ? { openGaps.append($0) } : { regressions.append($0) })(c.name) }
             let flag = perfect ? "" : (c.role == .gap ? "   <GAP" : "   <REGRESSION")
             // %-32@ does not pad on Darwin's String(format:) — pad by hand or the
             // whole table collapses into one ragged column.
@@ -479,62 +474,40 @@ struct SelectionEval {
                                            s.p, s.r, s.mrr, hits, retrieved.count) + flag)
         }
 
-        // Strategy comparison — the number that actually decides anything.
-        var means: [Strategy: Score] = [:]
-        for st in Strategy.allCases {
-            var acc = Score()
-            for c in cases {
-                let s = score(retrieved: retrieve(st, c), gold: c.gold)
-                acc.p += s.p; acc.r += s.r; acc.mrr += s.mrr
-            }
-            means[st] = Score(p: acc.p / n, r: acc.r / n, mrr: acc.mrr / n)
-        }
-
         print(String(repeating: "-", count: 68))
         print(String(format: "n=%d cases  (%d gap, %d guard)", cases.count,
                      cases.filter { $0.role == .gap }.count,
                      cases.filter { $0.role == .guardrail }.count))
-        print("")
-        print("strategy        precision   recall      MRR       F1")
-        print(String(repeating: "-", count: 68))
-        for st in Strategy.allCases {
-            let m = means[st]!
-            print(pad(st.rawValue, 16) + String(format: "%.3f      %.3f     %.3f    %.3f",
-                                                m.p, m.r, m.mrr, f1(m.p, m.r)))
-        }
-        print(String(repeating: "-", count: 68))
 
-        // full-context always scores recall 1.000 by construction — it returns
-        // everything, so it cannot miss. That is exactly why recall alone is not
-        // the gate: the question is whether selecting beats dumping once the cost
-        // of the dump is counted, which is what F1 does here.
-        let mine = means[.mull]!
-        let rivals = Strategy.allCases.filter { $0 != .mull }
-        let beaten = rivals.filter { f1(mine.p, mine.r) > f1(means[$0]!.p, means[$0]!.r) }
+        // Strategy comparison — the number that actually decides anything.
+        let beatsBaselines = printStrategyTable(needs: cases.map { ($0.need, $0.gold) })
 
-        for st in rivals {
-            let m = means[st]!
-            let delta = f1(mine.p, mine.r) - f1(m.p, m.r)
-            print("  vs " + pad(st.rawValue, 16) + String(format: "F1 %+.3f  ", delta)
-                  + (delta > 0 ? "beat" : "NOT BEATEN"))
+        // Gaps are SUPPOSED to fail — that is the difference between the two
+        // roles, and a harness with no open gaps has stopped pointing at anything.
+        // They are printed, not gated; a guardrail failure is the thing that has
+        // to stop a push.
+        if !openGaps.isEmpty {
+            print("\nopen gaps (known-failing, not gated): \(openGaps.joined(separator: ", "))")
         }
-        if !failures.isEmpty {
-            print("\nnot perfect: \(failures.joined(separator: ", "))")
+        if !regressions.isEmpty {
+            print("\nREGRESSIONS: \(regressions.joined(separator: ", "))")
         }
 
-        // Release gate (ROADMAP §1-B). Beating the baselines on F1 is necessary
-        // but far too slack on its own — mull currently clears them by ~0.3, so
+        // Release gate (SELECTION-LAYER §6.1). Beating the baselines on F1 is necessary
+        // but far too slack on its own — mull clears them by a wide margin, so
         // that test alone would stay green through a serious regression. The
         // second clause is the specific failure this harness was extended to
         // catch: a case where mull holds the answer and returns nothing, which is
-        // what "No relevant activity" looked like from the agent's side.
+        // what "No relevant activity" looked like from the agent's side. Scoped to
+        // guardrails: returning nothing IS the documented behaviour of some gaps.
         let silentMisses = cases.filter { c in
-            !c.gold.isEmpty && score(retrieved: retrieve(.mull, c), gold: c.gold).r == 0
+            c.role == .guardrail && !c.gold.isEmpty
+                && score(retrieved: retrieve(.mull, c.need), gold: c.gold).r == 0
         }
         if !silentMisses.isEmpty {
             print("\nanswered nothing while holding the answer: \(silentMisses.map(\.name).joined(separator: ", "))")
         }
-        let passed = beaten.count == rivals.count && mine.r >= 0.7 && silentMisses.isEmpty
+        let passed = beatsBaselines && silentMisses.isEmpty && regressions.isEmpty
         printConvergence()
         print(passed ? "\nGATE: pass" : "\nGATE: fail")
         exit(passed ? 0 : 1)

@@ -29,7 +29,7 @@ import Foundation
 struct FactExtractor {
 
     let analytics: AnalyticsEngine
-    let database: DatabaseService
+    let database: EventReading
 
     /// Extract all detectable facts from recorded data.
     func extractFacts(days: Int = 7) -> [Fact] {

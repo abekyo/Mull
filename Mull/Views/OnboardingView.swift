@@ -69,7 +69,7 @@ struct OnboardingView: View {
     @State private var coldReadInFlight = false
 
     // The exact text "Copy my context" would put on the clipboard, shown before it
-    // goes anywhere (根拠を見せる — DESIGN-NORTHSTAR §3.5).
+    // goes anywhere — mull shows its sources before it hands anything over.
     @State private var contextPreview: String?
     @State private var isLoadingPreview = false
     /// True when nothing has been recorded yet, so the pane is holding only the
@@ -123,7 +123,7 @@ struct OnboardingView: View {
         .frame(minWidth: 500, idealWidth: 500, maxWidth: .infinity,
                minHeight: 560, idealHeight: 560, maxHeight: .infinity)
         // Paper, not glass: .ultraThinMaterial is the cold-tech surface the design
-        // north star bans on anything a person reads (DESIGN-NORTHSTAR / CLAUDE.md §4).
+        // mull keeps off anything a person reads about their own life.
         // The paper is watermarked with the icon's rings in the top-right corner —
         // every onboarding page is a leaf of the same stationery.
         .background(
@@ -380,7 +380,7 @@ struct OnboardingView: View {
     ///
     /// So it says the smaller, true thing: here is what is visible right now, this is
     /// where each item came from, none of it was recorded, and you decide where it
-    /// goes. Reassurance, not a demonstration of reach (DESIGN-NORTHSTAR §0/§1).
+    /// goes. Reassurance, not a demonstration of reach.
     private var coldReadStep: some View {
         VStack(spacing: DS.lg) {
             Spacer()
@@ -486,7 +486,7 @@ struct OnboardingView: View {
             VStack(spacing: DS.xs) {
                 Text("Tell mull the essentials")
                     .font(DS.headlineFont)
-                Text("Every field is optional. Skip what you like; you can correct any of it later in About Me — your edits.")
+                Text("Every field is optional. Skip what you like; you can correct any of it later at the foot of About Me.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
                     .multilineTextAlignment(.center)

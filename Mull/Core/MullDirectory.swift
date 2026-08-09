@@ -11,9 +11,9 @@ enum MullDirectory {
     /// True when this process is an XCTest run.
     ///
     /// The test host is the app itself, so `AppState.init()` boots on every test
-    /// run — and it calls `setup()` and `FolderOntology.scaffold()`, which were
-    /// rewriting the eight `*/index.md` files in the user's REAL vault every
-    /// time anyone ran the suite. Tests must never mutate real user data.
+    /// run — and it calls `setup()` and `VaultLayout.migrate()`, which between them
+    /// were rewriting files in the user's REAL vault every time anyone ran the suite
+    /// (and now would MOVE them). Tests must never mutate real user data.
     static let isRunningTests: Bool = {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil
@@ -24,8 +24,8 @@ enum MullDirectory {
     /// Root directory: ~/mull — or a throwaway directory under XCTest.
     ///
     /// Redirecting the root (rather than guarding each writer) means every path
-    /// into the vault is covered at once: Curator, FolderOntology, FolderFiller,
-    /// RawStore, and the MCP write tools. It also makes those write paths safely
+    /// into the vault is covered at once: Curator, VaultLayout's migration, RawStore,
+    /// and the MCP write tools. It also makes those write paths safely
     /// testable, which they were not before.
     static let root: URL = {
         guard isRunningTests else {
@@ -122,6 +122,15 @@ enum MullDirectory {
             return status
         }
 
+        // The vault root, entered by nobody but its owner. Applied on every setup
+        // rather than only at creation: `createDirectory` uses the process umask
+        // (0755 on a stock account), so vaults made by earlier builds are sitting
+        // world-listable right now — and a listing of ~/mull is a list of the
+        // user's projects and the days they worked, which is content, not metadata.
+        // The root alone is enough: an unreadable directory cannot be traversed
+        // into, so `daily/`, `notes/` and everything below inherit the answer.
+        FilePrivacy.protectDirectory(at: root)
+
         // Heal files stamped .completeUnlessOpen by earlier builds — the stamp
         // can refuse reads (see FilePrivacy.protectFile), and files that are
         // never rewritten would otherwise carry it forever.
@@ -184,8 +193,9 @@ enum MullDirectory {
     }
 
     /// Markdown files directly inside a vault subdirectory, as vault-relative
-    /// paths, sorted. `index.md` is excluded — it is folder scaffolding written
-    /// by FolderOntology, not content.
+    /// paths, sorted. `index.md` is excluded: mull no longer writes one (DIRECTION
+    /// §6.1), and one the user made is a table of contents rather than a document —
+    /// callers here want the documents.
     static func markdownFiles(in relativeDir: String) -> [String] {
         let dir = root.appendingPathComponent(relativeDir, isDirectory: true)
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {

@@ -14,8 +14,8 @@ import SwiftUI
 /// into every turn, and tells the model it has no tools. That is "一発RAGで詰め込む",
 /// which DIRECTION §5 names as the ❌ side of its first design principle.
 ///
-/// It is kept anyway, as a satellite (CLAUDE.md §9 / §12: the GUI is frozen but stays
-/// working). It is the only LLM path for someone with neither Claude Desktop nor
+/// It is kept anyway, as a satellite: the GUI takes no new investment but stays
+/// working. It is the only LLM path for someone with neither Claude Desktop nor
 /// Cursor, its rule-based instant layer answers with no provider at all, and its
 /// "Inspect" affordance is the one screen that shows the outgoing payload verbatim.
 ///
@@ -425,7 +425,7 @@ final class ChatViewModel: ObservableObject {
         ctx.append("=== THIS WEEK'S RECORDED ACTIVITY (last 7 days, observed by mull) ===\n\(weeklyDigest)")
 
         // Project briefs, most recently touched first and bounded. This used to
-        // inline every file in 03_projects/ at full length with no cap, so the
+        // inline every file in projects/ at full length with no cap, so the
         // system prompt — re-sent on every turn — grew with the size of the
         // vault rather than the size of the question.
         var projectBudget = Self.projectContextBudget
@@ -600,7 +600,7 @@ final class ChatViewModel: ObservableObject {
     /// proxy for "what this person is actually working on now".
     private func recentProjectFiles(limit: Int) -> [String] {
         let fm = FileManager.default
-        let paths = MullDirectory.markdownFiles(in: "03_projects")
+        let paths = MullDirectory.markdownFiles(in: VaultLayout.projects)
         let byRecency = paths.sorted { a, b in
             let da = (try? fm.attributesOfItem(atPath: MullDirectory.url(for: a).path)[.modificationDate] as? Date) ?? nil
             let db = (try? fm.attributesOfItem(atPath: MullDirectory.url(for: b).path)[.modificationDate] as? Date) ?? nil

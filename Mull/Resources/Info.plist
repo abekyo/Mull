@@ -28,7 +28,5 @@
 	<string>Mull reads your calendar to give AI context about your schedule.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Mull reads your calendar to give AI context about your schedule.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Mull can optionally record audio for meeting transcription.</string>
 </dict>
 </plist>

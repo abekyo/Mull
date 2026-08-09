@@ -180,7 +180,7 @@ final class MarkdownDocTests: XCTestCase {
     }
 
     func testRelativeLinkResolvesAgainstItsOwnFolder() {
-        let target = MarkdownDoc.linkTarget("../me.md", from: "03_projects/mull.md",
+        let target = MarkdownDoc.linkTarget("../me.md", from: "projects/mull.md",
                                             exists: vault(["me.md"]))
         XCTAssertEqual(target, .vaultFile("me.md"))
     }

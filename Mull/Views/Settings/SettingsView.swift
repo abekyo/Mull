@@ -63,6 +63,10 @@ struct GeneralTab: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = true
     @AppStorage("outputMaxChars") private var outputMaxChars = 50000
     @AppStorage("proactiveBriefs") private var proactiveBriefs = false
+    @AppStorage("meetingReminders") private var meetingReminders = true
+    @AppStorage("aiAutoCopy") private var aiAutoCopy = true
+    @AppStorage("summaryNotifications") private var summaryNotifications = true
+    @AppStorage(Preferences.resumeGapKey) private var resumeGap = Int(TimeBlockEngine.defaultResumeGap)
     // `autoExport`, `exportPath` and `obsidianVault` used to live here, behind an
     // "Export Destinations" section and an "Auto-export after each mull" toggle.
     // Nothing in the app ever read any of the three: the user typed a vault path,
@@ -81,6 +85,17 @@ struct GeneralTab: View {
     /// checkbox claims. Empty when the two agree.
     @State private var loginItemNote: String?
     @State private var loginItemIsProblem = false
+
+    /// Seconds, matching `Preferences.resumeGap`. "Off" is a real option rather than
+    /// a hidden floor: someone who wants every interruption drawn separately should
+    /// be able to say so, not be told the smallest break mull believes in.
+    private let resumeGapOptions = [
+        (0, "Off — every break starts a new block"),
+        (300, "5 minutes"),
+        (600, "10 minutes"),
+        (900, "15 minutes"),
+        (1800, "30 minutes"),
+    ]
 
     private let charOptions = [
         (5000, "Minimal (5K)"),
@@ -142,12 +157,48 @@ struct GeneralTab: View {
                 }
             }
 
+            Section("Activity") {
+                Picker("Treat a return within", selection: $resumeGap) {
+                    ForEach(resumeGapOptions, id: \.0) { value, label in
+                        Text(label).tag(value)
+                    }
+                }
+                Text(resumeGap > 0
+                     ? "Coming back to the same project inside this window continues the session instead of starting a second one that looks unrelated. The break itself is never counted as working time — the block says how long you were away."
+                     : "Every break of more than three minutes begins a new block, even when you come straight back to the same file.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+            }
+
             Section("Notifications") {
+                // One toggle per source. Deliberately absent: "mull stopped
+                // recording" (losing capture without a word is the one failure
+                // the app must not allow) and the ⌘⇧C confirmation (it only
+                // fires when the user themselves asked for a copy).
+
                 // Default off: the trigger is "the active window's project
                 // changed", which announces ordinary window-hopping, not
                 // genuine resumption (see ProactiveLoop.tick).
                 Toggle("Resume briefs on project switch", isOn: $proactiveBriefs)
                 Text("When you return to a project, mull surfaces its recent threads as a notification and keeps them in proactive.md.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+
+                Toggle("Meeting reminders", isOn: $meetingReminders)
+                Text("15 minutes before a calendar event.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+
+                // This one governs the feature, not just its banner: the banner
+                // is how the user learns their clipboard was replaced, so a
+                // banner-less copy would be a silent overwrite.
+                Toggle("Auto-copy context for AI sites", isOn: $aiAutoCopy)
+                Text("Opening claude.ai or chatgpt.com puts your context on the clipboard and notifies you. Turning this off stops the copying itself, not just the banner.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+
+                Toggle("Summary notifications", isOn: $summaryNotifications)
+                Text("The banner when a summary finishes or fails. The summary itself still appears in the window and the menu bar's unread mark.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
             }
@@ -1085,7 +1136,7 @@ struct DataTab: View {
                         HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(DS.miniFont)
-                            Text("Notifications are turned off for mull, so briefings, meeting reminders and failure alerts won't reach you. mull still shows them inside its own window.")
+                            Text("Notifications are turned off for mull, so meeting reminders, recording alerts and summary banners won't reach you. mull still shows them inside its own window.")
                                 .font(DS.captionFont)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1709,6 +1760,11 @@ struct DataTab: View {
         var problems: [String] = []
         do {
             try appState.database.deleteAllData()
+        } catch let remains as DatabaseService.ArchivesRemainError {
+            // The tables really were cleared here, so the generic sentence below
+            // would be false — and false in the direction that matters, since what
+            // is left is a readable copy of the whole history.
+            problems.append(remains.errorDescription ?? "Quarantined copies of your history could not be deleted.")
         } catch {
             problems.append("The recordings database could not be cleared: \(error.localizedDescription)")
         }

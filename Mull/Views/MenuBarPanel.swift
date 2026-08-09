@@ -125,7 +125,7 @@ struct MenuBarPanel: View {
 
     // MARK: - Quick Capture
 
-    /// One focused field. Type a thought, press Return, it's in `09_inbox/captures.md`.
+    /// One focused field. Type a thought, press Return, it's in `inbox.md`.
     /// No file picker, no destination prompt, no save button — capture stays cheap so
     /// it actually gets used. mull routes it later.
     private var captureRow: some View {

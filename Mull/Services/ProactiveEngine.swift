@@ -124,13 +124,13 @@ final class Notifier {
 /// productivity lecture ("Block 2 hours right now"), a stalled-project nag built
 /// inline — bypassing the `autoSurfaceable` epistemic filter it was supposed to
 /// pass through — or an empty banner ("No meetings. Full focus today."). All
-/// three are the rushing DESIGN-NORTHSTAR forbids. If a morning orientation
+/// three hurry the reader on their own behalf, which mull does not do. If a morning orientation
 /// earns a place, it belongs in Home when the user opens it, not in a banner.
 ///
 /// Project resumption used to be a fourth intervention here, keyed off a raw
 /// window-title diff against a 14-day `projectSnapshots` cache. ProactiveLoop now
 /// owns that case entirely — it anchors on `CurrentState.activeEntity` and ranks
-/// with the selection layer (DIRECTION §7, SELECTION-LAYER.md) instead of substring
+/// with the selection layer (SELECTION-LAYER.md) instead of substring
 /// matching, and both fired from this same 3-second tick. What is left here is the
 /// set of interventions ProactiveLoop does not cover: clipboard hand-off, the
 /// once-a-day briefing, and calendar proximity.
@@ -139,7 +139,7 @@ final class Notifier {
 @MainActor
 final class ProactiveEngine: NSObject {
 
-    private let database: DatabaseService
+    private let database: EventReading
     private let calendar: CalendarService
     private let analytics: AnalyticsEngine
 
@@ -165,7 +165,7 @@ final class ProactiveEngine: NSObject {
     /// The AI sites that trigger auto-copy.
     private static let aiSites = ["claude.ai", "chatgpt.com", "chat.openai.com", "gemini.google.com"]
 
-    init(database: DatabaseService, calendar: CalendarService, analytics: AnalyticsEngine) {
+    init(database: EventReading, calendar: CalendarService, analytics: AnalyticsEngine) {
         self.database = database
         self.calendar = calendar
         self.analytics = analytics
@@ -203,6 +203,11 @@ final class ProactiveEngine: NSObject {
     // MARK: - 1. AI Auto-Copy
 
     private func checkAISiteAndCopy(url: String) {
+        // Settings › General › Notifications. Absent key means on; the toggle
+        // kills the whole feature, not just the banner — copying without the
+        // banner would replace the clipboard with nothing anywhere saying so.
+        guard UserDefaults.standard.object(forKey: "aiAutoCopy") as? Bool ?? true else { return }
+
         let urlLower = url.lowercased()
 
         // Check if this URL is an AI site
@@ -275,6 +280,11 @@ final class ProactiveEngine: NSObject {
     // MARK: - 2. Pre-Meeting
 
     private func checkUpcomingMeetings() {
+        // Settings › General › Notifications. Absent key means on. Checked
+        // before the cache refresh so a disabled reminder also stops the
+        // once-a-minute EventKit query it exists to feed.
+        guard UserDefaults.standard.object(forKey: "meetingReminders") as? Bool ?? true else { return }
+
         refreshUpcomingCacheIfNeeded()
 
         let now = Date()

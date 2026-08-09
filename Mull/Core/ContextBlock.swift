@@ -66,7 +66,7 @@ struct ContextBlock {
 ///     <!-- mull:block id=fact:skills:tech-stack src=agent hash=1a2b3c -->
 ///     - Tech stack: Swift, Vercel
 ///     <!-- mull:block id=priority src=human -->
-///     - FX is the current priority; the app business is frozen.
+///     - The migration is the current priority; the redesign is on hold.
 enum ContextBlockFile {
     static let markerPrefix = "<!-- mull:block"
 

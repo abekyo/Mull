@@ -231,7 +231,7 @@ enum MarkdownDoc {
     ///
     /// A relative path resolves against the folder of the document it appears in,
     /// which is what makes `memory/x.md` in `MEMORY.md` and `../me.md` in
-    /// `03_projects/x.md` both mean what a reader assumes. A `.md` extension is
+    /// `projects/x.md` both mean what a reader assumes. A `.md` extension is
     /// inferred when the bare path does not exist, so Obsidian-style links work.
     ///
     /// A path that climbs out of the vault is `unresolved`, never opened. These

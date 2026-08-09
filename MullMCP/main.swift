@@ -32,10 +32,28 @@ if vaultStatus != .ready {
         Data("[MullMCP] \(MullDirectory.issueDescription ?? "~/mull is not ready") Writes will fail; reads are unaffected.\n".utf8))
 }
 
-// Initialize database (read-only access to mull's existing DB)
-let database = DatabaseService()
-if let trouble = database.fallbackReason {
-    FileHandle.standardError.write(Data("[MullMCP] \(trouble)\n".utf8))
+// Open the app's database READ-ONLY, and mean it.
+//
+// This line used to say `DatabaseService()` under a comment claiming "read-only
+// access to mull's existing DB". It was not: that constructor takes a read-write
+// pool, runs the schema migrator, and owns the corruption-recovery path that
+// renames the live database out of the way. So two processes wrote to one SQLite
+// file and both could migrate it — and SQLite's answer to that is to hand a
+// reader a page it cannot reconcile and report SQLITE_CORRUPT, which sent the
+// app's recovery path off to quarantine the user's history. Thirty times.
+//
+// `openReadOnly` gives a connection SQLite itself refuses writes on, skips the
+// migrator (the schema belongs to the app, exclusively) and never quarantines
+// anything. `MCPServer` now takes `MCPDatabase`, which has no write methods on
+// it at all, so this is a boundary in the type system as well as in the file.
+let database: DatabaseService
+do {
+    database = try DatabaseService.openReadOnly()
+} catch {
+    // No database is a legitimate first-run state, not a crash — but it has to
+    // say so, because the alternative was answering every question with "no
+    // activity", which looks identical to a broken install.
+    die(error.localizedDescription)
 }
 let server = MCPServer(database: database)
 

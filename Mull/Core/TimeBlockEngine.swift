@@ -12,7 +12,21 @@ import Foundation
 ///   3. Label each block from window titles + clipboard context
 struct TimeBlockEngine {
 
-    let database: DatabaseService
+    let database: EventReading
+
+    /// How long a break can be before returning to the same work counts as a *new*
+    /// piece of work. Seconds; `0` turns rejoining off and restores the pure
+    /// elapsed-time segmentation described above.
+    ///
+    /// Read from `Preferences` at construction so both binaries and every surface
+    /// agree; tests pass it explicitly so the suite cannot depend on the developer's
+    /// own settings.
+    let resumeGap: TimeInterval
+
+    init(database: EventReading, resumeGap: TimeInterval = Preferences.resumeGap) {
+        self.database = database
+        self.resumeGap = resumeGap
+    }
 
     /// Maximum seconds a single inter-event gap can contribute to a block's
     /// `activeDuration`. Events are dense during real activity (keystrokes flush
@@ -21,6 +35,22 @@ struct TimeBlockEngine {
     /// time. Blocks still *merge* across gaps up to 180s for a clean timeline;
     /// this cap only governs the activity total, not the visual span.
     static let activeGapCap: TimeInterval = 90
+
+    /// Ten minutes, and the reasoning is worth keeping because the number is the
+    /// least interesting part of it.
+    ///
+    /// The 180s window below asks only "how long since the last event?", so it is
+    /// *more* forgiving of switching to Safari for two minutes (one block, flagged
+    /// multi-app) than of stepping away from the same file for five (two blocks,
+    /// identical captions, drawn as two unrelated cards). Elapsed time alone cannot
+    /// tell a break from a boundary. Continuity of the work can, and the task key
+    /// that answers it already exists for `analyzDay`.
+    ///
+    /// Merging across a pause is safe here because the honesty lives elsewhere:
+    /// `activeGapCap` means a rejoined break adds at most 90s to `activeDuration`,
+    /// so a longer window cannot inflate how long you worked — only the wall-clock
+    /// span the calendar draws, which is the truth about when the session ran.
+    static let defaultResumeGap: TimeInterval = 600
 
     /// Generate time blocks for a given day.
     func generateBlocks(for date: Date) -> [TimeBlock] {
@@ -93,7 +123,44 @@ struct TimeBlockEngine {
             blocks[i].label = generateLabel(for: blocks[i], chrome: chrome)
         }
 
-        return blocks
+        // Step 5: rejoin what a break split. Runs last because it needs the labels
+        // and the settled apps to know whether two blocks are the same work — and
+        // after the <30s filter, so a break is never bridged by a fragment that was
+        // too small to be worth drawing on its own.
+        return coalesceResumed(blocks, chrome: chrome)
+    }
+
+    /// Put the two halves of an interrupted session back together.
+    ///
+    /// Adjacent only, and only across a gap the user would call a break: A → B → A
+    /// stays three blocks, because merging the two A's would draw a card straight
+    /// through the middle of B. And same task only — the key is the one `analyzDay`
+    /// groups by, so "resumed the parser after lunch" merges and "stopped the parser,
+    /// answered mail" does not.
+    private func coalesceResumed(_ blocks: [TimeBlock], chrome: Set<String>) -> [TimeBlock] {
+        guard resumeGap > 0, blocks.count > 1 else { return blocks }
+
+        var merged: [TimeBlock] = []
+        for block in blocks {
+            let gap = merged.last.map { block.start.timeIntervalSince($0.end) } ?? 0
+            guard var previous = merged.last, gap >= 0, gap <= resumeGap,
+                  normalizeTaskKey(previous, chrome: chrome) == normalizeTaskKey(block, chrome: chrome)
+            else {
+                merged.append(block)
+                continue
+            }
+            previous.absorb(block, across: gap)
+            merged[merged.count - 1] = previous
+        }
+
+        // A rejoined block has context from both halves, so its face and its caption
+        // are settled over the whole session rather than over whichever fragment
+        // happened to open it.
+        for i in merged.indices where !merged[i].pauses.isEmpty {
+            merged[i].finalizeDominantApp()
+            merged[i].label = generateLabel(for: merged[i], chrome: chrome)
+        }
+        return merged
     }
 
     /// Generate a human-readable label for a time block.
@@ -221,6 +288,18 @@ struct TimeBlock: Identifiable {
     /// reflect real activity, not time the user stepped away mid-block.
     var activeDuration: TimeInterval = 0
 
+    /// The breaks this block was rejoined across, in order — empty unless
+    /// `TimeBlockEngine.coalesceResumed` put an interrupted session back together.
+    ///
+    /// Carried rather than discarded because a merged card claims a span the user was
+    /// not at the machine for the whole of, and CLAUDE.md §7.1 draws the line at what
+    /// can be shown to come from the record. "09:00–11:30, away 5m" is an
+    /// observation; "09:00–11:30" alone is a slightly larger claim than mull holds.
+    var pauses: [DateInterval] = []
+
+    /// Wall-clock seconds inside this block's span with no events in them at all.
+    var pausedDuration: TimeInterval { pauses.reduce(0) { $0 + $1.duration } }
+
     // Context accumulation
     private var windowTitles: [String: Int] = [:]
     private var windowTitleApps: [String: String] = [:]   // title → app it belongs to
@@ -270,6 +349,35 @@ struct TimeBlock: Identifiable {
         appDurations[lastSegmentApp, default: 0] += engaged
         lastSegmentApp = segment.app
         addContext(segment)
+    }
+
+    /// Rejoin a later block onto this one across a break, recording the break.
+    ///
+    /// The gap is attributed exactly as `absorb(_:gap:)` attributes an inter-event
+    /// one — capped at `activeGapCap`, credited to the app the user was last in — so
+    /// a rejoined session reports the same engaged time it would have reported had
+    /// the break never been treated as a boundary. The pause lengthens `duration`,
+    /// which is wall clock and should say so, and not `activeDuration`, which is the
+    /// number every "how long did you work" surface reads.
+    mutating func absorb(_ other: TimeBlock, across gap: TimeInterval) {
+        let engaged = min(max(gap, 0), TimeBlockEngine.activeGapCap)
+
+        pauses.append(DateInterval(start: end, end: max(other.start, end)))
+        pauses.append(contentsOf: other.pauses)
+
+        activeDuration += engaged + other.activeDuration
+        appDurations[lastSegmentApp, default: 0] += engaged
+        for (name, seconds) in other.appDurations { appDurations[name, default: 0] += seconds }
+        lastSegmentApp = other.lastSegmentApp
+
+        for (title, count) in other.windowTitles { windowTitles[title, default: 0] += count }
+        windowTitleApps.merge(other.windowTitleApps) { _, new in new }
+        clipboardTexts.append(contentsOf: other.clipboardTexts)
+        keystrokeCount += other.keystrokeCount
+
+        eventCount += other.eventCount
+        isMultiApp = isMultiApp || other.isMultiApp || other.app != app
+        end = other.end
     }
 
     /// Settle `app` on the app the user actually spent the most engaged time in — the
@@ -709,14 +817,18 @@ extension TimeBlockEngine {
                     data.clipboards.append(clip)
                 }
 
-                data.duration += block.duration
-                data.apps[block.app, default: 0] += block.duration
+                // Engaged time, not wall clock. These totals are shown as how long
+                // was spent on a project — `analyzDay` has always summed
+                // `activeDuration` for the same question, and a block can now span a
+                // rejoined break, which wall clock would bill to the project.
+                data.duration += block.activeDuration
+                data.apps[block.app, default: 0] += block.activeDuration
                 data.events += block.eventCount
 
                 accum[key] = data
 
                 var dayData = dayProjectDuration[key] ?? (0, "", "")
-                dayData.duration += block.duration
+                dayData.duration += block.activeDuration
                 if dayData.label.isEmpty { dayData.label = block.label }
                 if dayData.app.isEmpty { dayData.app = block.app }
                 dayProjectDuration[key] = dayData
@@ -823,13 +935,16 @@ extension TimeBlockEngine {
         let lastTotal = lastWeekSlice.reduce(0.0) { $0 + $1.totalDuration }
         let lastFull = lastWeek.reduce(0.0) { $0 + $1.totalDuration }
 
-        // Deep work blocks: blocks >= 2 hours
+        // Deep work blocks: blocks >= 2 hours. Measured in engaged time, as
+        // `BehaviorPatternEngine.detectContextSwitchCorrelation` measures it — the two
+        // counted the same concept two different ways, and wall clock was the wrong
+        // one of them even before a block could span a break.
         func countDeepBlocks(from monday: Date, days: Int) -> Int {
             var count = 0
             for offset in 0..<days {
                 guard let date = calendar.date(byAdding: .day, value: offset, to: monday) else { continue }
                 let blocks = generateBlocks(for: date)
-                count += blocks.filter { $0.duration >= 7200 }.count
+                count += blocks.filter { $0.activeDuration >= 7200 }.count
             }
             return count
         }

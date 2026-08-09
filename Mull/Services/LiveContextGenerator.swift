@@ -18,8 +18,35 @@ enum LiveContextGenerator {
     /// a class reference into shared mutable state from concurrent tasks is a
     /// retain/release data race, and a torn read could hand the generator a
     /// half-released object.
+    /// `inbox` is a VALUE, not the service.
+    ///
+    /// This runs inside `Task.detached` (AppState) so a slow vault write does not
+    /// block the UI. It used to take `EmailService` and call it from there — and
+    /// `EmailService` owns a 5-minute poll timer that mutates its state on the
+    /// main actor, so this was a genuine data race across a detached task. The
+    /// same class of bug as the retain/release race noted below, and it was found
+    /// by turning on strict concurrency checking rather than by anything failing:
+    /// races of this shape do not reproduce, they corrupt.
+    ///
+    /// The fix is to read the inbox on the main actor before detaching and pass
+    /// the answer down. Nothing off-main touches the service now.
+    /// What the inbox looked like at the moment the caller asked, captured on the
+    /// main actor. Plain values, so it crosses to a detached task safely.
+    struct InboxSnapshot: Sendable {
+        var summary: String?
+        var problem: String?
+        static let none = InboxSnapshot()
+
+        /// Read on the main actor, at the call site, before detaching.
+        @MainActor
+        static func read(from email: EmailService?) -> InboxSnapshot {
+            InboxSnapshot(summary: email?.recentEmailSummary(hours: 24),
+                          problem: EmailService.lastProblem?.message)
+        }
+    }
+
     static func generate(analytics: AnalyticsEngine, database: DatabaseService,
-                         calendar: CalendarService?, email: EmailService?) throws {
+                         calendar: CalendarService?, inbox: InboxSnapshot) throws {
         guard MullDirectory.status == .ready else { return }
 
         let memories = database.fetchAllMemories()
@@ -29,10 +56,9 @@ enum LiveContextGenerator {
         expireStaleNightlyBlocks()
 
         try generateMe(memories: memories, analytics: analytics, database: database, timestamp: timestamp)
-        try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendar, email: email, timestamp: timestamp)
+        try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendar, inbox: inbox, timestamp: timestamp)
         try generateFull(database: database, analytics: analytics, timestamp: timestamp)
         generateFrontDoor(timestamp: timestamp)
-        fillFoldersIfDue(database: database, analytics: analytics)
         try snapshotDaily()
         // NOTE: Claude Code integration is manual. User runs:
         //   claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
@@ -91,10 +117,9 @@ enum LiveContextGenerator {
         l.append("## The vault")
         l.append("- `me.md`, `now.md`, `full.md` — the 3-layer context above.")
         l.append("- `daily/` — daily snapshots of the full context.")
-        for folder in FolderOntology.folders {
-            l.append("- `\(folder.path)/` — \(folder.purpose)")
-        }
-        l.append("- `notes/` — the user's own notes.")
+        l.append("- `\(VaultLayout.projects)/` — one briefing per project they are working on.")
+        l.append("- `\(VaultLayout.corrections)/` — where they corrected mull, and what it should have said.")
+        l.append("- `notes/` — the user's own notes, in whatever folders they made.")
         l.append("")
         l.append("## Working with this record")
         l.append("- It is **theirs**. Don't assert what they think; if you infer judgment, mark it as a guess and let them correct it.")
@@ -103,30 +128,13 @@ enum LiveContextGenerator {
         _ = MullDirectory.write(l.joined(separator: "\n"), to: "mull.md")
     }
 
-    // MARK: - Rule-based vault fill (throttled)
-    //
-    // The numbered folders (00/01/03/06) are filled rule-based so the vault isn't
-    // empty with the LLM off. Heavier than me/now (14-day project scans, fact +
-    // knowledge extraction), so it runs at most every 5 minutes, not every 60s.
-
-    /// Guarded by `folderFillLock`: a bare `static var` here was a read-check-write
-    /// on shared state from concurrent generation tasks, so two overlapping runs
-    /// could both decide they were due and run FolderFiller in parallel.
-    private static var lastFolderFill: Date?
-    private static let folderFillLock = NSLock()
-
-    private static func fillFoldersIfDue(database: DatabaseService, analytics: AnalyticsEngine) {
-        let now = Date()
-        folderFillLock.lock()
-        if let last = lastFolderFill, now.timeIntervalSince(last) < 300 {
-            folderFillLock.unlock()
-            return
-        }
-        lastFolderFill = now
-        folderFillLock.unlock()
-
-        FolderFiller.fill(database: database, analytics: analytics)
-    }
+    // The rule-based vault fill used to run here, every five minutes, writing
+    // section blocks into the numbered folders' index.md files. Retired with those
+    // folders on 2026-08-09 (DIRECTION §6.1). What it put in `00_identity` was the
+    // FactExtractor pre-digestion that `generateMe` had already, deliberately,
+    // stopped writing into me.md — so the same rule-based facts mull removed from
+    // one file were being baked into another. They are still available, assembled
+    // at use-time, through `ContextComposer` and the Profile tab.
 
     // MARK: - Daily Snapshot
     //
@@ -219,7 +227,7 @@ enum LiveContextGenerator {
         analytics: AnalyticsEngine,
         database: DatabaseService,
         calendar: CalendarService?,
-        email: EmailService?,
+        inbox: InboxSnapshot,
         timestamp: String
     ) throws {
         var sections: [String?] = []
@@ -256,11 +264,11 @@ enum LiveContextGenerator {
             memories.filter { $0.memoryType == .project }
                 .map { "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))" }))
 
-        // Email metadata
-        if let emailSummary = email?.recentEmailSummary(hours: 24) {
+        // Email metadata — already read, on the main actor, by the caller.
+        if let emailSummary = inbox.summary {
             sections.append(MarkdownDoc.section("Inbox", emailSummary))
-        } else if let problem = EmailService.lastProblem {
-            sections.append(MarkdownDoc.section("Inbox", "Unavailable — \(problem.message)"))
+        } else if let problem = inbox.problem {
+            sections.append(MarkdownDoc.section("Inbox", "Unavailable — \(problem)"))
         }
 
         // Calendar events

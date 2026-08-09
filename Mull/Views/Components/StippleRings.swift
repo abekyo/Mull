@@ -9,8 +9,8 @@ import SwiftUI
 // days, the centre pushed off-frame so the record reads as still growing.
 //
 // Deliberately static. It never animates, never fills toward a target, and is
-// never wired to a live count — a texture of the record, not a meter of it
-// (DESIGN-NORTHSTAR: stated, not scored; no streaks, nothing that asks to be fed).
+// never wired to a live count — a texture of the record, not a meter of it.
+// Stated, not scored: no streaks, and nothing that asks to be fed.
 struct StippleRings: View {
     /// Seed for the deterministic dot stream. 112 is the icon's own seed.
     var seed: UInt32 = 112

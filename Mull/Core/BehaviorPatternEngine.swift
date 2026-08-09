@@ -8,7 +8,7 @@ import Foundation
 /// All rule-based. No LLM needed. The patterns are in the data, not in language.
 struct BehaviorPatternEngine {
 
-    let database: DatabaseService
+    let database: EventReading
 
     /// Run all pattern detectors and return actionable insights.
     func detectPatterns() -> [BehaviorPattern] {

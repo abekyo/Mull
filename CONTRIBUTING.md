@@ -40,7 +40,9 @@ xcodebuild -project Mull.xcodeproj -scheme Mull -destination 'platform=macOS' te
 ./eval/run.sh
 ```
 
-The test suite is 472 tests across 36 files and is expected to be fully green.
+The test suite is expected to be fully green. A count is deliberately not written down
+here — it was wrong in two files at once the last time it was, and no document is the right
+place to hold a number the test runner already prints.
 
 `eval/run.sh` is the selection-layer harness — it scores `Selection.rank` against labeled
 `(need → ideal slice)` cases. CI runs it on every push
@@ -49,10 +51,11 @@ a hand-maintained file list **without GRDB**, and it has silently broken twice w
 it depends on started importing GRDB. If you make `Mull/Core/` code reach for a new symbol,
 check that `./eval/run.sh` still builds before you push.
 
-> Its current scores are all `1.000`, which means the case set is saturated and is not yet
-> discriminating between rankers — see [ROADMAP.md](ROADMAP.md) §1-B. Treat it as a regression
-> guard today, not as evidence that a ranking change was an improvement. **New cases that the
-> current ranker fails are one of the most useful contributions available right now.**
+> Current scores and the four known-failing gaps are in the README's status block, and
+> [SELECTION-LAYER.md](SELECTION-LAYER.md) §6 is the specification behind them. The harness
+> beats its three baselines on the synthetic set and scores far lower on real harvested logs;
+> that gap is the interesting part. **New cases that the current ranker fails — especially
+> ones harvested from a real log — are one of the most useful contributions available.**
 
 ## Changing the capture surface
 
@@ -75,3 +78,8 @@ comments explain *why* a thing is the way it is — usually a constraint, a plat
 incident that produced the code — and do not restate what the next line does. Several of the
 most useful comments in this repository are records of something that went wrong. Keep writing
 those.
+
+Those comments are the record. [PITFALLS.md](PITFALLS.md) is the index of the ones that turned
+out to be a pattern — six shapes of mistake this codebase has made more than once, and what is
+holding each invariant today. It is short, and it is worth reading before you touch capture, the
+vault writers, or anything wrapping AppKit in SwiftUI.

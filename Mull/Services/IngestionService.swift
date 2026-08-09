@@ -66,7 +66,6 @@ final class IngestionService {
             do {
                 let items = try await connector.pull()
                 let fresh = RawStore.land(items, connector: connector.id)
-                writeInboxDigest(connector: connector.id)
                 outcomes.append(Outcome(connector: connector.id, pulled: items.count,
                                         new: fresh.count, error: nil))
             } catch {
@@ -110,40 +109,10 @@ final class IngestionService {
         timer = nil
     }
 
-    // MARK: - Inbox digest
-
-    /// Write the most recent ingested items for a connector into
-    /// `09_inbox/<connector>.md`, Curator-managed so user notes survive.
-    private func writeInboxDigest(connector: String) {
-        let recent = RawStore.load(connector: connector)
-            .sorted { $0.timestamp > $1.timestamp }
-            .prefix(15)
-
-        let lines = recent.map { item -> String in
-            let when = item.timestamp == .distantPast ? "" :
-                " · \(Self.dateFormatter.string(from: item.timestamp))"
-            let summary = item.summary.isEmpty ? "" : " — \(item.summary.prefix(120))"
-            return "- **\(item.title)**\(when)\(summary)"
-        }
-
-        // "Freshly ingested, awaiting synthesis" was pipeline vocabulary leaking
-        // into a user-facing file; say what the folder IS in the reader's language.
-        let ja = UserLanguage.isJapanese
-        let empty = ja ? "_（まだ何も取り込まれていません）_" : "_(nothing here yet)_"
-        let heading = ja ? "## \(connector) の新着" : "## Recent from \(connector)"
-        let body = lines.isEmpty ? empty : heading + "\n\n" + lines.joined(separator: "\n")
-
-        let header = ja
-            ? "# 09 インボックス — \(connector)\n\n_取り込んだばかりのデータ。ここから各フォルダに整理されます。_"
-            : "# 09 Inbox — \(connector)\n\n_Newly captured items — mull sorts them into the right folders from here._"
-        let block = ContextBlock(id: "recent", source: .agent, content: body, agentHash: nil)
-        _ = Curator.curate(relativePath: "09_inbox/\(connector).md",
-                           header: header, pinnedContent: nil, agentBlocks: [block])
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMM d, HH:mm"
-        return f
-    }()
+    // A per-connector digest used to be written to `09_inbox/<connector>.md` here,
+    // so a pull was visible somewhere. It went with the numbered folders on
+    // 2026-08-09 (DIRECTION §6.1): the pulled items are in `_raw/<connector>/`
+    // either way, and the one thing the digest added — "did the pull work?" — is
+    // answered properly by the per-connector outcomes in Settings, which say why
+    // when it did not.
 }

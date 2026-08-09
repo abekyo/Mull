@@ -16,7 +16,7 @@ struct CurrentState {
     var sessionStart: Date?
 
     /// Assemble the anchor from the last `window` seconds of events.
-    static func current(database: DatabaseService, now: Date = Date(), window: TimeInterval = 1200) -> CurrentState {
+    static func current(database: EventReading, now: Date = Date(), window: TimeInterval = 1200) -> CurrentState {
         let events = database.fetchEvents(from: now.addingTimeInterval(-window), to: now)
             .filter { event in
                 guard let app = event.appName else { return true }
@@ -44,7 +44,7 @@ struct CurrentState {
     }
 
     /// Text form for an MCP `whats_active_now` response and for the `now.md` /
-    /// `01_now` sections that write the same anchor down.
+    /// the other surfaces that write the same anchor down.
     ///
     /// A nested list rather than `Active:` / `Recently:` label lines. Those were
     /// prose to every markdown reader — indistinguishable from body text in the
@@ -59,7 +59,10 @@ struct CurrentState {
         if let app = activeApp { lines.append("- **App:** \(MarkdownDoc.inline(app))") }
         if !recentActions.isEmpty {
             lines.append("- **Recently:**")
-            lines.append(contentsOf: recentActions.map { "  - \(MarkdownDoc.inline($0))" })
+            // Clipboard entries and window titles — so this is other people's text
+            // as often as it is the user's, and `whats_active_now` is the call an
+            // agent is told to make first. Same frame as every other MCP surface.
+            lines.append(contentsOf: recentActions.map { "  - \(InstructionText.marked(MarkdownDoc.inline($0)))" })
         }
         return lines.isEmpty ? "(no recent activity)" : lines.joined(separator: "\n")
     }

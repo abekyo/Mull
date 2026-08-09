@@ -13,7 +13,10 @@ import Foundation
 /// Either they do (hit) or they don't (miss). No judgment, just a checkable bet.
 struct PredictionEngine {
 
-    let database: DatabaseService
+    /// Predictions are graded against what actually happened, so this one
+    /// genuinely needs both halves: the store to bet into, and the events to
+    /// grade the bet against.
+    let database: PredictionStoring & EventReading
 
     /// Grace period after `dueAt` before a pending prediction is graded, so a
     /// late-night return still counts.

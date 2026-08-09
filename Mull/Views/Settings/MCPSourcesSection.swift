@@ -33,7 +33,7 @@ struct MCPSourcesSection: View {
 
     /// MCP-pullable connectors (local "capture" is excluded — it's not an MCP source).
     private var connectorChoices: [String] {
-        FolderOntology.rawConnectors.filter { $0 != "capture" }
+        VaultLayout.rawConnectors.filter { $0 != "capture" }
     }
 
     var body: some View {

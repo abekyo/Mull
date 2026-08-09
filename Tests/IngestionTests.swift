@@ -24,7 +24,6 @@ final class IngestionTests: XCTestCase {
         let fm = FileManager.default
         for conn in createdConnectors {
             try? fm.removeItem(at: MullDirectory.root.appendingPathComponent("_raw/\(conn)"))
-            try? fm.removeItem(at: MullDirectory.root.appendingPathComponent("09_inbox/\(conn).md"))
         }
         createdConnectors.removeAll()
         super.tearDown()
@@ -53,7 +52,7 @@ final class IngestionTests: XCTestCase {
         XCTAssertEqual(RawStore.existingIDs(connector: conn), ["1", "2", "3"])
     }
 
-    func testIngestionServiceRunsLandsAndWritesDigest() async {
+    func testIngestionServiceRunsAndLands() async {
         let conn = newConnectorID()
         let service = IngestionService(connectors: [FakeConnector(id: conn, items: [item("a"), item("b")])])
 
@@ -63,12 +62,12 @@ final class IngestionTests: XCTestCase {
         XCTAssertEqual(outcomes.first?.new, 2)
         XCTAssertNil(outcomes.first?.error)
 
-        // Raw landed.
+        // Raw landed. That is the whole contract now: a per-connector digest used
+        // to be written to `09_inbox/<connector>.md` as well, and went with the
+        // numbered folders (DIRECTION §6.1). The pulled items live in `_raw/`
+        // either way, and "did the pull work?" is answered by the outcomes above.
         XCTAssertEqual(RawStore.load(connector: conn).count, 2)
-        // Inbox digest written and mentions an item.
-        let digest = MullDirectory.read("09_inbox/\(conn).md")
-        XCTAssertNotNil(digest)
-        XCTAssertTrue(digest?.contains("Item a") ?? false)
+        XCTAssertEqual(RawStore.load(connector: conn).map(\.id).sorted(), ["a", "b"])
     }
 
     func testFailingConnectorIsIsolated() async {

@@ -14,9 +14,25 @@ import Carbon.HIToolbox
 ///
 /// No romaji filter. No "is this meaningful?" check. No heuristics.
 /// AI is better at understanding messy data than we are at cleaning it.
+///
+/// **Main-actor isolated.** Every field below — the keystroke buffer, the current
+/// app pointer, the clipboard change counter, the browser URL cache — is touched
+/// by five timers, an NSWorkspace notification, and a CGEvent tap callback. That
+/// they all happen to land on the main run loop was true, documented in three
+/// places, and enforced by nothing; one `DispatchQueue.global` in a future caller
+/// would have corrupted the buffer silently. `@MainActor` makes the compiler
+/// check what the comments were asserting.
+///
+/// The one deliberate exception is the AppleScript call in the browser-URL path,
+/// which runs on `browserQueue` and hands its result back to the main actor.
+@MainActor
 final class RecordingService {
 
-    private let database: DatabaseService
+    private let database: EventWriting
+    /// The machine, behind a protocol so the capture rules can be tested without
+    /// one. See CaptureEnvironment — every privacy gate below used to be
+    /// unverifiable because these calls were inline.
+    private let environment: CaptureEnvironment
     private(set) var isRunning = false
     private var isPaused = false
 
@@ -70,8 +86,9 @@ final class RecordingService {
     private var excludedBundleIDs: Set<String>
     private static let excludedAppsKey = "excludedBundleIDs"
 
-    init(database: DatabaseService) {
+    init(database: EventWriting, environment: CaptureEnvironment = SystemCaptureEnvironment()) {
         self.database = database
+        self.environment = environment
         if let saved = UserDefaults.standard.stringArray(forKey: Self.excludedAppsKey) {
             self.excludedBundleIDs = Set(saved)
         } else {
@@ -203,7 +220,14 @@ final class RecordingService {
             callback: { _, _, event, refcon -> Unmanaged<CGEvent>? in
                 guard let refcon else { return Unmanaged.passRetained(event) }
                 let service = Unmanaged<RecordingService>.fromOpaque(refcon).takeUnretainedValue()
-                service.handleKeyEvent(event)
+                // A C callback cannot be actor-isolated. This one is nonetheless
+                // always on the main run loop: the run-loop source below is added
+                // to `CFRunLoopGetCurrent()` from `start()`, which is main-actor
+                // isolated. `assumeIsolated` states that as a precondition the
+                // runtime checks, instead of an assumption in a comment — if the
+                // tap were ever installed from another thread this traps here
+                // rather than quietly interleaving with the flush timer.
+                MainActor.assumeIsolated { service.handleKeyEvent(event) }
                 return Unmanaged.passRetained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
@@ -235,7 +259,7 @@ final class RecordingService {
         guard !isPaused, !isExcludedApp() else { return }
 
         // Skip if system-wide secure input is active (password dialogs)
-        if IsSecureEventInputEnabled() { return }
+        if environment.isSecureInputEnabled { return }
 
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
@@ -292,15 +316,15 @@ final class RecordingService {
     }
 
     private func updateCurrentApp() {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return }
-        currentAppName = app.localizedName
+        guard let name = environment.frontmostAppName else { return }
+        currentAppName = name
         currentWindowTitle = getActiveWindowTitle()
-        currentAppStartTime = Date()
+        currentAppStartTime = environment.now
     }
 
     private func recordAppSession() {
         guard let app = currentAppName else { return }
-        let duration = Date().timeIntervalSince(currentAppStartTime)
+        let duration = environment.now.timeIntervalSince(currentAppStartTime)
         guard duration >= 5 else { return }
 
         let minutes = Int(duration / 60)
@@ -316,54 +340,62 @@ final class RecordingService {
 
     private func startWindowTitleMonitor() {
         windowTitleTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            guard let self, self.isRunning, !self.isPaused else { return }
-            guard !self.isExcludedApp() else { return }
+            guard let self, self.isRunning else { return }
+            self.pollWindowTitle()
+        }
+    }
 
-            let newTitle = self.getActiveWindowTitle()
-            guard let title = newTitle, !title.isEmpty else { return }
+    /// One window-title tick. Split out of the timer for the same reason as
+    /// `pollClipboard`: the private-browsing gate and the typing-in-progress
+    /// heuristic are policy, and policy that cannot be called cannot be tested.
+    func pollWindowTitle() {
+        guard !isPaused else { return }
+        guard !isExcludedApp() else { return }
 
-            // Never record private / incognito browser windows. Remember the
-            // title so we don't reprocess it, but drop it from the record entirely.
-            if PrivateBrowsing.isPrivate(title) {
-                self.currentWindowTitle = title
-                return
-            }
+        let newTitle = getActiveWindowTitle()
+        guard let title = newTitle, !title.isEmpty else { return }
 
-            // Skip if title hasn't changed meaningfully
-            guard title != self.currentWindowTitle else { return }
+        // Never record private / incognito browser windows. Remember the
+        // title so we don't reprocess it, but drop it from the record entirely.
+        if PrivateBrowsing.isPrivate(title) {
+            currentWindowTitle = title
+            return
+        }
 
-            // Skip titles that are clearly typing-in-progress
-            // (VS Code updates window title as you type in its command palette / chat)
-            // Real window titles are stable for > 1 second. Typing titles change every keystroke.
-            // We use a simple heuristic: if the new title is a prefix/suffix of the old one
-            // and only differs by a few characters, it's likely typing, not a real title change.
-            if let old = self.currentWindowTitle {
-                let oldClean = old.trimmingCharacters(in: .whitespacesAndNewlines)
-                let newClean = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                // If one is a substring of the other and difference is small, skip
-                if newClean.hasPrefix(oldClean) || oldClean.hasPrefix(newClean) {
-                    let diff = abs(newClean.count - oldClean.count)
-                    if diff < 10 && diff > 0 {
-                        // Likely incremental typing in command palette — update internal state but don't record
-                        self.currentWindowTitle = title
-                        return
-                    }
+        // Skip if title hasn't changed meaningfully
+        guard title != currentWindowTitle else { return }
+
+        // Skip titles that are clearly typing-in-progress
+        // (VS Code updates window title as you type in its command palette / chat)
+        // Real window titles are stable for > 1 second. Typing titles change every keystroke.
+        // We use a simple heuristic: if the new title is a prefix/suffix of the old one
+        // and only differs by a few characters, it's likely typing, not a real title change.
+        if let old = currentWindowTitle {
+            let oldClean = old.trimmingCharacters(in: .whitespacesAndNewlines)
+            let newClean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            // If one is a substring of the other and difference is small, skip
+            if newClean.hasPrefix(oldClean) || oldClean.hasPrefix(newClean) {
+                let diff = abs(newClean.count - oldClean.count)
+                if diff < 10 && diff > 0 {
+                    // Likely incremental typing in command palette — update internal state but don't record
+                    currentWindowTitle = title
+                    return
                 }
             }
-
-            // Append the browser URL if one arrived since the last title event.
-            // Read from cache — never fetched inline here; see the browser URL
-            // monitor below for why this timer must not touch AppleScript.
-            let enriched: String
-            if let url = self.takePendingBrowserURL() {
-                enriched = "\(title) | \(url)"
-            } else {
-                enriched = title
-            }
-
-            self.currentWindowTitle = title
-            self.recordEvent(type: .screenText, text: enriched)
         }
+
+        // Append the browser URL if one arrived since the last title event.
+        // Read from cache — never fetched inline here; see the browser URL
+        // monitor below for why this timer must not touch AppleScript.
+        let enriched: String
+        if let url = takePendingBrowserURL() {
+            enriched = "\(title) | \(url)"
+        } else {
+            enriched = title
+        }
+
+        currentWindowTitle = title
+        recordEvent(type: .screenText, text: enriched)
     }
 
     // MARK: - 3b. Window Body Monitor (capture fidelity #1)
@@ -379,7 +411,7 @@ final class RecordingService {
         windowBodyTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             guard let self, self.isRunning, !self.isPaused else { return }
             guard !self.isExcludedApp() else { return }
-            if IsSecureEventInputEnabled() { return }
+            if environment.isSecureInputEnabled { return }
             if let title = self.currentWindowTitle, PrivateBrowsing.isPrivate(title) { return }
 
             // Below ~80 chars a title-only window adds nothing over .screenText.
@@ -558,72 +590,79 @@ final class RecordingService {
         return url
     }
 
-    private func getActiveWindowTitle() -> String? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-
-        var windowRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(
-            appElement, kAXFocusedWindowAttribute as CFString, &windowRef
-        )
-        // Some apps answer kAXFocusedWindow with something that isn't an AXUIElement.
-        // A force-cast crashes the whole recorder there, so verify the CF type first
-        // (same guard as WindowTextCapture.focusedWindowText).
-        guard result == .success, let window = windowRef,
-              CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
-        let windowElement = unsafeDowncast(window as AnyObject, to: AXUIElement.self)
-
-        var titleRef: CFTypeRef?
-        AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &titleRef)
-        return titleRef as? String
-    }
+    private func getActiveWindowTitle() -> String? { environment.activeWindowTitle }
 
     // MARK: - 4. Clipboard Monitor
 
     private func startClipboardMonitor() {
         clipboardTimer?.invalidate()
-        lastClipboardCount = NSPasteboard.general.changeCount
-        lastClipboardText = NSPasteboard.general.string(forType: .string) ?? ""
+        lastClipboardCount = environment.clipboardChangeCount
+        lastClipboardText = environment.clipboardText ?? ""
 
         clipboardTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self, self.isRunning, !self.isPaused else { return }
-
-            let currentCount = NSPasteboard.general.changeCount
-            guard currentCount != self.lastClipboardCount else { return }
-            // Advance the counter before the privacy gates: even when we drop this
-            // copy, the *next* one (from a permitted app) must still look changed.
-            self.lastClipboardCount = currentCount
-
-            // The same privacy gates every other capture channel applies — keystrokes,
-            // window titles and window body all check these, and the clipboard was the
-            // one poller that didn't, so a password copied out of 1Password (an
-            // explicitly excluded app) still landed in the vault. We return before
-            // reading the pasteboard at all, so the secret isn't even held in
-            // `lastClipboardText`. Checked here rather than at the top of the tick:
-            // this runs twice a second, and the common case is "nothing was copied".
-            if self.isExcludedApp() { return }
-            if IsSecureEventInputEnabled() { return }
-            if let title = self.currentWindowTitle, PrivateBrowsing.isPrivate(title) { return }
-
-            guard let text = NSPasteboard.general.string(forType: .string),
-                  !text.isEmpty,
-                  text != self.lastClipboardText else { return }
-            self.lastClipboardText = text
-
-            // Skip mull's own output (recording our own output is a feedback loop).
-            // Includes Curator provenance markers — copying a me.md block would
-            // otherwise feed "hash", "src", "agent" back in as "focus topics".
-            if MarkdownDoc.isGeneratedByMull(text) { return }
-
-            // Log the shape, never the content: Console.app is world-readable to any
-            // process that can talk to the unified log, so echoing clipboard text
-            // there leaks exactly what the local-only vault promise protects.
-            print("[mull] Clipboard captured: \(text.count) chars")
-            // Capture fidelity (MAP-ARCHITECTURE.md): the cap is irreversible loss
-            // at the territory layer — you can't re-copy the past. Keep generously;
-            // pasted docs/code routinely exceed 5k chars. SQLite handles this fine.
-            self.recordEvent(type: .clipboard, text: String(text.prefix(40000)))
+            guard let self, self.isRunning else { return }
+            self.pollClipboard()
         }
+    }
+
+    /// One clipboard tick.
+    ///
+    /// Split out of the timer closure so it can be called directly. The privacy
+    /// gates below are the ones mull advertises — excluded apps, secure input,
+    /// private browsing — and until there was a seam here, not one of them had a
+    /// test. `RecordingServiceTests` now drives this method against a stub
+    /// environment, which is the only way to assert that a password copied out of
+    /// 1Password never reaches the database.
+    func pollClipboard() {
+        guard !isPaused else { return }
+
+        let currentCount = environment.clipboardChangeCount
+        guard currentCount != lastClipboardCount else { return }
+        // Advance the counter before the privacy gates: even when we drop this
+        // copy, the *next* one (from a permitted app) must still look changed.
+        lastClipboardCount = currentCount
+
+        // The same privacy gates every other capture channel applies — keystrokes,
+        // window titles and window body all check these, and the clipboard was the
+        // one poller that didn't, so a password copied out of 1Password (an
+        // explicitly excluded app) still landed in the vault. We return before
+        // reading the pasteboard at all, so the secret isn't even held in
+        // `lastClipboardText`. Checked here rather than at the top of the tick:
+        // this runs twice a second, and the common case is "nothing was copied".
+        if isExcludedApp() { return }
+        if environment.isSecureInputEnabled { return }
+        if let title = currentWindowTitle, PrivateBrowsing.isPrivate(title) { return }
+
+        // The gate the exclusion list above cannot be: exclusion asks which app is
+        // frontmost *when this tick runs*, and it runs twice a second. The ordinary
+        // way anyone uses a password manager — copy in 1Password, ⌘Tab, paste —
+        // routinely puts a different app in front before mull looks, and the
+        // password is then recorded from an app that is on the excluded list. That
+        // race is why `defaultExcluded` alone was never enough.
+        //
+        // A do-not-store marker rides on the pasteboard item instead of on the
+        // frontmost process, so it survives the app switch. Checked before the
+        // string is read, so a concealed secret is never held in memory here.
+        if environment.clipboardIsMarkedDoNotStore { return }
+
+        guard let text = environment.clipboardText,
+              !text.isEmpty,
+              text != lastClipboardText else { return }
+        lastClipboardText = text
+
+        // Skip mull's own output (recording our own output is a feedback loop).
+        // Includes Curator provenance markers — copying a me.md block would
+        // otherwise feed "hash", "src", "agent" back in as "focus topics".
+        if MarkdownDoc.isGeneratedByMull(text) { return }
+
+        // Log the shape, never the content: Console.app is world-readable to any
+        // process that can talk to the unified log, so echoing clipboard text
+        // there leaks exactly what the local-only vault promise protects.
+        print("[mull] Clipboard captured: \(text.count) chars")
+        // Capture fidelity (MAP-ARCHITECTURE.md): the cap is irreversible loss
+        // at the territory layer — you can't re-copy the past. Keep generously;
+        // pasted docs/code routinely exceed 5k chars. SQLite handles this fine.
+        recordEvent(type: .clipboard, text: String(text.prefix(40000)))
     }
 
     // MARK: - 5. Sleep/Wake
@@ -704,10 +743,10 @@ final class RecordingService {
     // MARK: - Helpers
 
     private func isExcludedApp() -> Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        guard environment.frontmostAppName != nil || environment.frontmostBundleID != nil else { return false }
 
         // Check bundle ID
-        if let bundleID = app.bundleIdentifier, excludedBundleIDs.contains(bundleID) {
+        if let bundleID = environment.frontmostBundleID, excludedBundleIDs.contains(bundleID) {
             return true
         }
 
@@ -724,7 +763,7 @@ final class RecordingService {
             "securityagent", "loginwindow",
             "universalaccessauthwarn",
         ]
-        if let name = app.localizedName, excludedNames.contains(name.lowercased()) {
+        if let name = environment.frontmostAppName, excludedNames.contains(name.lowercased()) {
             return true
         }
 

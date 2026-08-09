@@ -32,14 +32,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// Answer layout with the room offered, never with the height of the note.
     ///
     /// Left to answer for itself, an `NSViewRepresentable` is sized from its NSView's
-    /// `fittingSize` — and an NSScrollView holding an `isVerticallyResizable` NSTextView
-    /// reports the full laid-out height of the text. That became the editor's *minimum*,
-    /// so nothing downstream could shrink it: the enclosing VStack was forced to the
-    /// height of the note, and so was the whole NavigationSplitView. Measured on a 914pt
-    /// window: a 1610pt split view whose top sat 374pt above the title bar, with both
-    /// columns carried up out of view — the sidebar's search field, "Copy context",
-    /// Home/Calendar/Live/Chat and the Files header all off the top of the screen, the
-    /// traffic lights drawn over the file list, and the note's own header row gone.
+    /// `fittingSize`, and an NSScrollView holding an `isVerticallyResizable` NSTextView
+    /// reports the full laid-out height of the text — so the editor asked to be as tall
+    /// as the note, which is never what a scroll view should ask for.
     ///
     /// A finite proposal is a real offer, and it is taken exactly — including the zero
     /// proposal, which is how layout asks "how small can you go?" and to which a scroll
@@ -48,6 +43,12 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// a plain default rather than the length of the file: it is only ever used to
     /// decide how to *distribute* real space, and real space always arrives as a finite
     /// proposal a moment later.
+    ///
+    /// This alone did not fix the window — measured, the split view still took the
+    /// page's height, because a SwiftUI `ScrollView` (the read-only files) reports the
+    /// same appetite and the ideal escaped anyway. The clamp that actually holds is the
+    /// GeometryReader around the detail column in `FullWindowView`. This stays because
+    /// it is what a scroll view should say for itself.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
         func room(_ offered: CGFloat?, ideal: CGFloat) -> CGFloat {
             guard let offered, offered.isFinite else { return ideal }
@@ -827,8 +828,8 @@ private enum MD {
     static let quoteBar = NSColor(DS.moon).withAlphaComponent(0.55)
     static let ruleColor = NSColor(DS.ink).withAlphaComponent(0.18)
 
-    // Code-block syntax tints — drawn from the earth palette (DESIGN-NORTHSTAR:
-    // no cold tech colours), quiet enough to sit on the code panel's ink wash.
+    // Code-block syntax tints — drawn from the earth palette rather than the usual
+    // cold editor colours, quiet enough to sit on the code panel's ink wash.
     static let codeKeyword = NSColor(DS.moon)
     static let codeString = NSColor(DS.olive)
     static let codeNumber = NSColor(DS.clay)

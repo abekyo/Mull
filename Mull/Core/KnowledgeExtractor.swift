@@ -12,7 +12,7 @@ import Foundation
 /// Runs after the nightly summary, using the same gathered data.
 struct KnowledgeExtractor {
 
-    let database: DatabaseService
+    let database: EventReading
 
     // MARK: - LLM Extraction
 

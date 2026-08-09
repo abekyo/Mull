@@ -98,6 +98,7 @@ struct EventEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.sm) {
             titleRow
+            if event.isRecurring { recurrenceRow }
             Divider()
             allDayRow
             startRow
@@ -125,6 +126,23 @@ struct EventEditor: View {
                 .font(DS.subtitleMedium)
                 .onSubmit(save)
         }
+    }
+
+    /// What every write in this form is going to mean.
+    ///
+    /// mull saves and deletes with EventKit's `.thisEvent` throughout — a decision
+    /// made where the undo chain lives, because an occurrence removed from a series
+    /// cannot be put back into it. The form used to be silent about that, so moving
+    /// Wednesday's stand-up read as moving the stand-up, and every other calendar the
+    /// reader has ever used would have asked which they meant.
+    private var recurrenceRow: some View {
+        HStack(spacing: DS.xs) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+            Text(CalendarWeekView.CalItem.recurrenceNote)
+        }
+        .font(DS.miniFont)
+        .foregroundStyle(DS.inkFaint)
+        .accessibilityElement(children: .combine)
     }
 
     private var allDayRow: some View {
@@ -284,10 +302,13 @@ struct EventEditor: View {
 
     private var buttonRow: some View {
         HStack {
-            Button(confirmingDelete ? "Delete?" : "Delete", role: .destructive, action: deleteTapped)
+            // The confirming label names what is about to go. "Delete?" on a repeating
+            // event left the reader to guess whether the series was about to go with
+            // it, which is the one question a confirmation exists to answer.
+            Button(deleteLabel, role: .destructive, action: deleteTapped)
                 .controlSize(.small)
                 .help(confirmingDelete ? "Click again to delete it (⌘Z undoes this)"
-                                       : "Delete from your calendar")
+                                       : deleteHelp)
 
             Spacer()
 
@@ -363,6 +384,19 @@ struct EventEditor: View {
                 .labelsHidden()
                 .frame(width: Self.timeFieldWidth)
         }
+    }
+
+    private var deleteLabel: String {
+        if event.isRecurring {
+            return confirmingDelete ? "Delete this one?" : "Delete occurrence"
+        }
+        return confirmingDelete ? "Delete?" : "Delete"
+    }
+
+    private var deleteHelp: String {
+        event.isRecurring
+            ? "Remove this occurrence from the series (⌘Z undoes this)"
+            : "Delete from your calendar"
     }
 
     private var selectedCalendar: CalendarService.WritableCalendar? {

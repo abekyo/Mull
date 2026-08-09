@@ -13,7 +13,14 @@ final class VaultLocalizationTests: XCTestCase {
     func testStatedWorkingLanguageBeatsSystemLocale() {
         let key = UserLanguage.onboardingAnswersKey
         let saved = UserDefaults.standard.dictionary(forKey: key)
-        defer { UserDefaults.standard.set(saved, forKey: key) }
+        let savedPreference = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        defer {
+            UserDefaults.standard.set(saved, forKey: key)
+            UserDefaults.standard.set(savedPreference, forKey: UserLanguage.preferenceKey)
+        }
+        // This is the no-explicit-choice path; a leftover preference would decide
+        // the answer before the stated one was consulted.
+        UserDefaults.standard.removeObject(forKey: UserLanguage.preferenceKey)
 
         UserDefaults.standard.set(["language": "Japanese (日本語)"], forKey: key)
         XCTAssertTrue(UserLanguage.isJapanese, "stated Japanese wins whatever the OS locale is")
@@ -23,6 +30,50 @@ final class VaultLocalizationTests: XCTestCase {
 
         UserDefaults.standard.set(["language": "日本語で"], forKey: key)
         XCTAssertTrue(UserLanguage.isJapanese)
+    }
+
+    /// The reason the picker was added: an explicit choice has to win over prose
+    /// that a substring match reads the other way, in both directions.
+    func testExplicitChoiceOverridesTheStatedAnswer() {
+        XCTAssertTrue(UserLanguage.resolve(preference: .japanese, stated: "English only please"))
+        XCTAssertFalse(UserLanguage.resolve(preference: .english, stated: "Japanese (日本語)"))
+        XCTAssertTrue(UserLanguage.resolve(preference: .japanese, stated: nil))
+        XCTAssertFalse(UserLanguage.resolve(preference: .english, stated: nil))
+    }
+
+    /// …and that `.system` is not a third behaviour but the old one, unchanged —
+    /// so upgrading does not move anybody's vault to another language.
+    func testSystemChoiceKeepsThePreviousPrecedence() {
+        XCTAssertTrue(UserLanguage.resolve(preference: .system, stated: "Japanese (日本語)"))
+        XCTAssertTrue(UserLanguage.resolve(preference: .system, stated: "ja-JP"))
+        XCTAssertFalse(UserLanguage.resolve(preference: .system, stated: "English"))
+
+        // The silent failure the picker exists for: prose a reader would call
+        // Japanese that the match does not see, so it falls through to the locale.
+        let localeIsJapanese = Locale.preferredLanguages.first?.hasPrefix("ja") == true
+        for missed in ["にほんご", "JP", "日本"] {
+            XCTAssertEqual(UserLanguage.resolve(preference: .system, stated: missed), localeIsJapanese,
+                           "\"\(missed)\" is unmatched prose — only the explicit choice can fix it")
+            XCTAssertTrue(UserLanguage.resolve(preference: .japanese, stated: missed))
+        }
+    }
+
+    func testStoredPreferenceIsWhatIsJapaneseReads() {
+        let saved = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        defer { UserDefaults.standard.set(saved, forKey: UserLanguage.preferenceKey) }
+
+        UserDefaults.standard.set(UserLanguage.Preference.japanese.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
+        XCTAssertEqual(UserLanguage.preference, .japanese)
+        XCTAssertTrue(UserLanguage.isJapanese)
+
+        UserDefaults.standard.set(UserLanguage.Preference.english.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
+        XCTAssertFalse(UserLanguage.isJapanese)
+
+        // Garbage in the defaults must not decide the language.
+        UserDefaults.standard.set("klingon", forKey: UserLanguage.preferenceKey)
+        XCTAssertEqual(UserLanguage.preference, .system)
     }
 
     func testAnswersKeyMirrorsOnboardingProfile() {
@@ -150,43 +201,10 @@ final class VaultLocalizationTests: XCTestCase {
                        "an existing run of blank lines should collapse, not persist")
     }
 
-    // MARK: - Folder ontology translations
-
-    func testEveryFolderHasAJapaneseTitleAndPurpose() {
-        for folder in FolderOntology.folders {
-            XCTAssertNotNil(FolderOntology.jaTitles[folder.number],
-                            "folder \(folder.number) \(folder.title) has no Japanese title")
-            XCTAssertNotNil(FolderOntology.jaPurposes[folder.number],
-                            "folder \(folder.number) \(folder.title) has no Japanese purpose")
-        }
-    }
-
-    func testEveryDeclaredSectionHasAJapaneseHeading() {
-        for folder in FolderOntology.folders {
-            for section in folder.sections {
-                XCTAssertNotNil(FolderOntology.jaSections[section],
-                                "section \"\(section)\" (folder \(folder.number)) has no Japanese heading")
-            }
-        }
-    }
-
-    func testSectionHeadingLocalizesDisplayOnly() {
-        XCTAssertEqual(FolderOntology.sectionHeading("Decisions", japanese: true), "決定")
-        XCTAssertEqual(FolderOntology.sectionHeading("Decisions", japanese: false), "Decisions")
-        // Unknown names fall back rather than vanish.
-        XCTAssertEqual(FolderOntology.sectionHeading("Brand new", japanese: true), "Brand new")
-    }
-
-    func testGuidanceSpeaksBothLanguagesForEveryFillSource() {
-        for folder in FolderOntology.folders {
-            let ja = folder.guidance(japanese: true)
-            let en = folder.guidance(japanese: false)
-            XCTAssertFalse(ja.isEmpty)
-            XCTAssertFalse(en.isEmpty)
-            XCTAssertNotEqual(ja, en, "folder \(folder.number) guidance is untranslated")
-
-            XCTAssertNotEqual(folder.emptyHint(japanese: true), folder.emptyHint(japanese: false),
-                              "folder \(folder.number) empty hint is untranslated")
-        }
-    }
+    // The folder-ontology translation tests lived here: every numbered folder had a
+    // Japanese title, purpose, per-section heading, fill guidance and empty hint, and
+    // these pinned the maps against the schema so a new folder could not ship
+    // half-translated. All of it went with the folders on 2026-08-09 (DIRECTION §6.1).
+    // What is left in the vault that follows the reader's language is the pinned-facts
+    // scaffold and its markers, which the tests above this line already cover.
 }

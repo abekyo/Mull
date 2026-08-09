@@ -7,7 +7,7 @@ import Foundation
 enum RawStore {
 
     static func itemsPath(connector: String) -> String {
-        "\(FolderOntology.rawRoot)/\(connector)/items.ndjson"
+        "\(VaultLayout.rawRoot)/\(connector)/items.ndjson"
     }
 
     private static var encoder: JSONEncoder {
@@ -88,7 +88,7 @@ enum RawStore {
     private static let maxItems = 2000
 
     static func archivePath(connector: String, index: Int) -> String {
-        "\(FolderOntology.rawRoot)/\(connector)/items.\(index).ndjson"
+        "\(VaultLayout.rawRoot)/\(connector)/items.\(index).ndjson"
     }
 
     /// The next unused archive index for a connector.

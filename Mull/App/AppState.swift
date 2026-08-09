@@ -175,7 +175,7 @@ final class AppState: ObservableObject {
         self.calendar = CalendarService()
         self.email = EmailService(database: database)
         self.proactive = ProactiveEngine(database: database, calendar: calendar, analytics: analytics)
-        // The self-driving proactive loop (DIRECTION §7): anchor → select → judge
+        // The self-driving proactive loop: anchor → select → judge
         // → write-back → notify, fired on project switches.
         self.proactiveLoop = ProactiveLoop(database: database)
         // Phase B ingestion — pulls from configured MCP sources. No-op until the
@@ -196,10 +196,12 @@ final class AppState: ObservableObject {
                 self.hasUnreadSummary = true
                 self.lastSummaryDate = Date()
                 self.loadRecentSummaries()
-                self.sendNotification(
-                    title: "Tonight's summary is ready ☽",
-                    body: summary.preview
-                )
+                if self.summaryBannersEnabled {
+                    self.sendNotification(
+                        title: "Tonight's summary is ready ☽",
+                        body: summary.preview
+                    )
+                }
                 // The summary exists either way, so this is not a failure — but a
                 // user who switched a provider on and got the rule-based version
                 // should not have to compare prose styles to find that out.
@@ -217,10 +219,12 @@ final class AppState: ObservableObject {
                 guard let self else { return }
                 // Both channels: the notification may be refused by macOS, and
                 // this is the one message that explains a missing summary.
-                self.sendNotification(
-                    title: "Summary failed",
-                    body: error.localizedDescription
-                )
+                if self.summaryBannersEnabled {
+                    self.sendNotification(
+                        title: "Summary failed",
+                        body: error.localizedDescription
+                    )
+                }
                 self.postNotice("Tonight's summary didn't run",
                                 detail: error.localizedDescription, isProblem: true)
             }
@@ -291,7 +295,7 @@ final class AppState: ObservableObject {
         // retention — both are file/DB work with no first-frame dependency.
         let db = database
         Task.detached {
-            FolderOntology.scaffold()
+            VaultLayout.migrate()
             Self.pruneToRetention(database: db)
             let today = db.fetchSummary(for: Date())
             let recent = db.fetchRecentSummaries(limit: 30)
@@ -341,7 +345,7 @@ final class AppState: ObservableObject {
     ///
     /// `refreshStats()` runs every 3 seconds but the 60s gate only closes AFTER the
     /// detached task finishes writing `lastMeFileUpdate`. A generation takes longer
-    /// than 3s (FolderFiller alone does a 14-day TimeBlockEngine scan plus a 7-day
+    /// than 3s (the folder fill alone did a 14-day TimeBlockEngine scan plus a 7-day
     /// fetch), so the gate stayed open and each tick spawned another overlapping run
     /// — several of them racing inside Curator's non-atomic read-merge-write, which
     /// is exactly how curated blocks get lost. Same check-and-set pattern as
@@ -357,7 +361,12 @@ final class AppState: ObservableObject {
         let db = database
         let analyticsRef = analytics
         let calendarRef = calendar
-        let emailRef = email
+        // Read the inbox HERE, on the main actor, and hand the detached task a
+        // value. Passing `EmailService` across meant a detached task calling into
+        // a type whose 5-minute poll timer mutates it on main — the same class of
+        // race as the statics noted below, found by strict concurrency checking
+        // rather than by anything failing.
+        let inbox = LiveContextGenerator.InboxSnapshot.read(from: email)
 
         Task.detached {
             // Services are passed in, not stashed in LiveContextGenerator statics —
@@ -369,7 +378,7 @@ final class AppState: ObservableObject {
             var generated = true
             do {
                 try LiveContextGenerator.generate(analytics: analyticsRef, database: db,
-                                                  calendar: calendarRef, email: emailRef)
+                                                  calendar: calendarRef, inbox: inbox)
             } catch {
                 generated = false
             }
@@ -601,16 +610,20 @@ final class AppState: ObservableObject {
                 mullProgress = nil
 
                 // macOS notification — pull user back
-                sendNotification(
-                    title: "Summary is ready",
-                    body: summary.preview
-                )
+                if summaryBannersEnabled {
+                    sendNotification(
+                        title: "Summary is ready",
+                        body: summary.preview
+                    )
+                }
             } catch {
                 mullProgress = "mull failed: \(error.localizedDescription)"
-                sendNotification(
-                    title: "Summary failed",
-                    body: error.localizedDescription
-                )
+                if summaryBannersEnabled {
+                    sendNotification(
+                        title: "Summary failed",
+                        body: error.localizedDescription
+                    )
+                }
                 try? await Task.sleep(for: .seconds(5))
                 mullProgress = nil
             }
@@ -621,6 +634,13 @@ final class AppState: ObservableObject {
 
     private func sendNotification(title: String, body: String) {
         Notifier.shared.send(id: UUID().uuidString, title: title, body: body)
+    }
+
+    /// Settings › General › Notifications. Absent key means on. Governs only the
+    /// banner: the summary itself, the in-app notices and the menu bar's unread
+    /// mark are unaffected.
+    private var summaryBannersEnabled: Bool {
+        UserDefaults.standard.object(forKey: "summaryNotifications") as? Bool ?? true
     }
 
     // MARK: - Permission loss

@@ -6,8 +6,8 @@ import EventKit
 /// recorded anything.
 ///
 /// This is not a cold read and must not perform like one. A fortune-teller's trick
-/// works by hiding where the knowledge came from, and DESIGN-NORTHSTAR §3.5 names
-/// exactly that as a DON'T ("出所を隠した不気味な的中"): the understudy shows its
+/// works by hiding where the knowledge came from, and an uncanny hit with a concealed
+/// source is the exact effect this file is forbidden to produce — mull shows its
 /// sources. So every fact here names what it was read from — the running apps, the
 /// front window's title, the clipboard, the calendar — and stops there. mull reports
 /// the observation; the user is the one who knows what it means.

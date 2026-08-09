@@ -227,7 +227,9 @@ final class SearchServiceTests: XCTestCase {
 
     func testMatchingProjectsLooksAtNameAppAndResumeFile() {
         let db = try! DatabaseService.temporary()
-        let engine = TimeBlockEngine(database: db)
+        // Pinned, not defaulted: `Preferences` resolves to the developer's own
+        // settings under the test host. See `TimeBlockEngineTests.setUp`.
+        let engine = TimeBlockEngine(database: db, resumeGap: TimeBlockEngine.defaultResumeGap)
 
         // Two days of real-shaped activity so `projectSnapshots` has something to infer
         // from — going through the engine keeps the test honest about the shape of a

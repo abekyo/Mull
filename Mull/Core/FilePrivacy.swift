@@ -49,6 +49,32 @@ enum FilePrivacy {
         stripLegacyProtection(at: url)
     }
 
+    /// Owner read/write/execute on a directory, nothing for group or other.
+    private static let ownerOnlyDirectory = NSNumber(value: Int16(0o700))
+
+    /// Apply owner-only permissions to a directory.
+    ///
+    /// The files inside are already 0600, which is what stops another account
+    /// reading them — but a 0755 directory still lets any other user on the machine
+    /// *list* it, and in mull's case the list is the content: project names, the
+    /// days you worked, `projects/<client>.md`. A directory nobody may enter
+    /// makes the question moot for everything beneath it, which is why only the two
+    /// roots need this and not every folder created under them.
+    ///
+    /// Best-effort and silent, like everything else here: a vault on a volume
+    /// without POSIX modes must still start the app.
+    static func protectDirectory(at url: URL) {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return }
+        do {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: ownerOnlyDirectory], ofItemAtPath: url.path)
+        } catch {
+            logger.error("Could not set 0700 on \(url.lastPathComponent, privacy: .public): \(error.localizedDescription)")
+        }
+    }
+
     /// Remove the `.completeUnlessOpen` stamp left by earlier builds, if present.
     ///
     /// Routine rewrites shed it on their own — the atomic write creates a fresh

@@ -328,4 +328,222 @@ final class CalendarGridTests: XCTestCase {
         XCTAssertGreaterThan(spans[0].height, 0)
         XCTAssertGreaterThan(spans[0].trueHeight, 0)
     }
+
+    // MARK: - The all-day band
+
+    /// Monday 2026-08-10 through Sunday, the week every case below is drawn on.
+    private var week: [Date] { (0..<7).map { date(2026, 8, 10 + $0) } }
+
+    /// EventKit's shape for a day-shaped event: midnight on the first day to
+    /// midnight after the last, so the end is a day that is not covered.
+    private func allDay(_ id: String, _ from: Int, through last: Int) -> CalendarGrid.DayInterval {
+        CalendarGrid.DayInterval(id: id, start: date(2026, 8, from), end: date(2026, 8, last + 1))
+    }
+
+    private func bars(_ intervals: [CalendarGrid.DayInterval],
+                      days: [Date]? = nil) -> [String: CalendarGrid.Bar] {
+        let laid = CalendarGrid.allDayBars(intervals, days: days ?? week, calendar: calendar)
+        return Dictionary(uniqueKeysWithValues: laid.map { ($0.id, $0) })
+    }
+
+    /// The case the band got wrong: a four-day trip was filed under each of its four
+    /// days and drawn four times, once per column.
+    func testMultiDayEventIsOneBarSpanningItsDays() {
+        let laid = CalendarGrid.allDayBars([allDay("trip", 11, through: 14)],
+                                           days: week, calendar: calendar)
+
+        XCTAssertEqual(laid.count, 1, "one commitment is one bar, however many days it covers")
+        XCTAssertEqual(laid[0].column, 1)
+        XCTAssertEqual(laid[0].span, 4)
+    }
+
+    func testOneDayEventOccupiesOneColumn() {
+        let bar = bars([allDay("birthday", 12, through: 12)])["birthday"]
+
+        XCTAssertEqual(bar?.column, 2)
+        XCTAssertEqual(bar?.span, 1)
+        XCTAssertEqual(bar?.continuesBefore, false)
+        XCTAssertEqual(bar?.continuesAfter, false)
+    }
+
+    /// An all-day event whose end is stored inclusively — 23:59:59 on the last day
+    /// rather than the midnight after it — must not gain a trailing column.
+    func testInclusiveEndDoesNotInventATrailingDay() {
+        let inclusive = CalendarGrid.DayInterval(id: "pto",
+                                                 start: date(2026, 8, 11),
+                                                 end: date(2026, 8, 12, 23, 59))
+        XCTAssertEqual(bars([inclusive])["pto"]?.span, 2)
+    }
+
+    /// The lane jog: a bar used to move up a row the moment the event above it
+    /// ended, because each column stacked its own chips with no memory of its
+    /// neighbours. `run` is pushed to the second lane by an earlier bar, and has to
+    /// stay there on Wednesday, Thursday and Friday — where the first lane is empty
+    /// and the old band would have pulled it up.
+    func testABarHoldsOneLaneForTheWholeOfItsRun() {
+        let laid = bars([allDay("mon-tue", 10, through: 11),
+                         allDay("run", 11, through: 14)])
+
+        XCTAssertEqual(laid["mon-tue"]?.lane, 0)
+        XCTAssertEqual(laid["run"]?.lane, 1)
+        XCTAssertEqual(laid["run"]?.column, 1)
+        XCTAssertEqual(laid["run"]?.span, 4, "one bar, one lane, four columns")
+    }
+
+    /// Where two begin on the same day, the longer one goes on top — Apple's order,
+    /// and the one that keeps a week of PTO above the afternoon inside it.
+    func testLongerRunTakesTheUpperLane() {
+        let laid = bars([allDay("short", 10, through: 10),
+                         allDay("long", 10, through: 13)])
+
+        XCTAssertEqual(laid["long"]?.lane, 0)
+        XCTAssertEqual(laid["short"]?.lane, 1)
+    }
+
+    func testBarsThatDoNotOverlapShareALane() {
+        let laid = bars([allDay("early", 10, through: 11),
+                         allDay("late", 13, through: 14)])
+
+        XCTAssertEqual(laid["early"]?.lane, 0)
+        XCTAssertEqual(laid["late"]?.lane, 0, "a lane is free again once its bar has ended")
+    }
+
+    /// Touching, not overlapping: one ends on Tuesday, the next begins on Wednesday.
+    func testABarMayReuseALaneTheDayAfterItsNeighbourEnds() {
+        let laid = bars([allDay("first", 10, through: 11),
+                         allDay("second", 12, through: 13)])
+
+        XCTAssertEqual(laid["first"]?.lane, 0)
+        XCTAssertEqual(laid["second"]?.lane, 0)
+    }
+
+    func testRunsLeavingTheRangeAreClippedAndSayThatTheyWere() {
+        let laid = bars([CalendarGrid.DayInterval(id: "leave",
+                                                  start: date(2026, 8, 6),
+                                                  end: date(2026, 8, 20))])["leave"]
+
+        XCTAssertEqual(laid?.column, 0)
+        XCTAssertEqual(laid?.span, 7)
+        XCTAssertTrue(laid?.continuesBefore == true, "it did not begin on Monday")
+        XCTAssertTrue(laid?.continuesAfter == true, "and it does not end on Sunday")
+    }
+
+    func testAnEventEndingInsideTheRangeDoesNotClaimToContinue() {
+        let laid = bars([CalendarGrid.DayInterval(id: "arriving",
+                                                  start: date(2026, 8, 8),
+                                                  end: date(2026, 8, 12))])["arriving"]
+
+        XCTAssertTrue(laid?.continuesBefore == true)
+        XCTAssertFalse(laid?.continuesAfter == true)
+        XCTAssertEqual(laid?.span, 2, "Monday and Tuesday of the week on screen")
+    }
+
+    /// Day view is the same band one column wide, and a trip passing through it has
+    /// to read as passing through rather than as a one-day booking.
+    func testDayViewShowsAPassingRunAsContinuingBothWays() {
+        let laid = CalendarGrid.allDayBars([allDay("trip", 10, through: 14)],
+                                           days: [date(2026, 8, 12)], calendar: calendar)
+
+        XCTAssertEqual(laid.count, 1)
+        XCTAssertEqual(laid[0].span, 1)
+        XCTAssertTrue(laid[0].continuesBefore)
+        XCTAssertTrue(laid[0].continuesAfter)
+    }
+
+    func testEventsOutsideTheRangeAreNotDrawn() {
+        XCTAssertTrue(CalendarGrid.allDayBars([allDay("last-month", 1, through: 3)],
+                                              days: week, calendar: calendar).isEmpty)
+    }
+
+    func testNoDaysMeansNoBars() {
+        XCTAssertTrue(CalendarGrid.allDayBars([allDay("trip", 11, through: 14)],
+                                              days: [], calendar: calendar).isEmpty)
+    }
+
+    /// The band is rebuilt on every load; two identical layouts must not swap lanes
+    /// between them, or a bar moves under the cursor for no reason.
+    func testLayoutIsStableForEventsThatCannotBeToldApartByDate() {
+        let same = [allDay("b", 10, through: 11), allDay("a", 10, through: 11)]
+
+        XCTAssertEqual(bars(same)["a"]?.lane, 0)
+        XCTAssertEqual(bars(same.reversed())["a"]?.lane, 0)
+    }
+
+    // MARK: - Dragging a span
+
+    private func dragged(_ start: Date, by hours: Double, columns: Int = 0) -> Date {
+        CalendarGrid.draggedStart(from: start, shift: hours * 3600,
+                                  dayDelta: columns, calendar: calendar)
+    }
+
+    func testDraggingDownTheAxisMovesTheStartAndSnaps() {
+        let moved = dragged(date(2026, 8, 10, 9, 0), by: 2.1)
+        XCTAssertEqual(moved, date(2026, 8, 10, 11, 0))
+    }
+
+    /// The wrap: a nudge upward at the top of the day used to roll the event onto
+    /// yesterday, and the card leapt to the bottom of the column on the way.
+    func testDraggingUpPastMidnightIsHeldAtMidnight() {
+        let moved = dragged(date(2026, 8, 10, 0, 15), by: -2)
+
+        XCTAssertEqual(moved, date(2026, 8, 10, 0, 0))
+    }
+
+    func testDraggingDownPastMidnightIsHeldAtTheLastQuarterOfTheDay() {
+        let moved = dragged(date(2026, 8, 10, 23, 0), by: 5)
+
+        XCTAssertEqual(moved, date(2026, 8, 10, 23, 45),
+                       "and never 00:00, which is a different day wearing the same clock")
+    }
+
+    func testDraggingSidewaysMovesWholeDaysAndKeepsTheTime() {
+        let moved = dragged(date(2026, 8, 10, 9, 30), by: 0, columns: 2)
+        XCTAssertEqual(moved, date(2026, 8, 12, 9, 30))
+    }
+
+    func testSidewaysAndDownwardsCompose() {
+        let moved = dragged(date(2026, 8, 10, 9, 0), by: 1.5, columns: -1)
+        XCTAssertEqual(moved, date(2026, 8, 9, 10, 30))
+    }
+
+    /// A span that began yesterday and is drawn clamped at the top of today's column
+    /// still belongs to yesterday: its clamp is yesterday's, shifted by the columns
+    /// the pointer asked for.
+    func testAContinuingSpanIsClampedToItsOwnDay() {
+        let moved = dragged(date(2026, 8, 9, 23, 30), by: 4)
+        XCTAssertEqual(moved, date(2026, 8, 9, 23, 45))
+    }
+
+    /// A day that is 25 hours long really has a 24:xx to be dragged into.
+    func testTheClampFollowsALongDaysRealLength() {
+        var american = Calendar(identifier: .gregorian)
+        american.timeZone = TimeZone(identifier: "America/New_York")!
+        let fallBack = american.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 22))!
+        let moved = CalendarGrid.draggedStart(from: fallBack, shift: 6 * 3600,
+                                              dayDelta: 0, calendar: american)
+
+        XCTAssertEqual(moved.timeIntervalSince(american.startOfDay(for: fallBack)),
+                       24.75 * 3600, accuracy: 1,
+                       "the last quarter hour of a 25-hour day")
+    }
+
+    // MARK: - Which column a drag asked for
+
+    func testASmallSidewaysWobbleIsNotADayChange() {
+        XCTAssertEqual(CalendarGrid.draggedColumns(12, columnWidth: 100, from: 2, columns: 7), 0)
+    }
+
+    func testHalfAColumnRoundsToTheNextOne() {
+        XCTAssertEqual(CalendarGrid.draggedColumns(60, columnWidth: 100, from: 2, columns: 7), 1)
+    }
+
+    func testADragOffTheEdgeOfTheWeekStopsAtTheEdge() {
+        XCTAssertEqual(CalendarGrid.draggedColumns(900, columnWidth: 100, from: 5, columns: 7), 1)
+        XCTAssertEqual(CalendarGrid.draggedColumns(-900, columnWidth: 100, from: 1, columns: 7), -1)
+    }
+
+    /// Day view is one column, and there is nowhere sideways to go.
+    func testASingleColumnRangeNeverChangesDay() {
+        XCTAssertEqual(CalendarGrid.draggedColumns(500, columnWidth: 100, from: 0, columns: 1), 0)
+    }
 }

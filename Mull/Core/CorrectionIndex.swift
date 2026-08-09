@@ -7,7 +7,7 @@ import Foundation
 /// occupation-neutral — it holds whatever vocabulary the text is written in —
 /// which is why it is the only layer that can lift the top salience tiers
 /// without a per-trade word list. Adding FX words, then legal words, then video
-/// words is the failure mode this replaces (HARNESS.md 第I部 原理1).
+/// words is the failure mode this replaces.
 ///
 /// It is also the only signal no competitor can have. Screenpipe / ManicTime /
 /// Timing capture the same activity; ChatGPT and Copilot Memory let you delete a
@@ -100,7 +100,8 @@ struct CorrectionIndex {
     /// Path inside the vault. Plain markdown, in the knowledge folder, because a
     /// signal the user cannot read and correct is not a signal they own
     /// (DIRECTION §6 / Invariant Contract 契約2).
-    static let ledgerPath = "06_knowledge/corrections/ledger.md"
+    static let directory = "corrections"
+    static let ledgerPath = directory + "/ledger.md"
 
     static let ledgerHeader = """
     # Correction ledger

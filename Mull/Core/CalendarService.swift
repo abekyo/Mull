@@ -257,6 +257,32 @@ final class CalendarService {
         static func == (lhs: WritableCalendar, rhs: WritableCalendar) -> Bool { lhs.id == rhs.id }
     }
 
+    /// A calendar the grid could draw, and whether mull may write to it.
+    ///
+    /// `WritableCalendar` cannot stand in for this: the show/hide menu has to list
+    /// the subscribed feeds too — a holiday calendar is exactly the sort of thing a
+    /// reader wants out of the way, and it is the one kind that accepts no writes.
+    struct CalendarSource: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let color: CGColor
+        let isWritable: Bool
+
+        static func == (lhs: CalendarSource, rhs: CalendarSource) -> Bool { lhs.id == rhs.id }
+    }
+
+    /// Every event calendar on the Mac, writable ones first, then by name.
+    var eventCalendars: [CalendarSource] {
+        if !hasAccess { recheckAccess() }
+        guard hasAccess else { return [] }
+        return store.calendars(for: .event)
+            .map {
+                CalendarSource(id: $0.calendarIdentifier, title: $0.title, color: $0.cgColor,
+                               isWritable: $0.allowsContentModifications)
+            }
+            .sorted { ($0.isWritable ? 0 : 1, $0.title) < ($1.isWritable ? 0 : 1, $1.title) }
+    }
+
     /// Every calendar that accepts new events, default first.
     ///
     /// The UI needs the whole list, not just the default: an event that lands in
@@ -571,7 +597,7 @@ final class CalendarService {
     /// Either kind is filed under *every* day it covers, not only the one it began
     /// on: a four-day trip belongs on all four days, and a meeting running 23:40 →
     /// 00:50 belongs on both of them (each column clamps and marks its own half).
-    func dayEvents(from start: Date, to end: Date)
+    func dayEvents(from start: Date, to end: Date, excluding hidden: Set<String> = [])
         -> (timed: [Date: [CalendarEvent]], allDay: [Date: [CalendarEvent]]) {
         if !hasAccess { recheckAccess() }
         guard hasAccess, start < end else { return ([:], [:]) }
@@ -580,7 +606,7 @@ final class CalendarService {
         var timed: [Date: [CalendarEvent]] = [:]
         var allDay: [Date: [CalendarEvent]] = [:]
 
-        for event in fetch(from: start, to: end) {
+        for event in fetch(from: start, to: end, excluding: hidden) {
             var day = calendar.startOfDay(for: max(event.start, start))
             // The last *moment* the event occupies, not its end: an end lands on
             // midnight in two different meanings (EventKit's inclusive all-day
@@ -602,6 +628,23 @@ final class CalendarService {
         return (timed, allDay)
     }
 
+    /// The two buckets flattened into one list per day, for a grid with no hour axis.
+    ///
+    /// All-day first. Appending them after the timed ones — which is what the month
+    /// view used to do — put a whole day of PTO *below* a 14:00 meeting, and since a
+    /// month cell shows the first two or three and counts the rest, the day-shaped
+    /// commitment was the first thing to disappear into "+2 more". It is the one
+    /// least able to spare the room.
+    static func merged(timed: [Date: [CalendarEvent]],
+                       allDay: [Date: [CalendarEvent]]) -> [Date: [CalendarEvent]] {
+        var merged: [Date: [CalendarEvent]] = [:]
+        for day in Set(timed.keys).union(allDay.keys) {
+            merged[day] = (allDay[day] ?? []).sorted { $0.title < $1.title }
+                        + (timed[day] ?? []).sorted { $0.start < $1.start }
+        }
+        return merged
+    }
+
     /// The one place raw EventKit rows become `CalendarEvent`s.
     ///
     /// Deduplicates on title + start time: the same appointment subscribed from
@@ -612,21 +655,21 @@ final class CalendarService {
     /// All-day events are carried through with a flag rather than discarded —
     /// deciding what to do with them is the caller's business, and dropping them
     /// here is what made them invisible everywhere at once.
-    private func fetch(from start: Date, to end: Date) -> [CalendarEvent] {
+    private func fetch(from start: Date, to end: Date,
+                       excluding hidden: Set<String> = []) -> [CalendarEvent] {
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
         let rawEvents = store.events(matching: predicate)
+            .filter { !hidden.contains($0.calendar.calendarIdentifier) }
             .sorted { $0.startDate < $1.startDate }
 
-        var seen = Set<String>()
+        var index: [String: Int] = [:]
         var results: [CalendarEvent] = []
 
         for event in rawEvents {
             let title = event.title ?? "Untitled"
             let key = "\(title)|\(event.startDate.timeIntervalSince1970)"
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
 
-            results.append(CalendarEvent(
+            let made = CalendarEvent(
                 title: title,
                 start: event.startDate,
                 end: event.endDate,
@@ -638,7 +681,19 @@ final class CalendarService {
                 isRecurring: event.hasRecurrenceRules,
                 calendarIdentifier: event.calendar.calendarIdentifier,
                 isEditable: event.calendar.allowsContentModifications
-            ))
+            )
+
+            // Of two copies of the same appointment, keep the one that can be
+            // changed. Which arrived first is decided by a sort on start date alone,
+            // so it used to be arbitrary — and when the subscribed copy won, the
+            // grid offered a read-only card, and the "this calendar is subscribed"
+            // note, for an event sitting in the reader's own writable calendar.
+            if let existing = index[key] {
+                if made.isEditable, !results[existing].isEditable { results[existing] = made }
+                continue
+            }
+            index[key] = results.count
+            results.append(made)
         }
 
         return results

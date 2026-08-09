@@ -12,9 +12,9 @@ import Foundation
 /// Results feed into me.md/now.md so AI understands your patterns without being told.
 final class AnalyticsEngine {
 
-    private let database: DatabaseService
+    private let database: EventReading
 
-    init(database: DatabaseService) {
+    init(database: EventReading) {
         self.database = database
     }
 

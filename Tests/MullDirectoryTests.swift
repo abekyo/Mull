@@ -70,4 +70,46 @@ final class MullDirectoryTests: XCTestCase {
         // Cleanup
         try? FileManager.default.removeItem(at: MullDirectory.root.appendingPathComponent(path))
     }
+
+    // MARK: - Permissions
+
+    private func mode(of url: URL) throws -> Int {
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        return (attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0
+    }
+
+    /// Files are 0600, which is what stops another account reading them — but the
+    /// vault was created under the process umask, so the directory itself was 0755
+    /// and any other user on the machine could list it. For ~/mull the listing IS
+    /// content: project names, the days worked, `projects/<client>.md`.
+    func testTheVaultRootIsOwnerOnly() throws {
+        _ = MullDirectory.setup()
+        XCTAssertEqual(try mode(of: MullDirectory.root), 0o700)
+    }
+
+    /// Applied on every setup, not only at creation — vaults made by earlier builds
+    /// are sitting world-listable right now and have to be healed in place.
+    func testAnExistingWorldReadableVaultIsLockedDownOnSetup() throws {
+        _ = MullDirectory.setup()
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o755))],
+            ofItemAtPath: MullDirectory.root.path)
+
+        _ = MullDirectory.setup()
+
+        XCTAssertEqual(try mode(of: MullDirectory.root), 0o700)
+    }
+
+    /// An unreadable directory cannot be traversed into, so the root alone settles
+    /// it for everything underneath — which is why `daily/` and `notes/` are not
+    /// chased individually.
+    func testFilesInTheVaultAreOwnerOnly() throws {
+        _ = MullDirectory.setup()
+        let path = "permissions-\(UUID().uuidString).md"
+        XCTAssertTrue(MullDirectory.write("private", to: path))
+
+        XCTAssertEqual(try mode(of: MullDirectory.url(for: path)), 0o600)
+
+        try? FileManager.default.removeItem(at: MullDirectory.url(for: path))
+    }
 }

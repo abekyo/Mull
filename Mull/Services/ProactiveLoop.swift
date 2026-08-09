@@ -1,6 +1,6 @@
 import Foundation
 
-/// The proactive loop (DIRECTION §7 / §9.2) — the self-driving core that makes
+/// The proactive loop (DIRECTION §9.2) — the self-driving core that makes
 /// mull ACT, not just answer. A passive selection layer does nothing until an
 /// agent calls it; this is the part that fires on its own.
 ///
@@ -21,7 +21,7 @@ import Foundation
 @MainActor
 final class ProactiveLoop {
 
-    private let database: DatabaseService
+    private let database: MCPDatabase
     private let llm: LLMClient
 
     private var lastEntity: String?
@@ -47,7 +47,7 @@ final class ProactiveLoop {
 
     static let briefsFile = "proactive.md"
 
-    init(database: DatabaseService, llm: LLMClient = LLMClient()) {
+    init(database: MCPDatabase, llm: LLMClient = LLMClient()) {
         self.database = database
         self.llm = llm
         Self.resetLegacyBriefsOnce()

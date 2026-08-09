@@ -210,8 +210,8 @@ struct ReportCardView: View {
                     // The fidelity measurement, said once and quietly, only after the
                     // act it measures is complete. Same register as the provenance
                     // line above — no target, no trend arrow, no colour, nothing to
-                    // beat (DESIGN-NORTHSTAR §1: no streaks, badges or points on a
-                    // surface a human reads about their own life). It states what
+                    // beat — no streaks, badges or points on a surface a human
+                    // reads about their own life. It states what
                     // happened; whether that number is good is the user's to decide.
                     if approved, let note = fidelityNote {
                         Text(note)

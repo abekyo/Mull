@@ -23,7 +23,7 @@ import Foundation
 /// visible and mergeable later — it is deliberately not being reconciled here.
 struct ContextComposer {
 
-    let database: DatabaseService
+    let database: EventReading
 
     /// The line that makes a pasted block self-explanatory wherever it lands.
     /// Exposed because onboarding composes a starter block from a live read of the
@@ -135,7 +135,7 @@ struct ContextComposer {
             var text = Self.preamble + "\n" + sections.joined(separator: "\n\n")
             text = ContextBlockFile.stripMarkers(text)
 
-            let maxChars = UserDefaults.standard.integer(forKey: "outputMaxChars")
+            let maxChars = Preferences.outputMaxChars
             return (maxChars > 0 && text.count > maxChars) ? String(text.prefix(maxChars)) : text
         }.value
     }

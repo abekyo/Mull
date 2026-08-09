@@ -33,7 +33,11 @@ final class TimeBlockEngineTests: XCTestCase {
     override func setUp() {
         super.setUp()
         db = try! DatabaseService.temporary()
-        engine = TimeBlockEngine(database: db)
+        // `resumeGap` is pinned to the shipped default rather than left to
+        // `Preferences`. The test bundle's host is Mull.app, so `Preferences.store`
+        // resolves to the *developer's own* settings — a suite whose segmentation
+        // depended on that would pass or fail according to a picker in Settings.
+        engine = TimeBlockEngine(database: db, resumeGap: TimeBlockEngine.defaultResumeGap)
     }
 
     override func tearDown() {
@@ -139,7 +143,7 @@ final class TimeBlockEngineTests: XCTestCase {
         XCTAssertEqual(engine.generateBlocks(for: fixtureDate).count, 1, "179s gap must stay in the same block")
 
         let db2 = try! DatabaseService.temporary()
-        let engine2 = TimeBlockEngine(database: db2)
+        let engine2 = TimeBlockEngine(database: db2, resumeGap: TimeBlockEngine.defaultResumeGap)
         for t in [at(9, 0), at(9, 1), at(9, 1).addingTimeInterval(180)] {
             db2.insertEvent(RecordingEvent(timestamp: t, eventType: .screenText,
                                            appName: "Xcode", windowTitle: "Nocturne — IngestPipeline.swift"))
@@ -149,6 +153,107 @@ final class TimeBlockEngineTests: XCTestCase {
         let split = engine2.generateBlocks(for: fixtureDate)
         XCTAssertEqual(split.count, 1)
         XCTAssertEqual(split[0].end, at(9, 1), "180s gap must NOT be absorbed into the block")
+    }
+
+    // MARK: - Resuming the same work after a break
+
+    func testFiveMinuteBreakInTheSameProjectStaysOneBlock() {
+        // The complaint this pass exists for. Two sittings on the same file, five
+        // minutes apart, used to be two cards with identical captions — two things,
+        // as far as anyone reading the calendar is concerned.
+        seedMinutes(from: at(9, 0), minutes: 30, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+        seedMinutes(from: at(9, 35), minutes: 40, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+
+        let blocks = engine.generateBlocks(for: fixtureDate)
+
+        XCTAssertEqual(blocks.count, 1, "a five-minute break is a break, not a boundary")
+        XCTAssertEqual(blocks[0].start, at(9, 0))
+        XCTAssertEqual(blocks[0].end, at(10, 15))
+        XCTAssertEqual(blocks[0].eventCount, 31 + 41)
+        XCTAssertEqual(blocks[0].label, "PantryApp — ChartViewModel.swift")
+    }
+
+    func testRejoinedBreakIsReportedAndNotCountedAsWork() {
+        // The merge must not turn five idle minutes into five worked ones. Engaged
+        // time takes the 90s cap, exactly as an inter-event gap inside a block does;
+        // the wall-clock span keeps the whole 75 minutes because that is when the
+        // session ran, and the block says how much of it was away.
+        seedMinutes(from: at(9, 0), minutes: 30, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+        seedMinutes(from: at(9, 35), minutes: 40, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+
+        let block = engine.generateBlocks(for: fixtureDate)[0]
+
+        XCTAssertEqual(block.duration, 75 * 60, accuracy: 0.5)
+        XCTAssertEqual(block.activeDuration, 1800 + 90 + 2400, accuracy: 0.5,
+                       "the rejoined break contributes only the 90s cap")
+        XCTAssertEqual(block.pauses.count, 1)
+        XCTAssertEqual(block.pausedDuration, 300, accuracy: 0.5)
+        XCTAssertEqual(block.pauses[0].start, at(9, 30))
+        XCTAssertEqual(block.pauses[0].end, at(9, 35))
+    }
+
+    func testABreakBetweenDifferentProjectsStillSplits() {
+        // Continuity of the *work*, not just of the clock. Five minutes between two
+        // different projects is a boundary and has to stay one.
+        seedMinutes(from: at(9, 0), minutes: 30, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+        seedMinutes(from: at(9, 35), minutes: 30, app: "Xcode", title: "Nocturne — IngestPipeline.swift")
+
+        let blocks = engine.generateBlocks(for: fixtureDate)
+
+        XCTAssertEqual(blocks.count, 2)
+        XCTAssertTrue(blocks.allSatisfy { $0.pauses.isEmpty })
+        XCTAssertEqual(blocks.map(\.label),
+                       ["PantryApp — ChartViewModel.swift", "Nocturne — IngestPipeline.swift"])
+    }
+
+    func testResumingAfterAnotherProjectDoesNotDrawThroughIt() {
+        // A → B → A. Merging the two A's would draw one card straight across B, so
+        // rejoining is adjacent-only and this stays three blocks.
+        seedMinutes(from: at(9, 0), minutes: 20, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+        seedMinutes(from: at(9, 25), minutes: 20, app: "Code", title: "Nocturne — IngestPipeline.swift")
+        seedMinutes(from: at(9, 50), minutes: 20, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+
+        let blocks = engine.generateBlocks(for: fixtureDate)
+
+        XCTAssertEqual(blocks.count, 3)
+        XCTAssertTrue(blocks.allSatisfy { $0.pauses.isEmpty })
+    }
+
+    func testBreakLongerThanTheResumeWindowStartsANewBlock() {
+        // The window is a window. Eleven minutes is past the ten-minute default even
+        // on the same file, and the day should show two sittings.
+        seedMinutes(from: at(9, 0), minutes: 30, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+        seedMinutes(from: at(9, 41), minutes: 30, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+
+        XCTAssertEqual(engine.generateBlocks(for: fixtureDate).count, 2)
+    }
+
+    func testResumeGapOfZeroRestoresPureElapsedTimeSegmentation() {
+        // "Off" in Settings has to mean off, not "a smaller window mull believes in".
+        seedMinutes(from: at(9, 0), minutes: 30, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+        seedMinutes(from: at(9, 35), minutes: 40, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+
+        let off = TimeBlockEngine(database: db, resumeGap: 0)
+
+        XCTAssertEqual(off.generateBlocks(for: fixtureDate).count, 2)
+        XCTAssertEqual(engine.generateBlocks(for: fixtureDate).count, 1,
+                       "the same fixture, and only the setting differs")
+    }
+
+    func testRejoinedBlockSettlesItsFaceOverTheWholeSession() {
+        // Ten minutes of Safari open the day, then — after a break — forty minutes of
+        // Xcode on the same project. The merged block's face is the app that actually
+        // held the session, not the one that happened to open its first fragment.
+        seedMinutes(from: at(9, 0), minutes: 10, app: "Safari", title: "PantryApp — GitHub")
+        seedMinutes(from: at(9, 15), minutes: 40, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+
+        let blocks = engine.generateBlocks(for: fixtureDate)
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].app, "Xcode")
+        XCTAssertEqual(blocks[0].label, "PantryApp — ChartViewModel.swift")
+        XCTAssertTrue(blocks[0].isMultiApp)
+        XCTAssertEqual(blocks[0].secondaryApps, ["Safari"])
     }
 
     func testAppSwitchWithinThreeMinutesContinuesTheBlockAsMultiApp() {
@@ -571,9 +676,12 @@ final class TimeBlockEngineTests: XCTestCase {
         let lastMonday = cal.date(byAdding: .day, value: -7, to: thisMonday)!
         let start = cal.date(bySettingHour: 9, minute: 0, second: 0, of: lastMonday)!
 
-        // 2.5 hours of continuous work (events 150s apart, inside the 180s merge
-        // window) → one block of 9000s, past the 7200s "deep work" bar.
-        seedRun(start: start, count: 61, spacing: 150, app: "Xcode",
+        // 2.5 hours of continuous work → one block of 9000s, past the 7200s "deep
+        // work" bar. Spacing is 60s, under `activeGapCap`, because deep blocks are
+        // counted in *engaged* time: at the old 150s spacing the engine credited only
+        // 90s of each gap and the same 2.5 hours came to 5400s — which is the honest
+        // answer for a stream that sparse, and not what "continuous work" means here.
+        seedRun(start: start, count: 151, spacing: 60, app: "Xcode",
                 title: "PantryApp — ChartViewModel.swift")
         // Four app switches on the same day feed the context-switch counter.
         for i in 0..<4 {

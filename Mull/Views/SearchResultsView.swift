@@ -422,10 +422,22 @@ struct SearchResultsView<ProjectCard: View>: View {
     private func timelineRow(_ row: Row) -> some View {
         Button { onOpenDay(row.date) } label: {
             HStack(alignment: .top, spacing: DS.sm) {
+                // `SearchService.timeLabel` is locale-shaped — "14:45" on a 24-hour
+                // Mac, "12:45 PM" on a 12-hour one, "오후 12:45" in Korean — so a
+                // hard 48pt column was only ever wide enough for some of them: on a
+                // 12-hour clock every event in the noon hour came out "12:45 P…",
+                // which is a reading that has lost the half of the day it was for.
+                //
+                // A floor instead, set above the widest reading the template can
+                // produce (54pt), so every row still lands on one shared width and
+                // nothing is cut; larger system text sizes push the column out
+                // rather than chopping it.
                 Text(row.time)
                     .font(DS.microFont)
                     .foregroundStyle(DS.inkGhost)
-                    .frame(width: 48, alignment: .trailing)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minWidth: 56, alignment: .trailing)
 
                 kindBadge(row.kind)
 

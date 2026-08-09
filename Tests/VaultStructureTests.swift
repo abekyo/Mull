@@ -34,7 +34,7 @@ final class VaultStructureTests: XCTestCase {
     private func generate() {
         XCTAssertNoThrow(try LiveContextGenerator.generate(
             analytics: AnalyticsEngine(database: database),
-            database: database, calendar: nil, email: nil))
+            database: database, calendar: nil, inbox: .none))
     }
 
     private func read(_ name: String) -> String {

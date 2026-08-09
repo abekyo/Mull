@@ -9,7 +9,7 @@ import CryptoKit
 /// and become tomorrow's voice samples, so the understudy sounds more like you over time
 /// (the fidelity loop). That loop — only mull has your corrections — is the moat.
 struct ReportWriter {
-    let database: DatabaseService
+    let database: EventReading
     /// Where the last language decision is remembered (see dominantLanguage). Injectable
     /// so tests can exercise a run of borderline days without touching the real domain.
     var defaults: UserDefaults = .standard
@@ -206,8 +206,9 @@ struct ReportWriter {
     /// change — the fidelity measurement made visible without becoming a score.
     ///
     /// Deliberately a measurement and not a metric: no target, no streak, no colour, no
-    /// direction arrow (DESIGN-NORTHSTAR §1 Ritmo umano bans streaks/badges/points, §4.5
-    /// bans hurrying the user). It reports what happened, in the register of the rest of
+    /// direction arrow. Streaks, badges and points do not belong on a surface where a
+    /// person reads about their own life, and neither does anything that hurries them
+    /// along. It reports what happened, in the register of the rest of
     /// the card, and then gets out of the way. Returns nil until there is something
     /// genuinely measured — an invented "0%" on day one would be a lie about the loop.
     func fidelityNote(for date: Date) -> String? {
@@ -358,7 +359,7 @@ struct ReportWriter {
             // else's doc. Instruction-shaped text there would be read as direction
             // by the model and steer a report presented back as "what you wrote".
             // The system prompt says to ignore it; dropping it is the cheap belt.
-            .filter { !Self.looksLikeInstruction($0) }
+            .filter { !InstructionText.looksLikeInstruction($0) }
         for w in written.prefix(8) { chunks.append((w, Self.typedSourceLabel)) }
 
         var out = ""
@@ -381,22 +382,6 @@ struct ReportWriter {
         }
         if includedTyped { sources.append(Self.typedSourceLabel) }
         return (out.trimmingCharacters(in: .whitespacesAndNewlines), sources)
-    }
-
-    /// Text that reads as a directive aimed at an assistant rather than as the
-    /// user's own prose. High-precision by design — this drops a style sample,
-    /// so a false positive costs almost nothing while a miss steers the draft.
-    private static let instructionMarkers: [String] = [
-        "ignore the above", "ignore previous", "ignore all previous",
-        "disregard the above", "disregard previous",
-        "you are now", "act as", "pretend to be",
-        "new instructions", "system prompt", "system:",
-        "以上の指示を無視", "これまでの指示を無視", "あなたは今から",
-    ]
-
-    static func looksLikeInstruction(_ text: String) -> Bool {
-        let lower = text.lowercased()
-        return instructionMarkers.contains { lower.contains($0) }
     }
 
     /// Crude but honest: if the user's own writing is mostly CJK, the report is Japanese.

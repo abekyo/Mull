@@ -4,7 +4,7 @@
 # The harness must keep compiling WITHOUT GRDB — that is what makes it run in
 # seconds instead of needing the app and a host test bundle. So this list is a
 # standing constraint, not a convenience: every file here, and everything they
-# reach for, has to stay GRDB-free. It has silently rotted twice (ROADMAP §1-A),
+# reach for, has to stay GRDB-free. It has silently rotted twice (SELECTION-LAYER §6.4),
 # which is why CI runs this script on every push.
 set -euo pipefail
 
@@ -25,6 +25,8 @@ swiftc -o "$BIN" \
   Mull/Core/Redactor.swift \
   Mull/Core/TestInput.swift \
   Mull/Core/SensitiveText.swift \
+  Mull/Core/InstructionText.swift \
+  eval/EvalCore.swift \
   eval/selection_eval.swift
 
 exec "$BIN" "$@"

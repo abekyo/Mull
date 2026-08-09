@@ -16,7 +16,7 @@ struct NarrativeEngine {
 
     let analysis: DailyActivity
     let analytics: AnalyticsEngine
-    let database: DatabaseService
+    let database: EventReading
 
     /// How many activities get a sentence of their own before the rest are summed.
     private static let maxActivitySentences = 3

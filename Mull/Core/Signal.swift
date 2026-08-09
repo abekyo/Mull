@@ -49,7 +49,7 @@ enum Signal {
     /// Deliberately narrow and trade-neutral — no tool, framework, or domain
     /// words — so it fires the same for a position size, a contract clause, and a
     /// refactor. Growing this list with per-occupation vocabulary is the failure
-    /// mode to avoid (HARNESS.md 第I部 原理1).
+    /// mode to avoid.
     static func looksLikeDecision(_ text: String) -> Bool {
         let lower = text.lowercased()
         let en = ["decided", "let's go with", "we'll use", "going with",

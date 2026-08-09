@@ -2,7 +2,7 @@ import Foundation
 
 /// Configuration for one MCP ingestion source, persisted in UserDefaults.
 struct MCPSourceConfig: Codable, Equatable, Identifiable {
-    /// Connector id; should be one of `FolderOntology.rawConnectors`.
+    /// Connector id; should be one of `VaultLayout.rawConnectors`.
     var connectorID: String
     var server: MCPClient.ServerConfig
     /// Tool to call on the server to pull items (e.g. "search_messages").

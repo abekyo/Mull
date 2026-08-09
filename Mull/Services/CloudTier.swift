@@ -1,14 +1,12 @@
 import Foundation
 
 /// The cloud tier: everything the nightly run does *after* the daily summary
-/// exists — per-project deliberation, category synthesis, and prediction
-/// bookkeeping.
+/// exists — per-project deliberation and prediction bookkeeping.
 ///
 /// **For a default-configuration user this tier produces nothing.** The LLM is
-/// off by default (CLAUDE.md §9: "LLMは既定でOff"), and with `llmProvider == .off`
-/// both DeliberationEngine and SynthesisEngine fail their first `LLMClient.complete`
-/// call and return empty — so no `03_projects/*.md` briefing and no folder
-/// `index.md` is ever written. PredictionEngine is rule-based and does keep
+/// off by default (CLAUDE.md §8.1: "LLM は既定で Off"), and with `llmProvider == .off`
+/// DeliberationEngine fails its first `LLMClient.complete` call and returns empty —
+/// so no `projects/*.md` briefing is ever written. PredictionEngine is rule-based and does keep
 /// running, but its rows are read back only by its own grader; nothing in the UI
 /// surfaces them. That is roughly 750 lines of engine code whose entire output for
 /// the default install is a no-op, and the call site inside `runSummary` said
@@ -23,12 +21,10 @@ final class CloudTier {
 
     private let database: DatabaseService
     private let deliberation: DeliberationEngine
-    private let synthesis: SynthesisEngine
 
     init(database: DatabaseService, llm: LLMClient) {
         self.database = database
         self.deliberation = DeliberationEngine(database: database, llm: llm)
-        self.synthesis = SynthesisEngine(llm: llm)
     }
 
     /// Run the whole tier. Called at the tail of a successful consolidation.
@@ -38,9 +34,9 @@ final class CloudTier {
         // each project file is upserted via the Curator so user edits survive.
         await deliberation.deliberateActiveProjects()
 
-        // Synthesis tier (Phase C): fill category folder index.md files from
-        // ingested _raw data. Best-effort; no-op when the LLM is off.
-        await synthesis.synthesizeAll()
+        // The synthesis tier (Phase C) used to run here, filling each numbered
+        // folder's index.md from ingested _raw data. Both it and the folders it
+        // wrote were retired on 2026-08-09 — DIRECTION §6.1.
 
         // Epistemics: grade yesterday's behavior predictions against the log,
         // then place fresh bets. This is how proactivity earns a hit-rate

@@ -2,7 +2,9 @@ import Foundation
 import GRDB
 import os.log
 
-private let logger = Logger(subsystem: "com.mull.app", category: "Database")
+/// Shared by every DatabaseService file. Internal rather than file-private
+/// because the storage layer is now four files and they all log as "Database".
+let databaseLogger = Logger(subsystem: "com.mull.app", category: "Database")
 
 /// SQLite database layer using GRDB with WAL mode and FTS5 full-text search.
 /// Uses DatabasePool for concurrent read/write (recording writes don't block mull reads).
@@ -11,6 +13,12 @@ final class DatabaseService: Sendable {
 
     let dbPool: DatabasePool
 
+    /// Where the live file actually is. Not `primaryDatabasePath()`: the recovery
+    /// paths can land the pool on the pre-migration backup or on the temp
+    /// fallback, and anything reasoning about files *beside* the database — the
+    /// quarantined copies, above all — has to look beside the real one.
+    var databaseFilePath: String { dbPool.path }
+
     /// True when the primary database was unrecoverable and a fallback is in use.
     /// UI should show a warning when this is true.
     let isFallback: Bool
@@ -18,35 +26,52 @@ final class DatabaseService: Sendable {
     /// Human-readable reason for fallback, if any.
     let fallbackReason: String?
 
+    /// True when this handle cannot write. Only `openReadOnly` produces one.
+    /// Write methods check it and refuse rather than throwing from inside GRDB,
+    /// so a mistake reads as "MullMCP tried to write" and not "SQLITE_READONLY".
+    let isReadOnly: Bool
+
     // MARK: - Init
 
-    init() {
-        let appSupport: URL
+    /// Where the live database lives. Shared by the read-write owner (the app)
+    /// and the read-only reader (MullMCP), so the two cannot drift onto different
+    /// files — which would look exactly like "mull knows nothing about today".
+    static func applicationSupportDirectory() -> URL {
         if let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            appSupport = dir.appendingPathComponent("mull", isDirectory: true)
-        } else {
-            appSupport = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".mull", isDirectory: true)
+            return dir.appendingPathComponent("mull", isDirectory: true)
         }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".mull", isDirectory: true)
+    }
+
+    /// Under XCTest the test host is the app, so `AppState.init()` constructs a
+    /// DatabaseService on every run — against the user's real recorded history.
+    /// Sandboxing happened to make that read-only, but the suite was one
+    /// entitlement change away from mutating real data. Redirect instead.
+    static func primaryDatabasePath() -> String {
+        if MullDirectory.isRunningTests {
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent("mull-test-\(ProcessInfo.processInfo.processIdentifier).sqlite")
+                .path
+        }
+        return applicationSupportDirectory().appendingPathComponent("mull.sqlite").path
+    }
+
+    init() {
+        let appSupport = Self.applicationSupportDirectory()
 
         do {
             try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         } catch {
-            logger.error("Failed to create app support directory: \(error.localizedDescription)")
+            databaseLogger.error("Failed to create app support directory: \(error.localizedDescription)")
         }
+        // Owner-only, for the same reason the files are (FilePrivacy): the database
+        // itself is 0600, but the quarantined copies beside it are named after the
+        // day they were quarantined, and a 0755 directory hands another account on
+        // the machine that list for free.
+        FilePrivacy.protectDirectory(at: appSupport)
 
-        // Under XCTest the test host is the app, so AppState.init() constructs a
-        // DatabaseService on every run — against the user's real recorded
-        // history. Sandboxing happened to make that read-only, but the suite was
-        // one entitlement change away from mutating real data. Redirect instead.
-        let dbPath: String
-        if MullDirectory.isRunningTests {
-            dbPath = FileManager.default.temporaryDirectory
-                .appendingPathComponent("mull-test-\(ProcessInfo.processInfo.processIdentifier).sqlite")
-                .path
-        } else {
-            dbPath = appSupport.appendingPathComponent("mull.sqlite").path
-        }
+        let dbPath = Self.primaryDatabasePath()
 
         // One-time migration from the pre-rename location
         // (~/Library/Application Support/Whatly/whatly.sqlite). Moves the DB and its
@@ -91,7 +116,7 @@ final class DatabaseService: Sendable {
                 }
             }
         } catch {
-            logger.error("Primary database failed: \(error.localizedDescription)")
+            databaseLogger.error("Primary database failed: \(error.localizedDescription)")
             pool = nil
 
             // Quarantine ONLY on true corruption. Any other failure (lock
@@ -120,12 +145,12 @@ final class DatabaseService: Sendable {
             if claimsCorruption {
                 if let recovered = Self.reopenAfterCorruptionClaim(at: dbPath, config: config) {
                     pool = recovered
-                    logger.warning("Corruption reported but not reproduced on a fresh connection — primary database kept")
+                    databaseLogger.warning("Corruption reported but not reproduced on a fresh connection — primary database kept")
                 } else {
                     isCorruption = true
                 }
             } else {
-                logger.error("Failure is not corruption — primary database left untouched; using temporary fallback")
+                databaseLogger.error("Failure is not corruption — primary database left untouched; using temporary fallback")
             }
 
             if isCorruption {
@@ -141,9 +166,9 @@ final class DatabaseService: Sendable {
                     if fm.fileExists(atPath: src) {
                         do {
                             try fm.moveItem(atPath: src, toPath: dst)
-                            logger.warning("Renamed corrupted file: \(src) → \(dst)")
+                            databaseLogger.warning("Renamed corrupted file: \(src) → \(dst)")
                         } catch {
-                            logger.error("Failed to rename corrupted DB: \(error.localizedDescription)")
+                            databaseLogger.error("Failed to rename corrupted DB: \(error.localizedDescription)")
                             try? fm.removeItem(atPath: src)
                         }
                     }
@@ -152,9 +177,9 @@ final class DatabaseService: Sendable {
                 do {
                     pool = try DatabasePool(path: dbPath, configuration: config)
                     reason = "Database was corrupted and has been reset. Previous data saved to \(corruptPath)"
-                    logger.warning("\(reason!)")
+                    databaseLogger.warning("\(reason!)")
                 } catch {
-                    logger.error("Fresh database creation also failed: \(error.localizedDescription)")
+                    databaseLogger.error("Fresh database creation also failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -168,7 +193,7 @@ final class DatabaseService: Sendable {
                     pool = p
                     usedFallback = true
                     reason = "Database is running from a temporary location. Data will not persist across restarts."
-                    logger.fault("\(reason!)")
+                    databaseLogger.fault("\(reason!)")
                     break
                 }
             }
@@ -197,7 +222,7 @@ final class DatabaseService: Sendable {
         do {
             try Self.buildMigrator().migrate(activePool)
         } catch {
-            logger.fault("Database migration failed: \(error.localizedDescription)")
+            databaseLogger.fault("Database migration failed: \(error.localizedDescription)")
             let fm = FileManager.default
             let timestamp = ISO8601DateFormatter().string(from: Date())
                 .replacingOccurrences(of: ":", with: "-")
@@ -213,7 +238,7 @@ final class DatabaseService: Sendable {
                     try fm.moveItem(atPath: dbPath + ext, toPath: backupPath + ext)
                     movedAside = true
                 } catch {
-                    logger.error("Could not move aside \(dbPath + ext): \(error.localizedDescription)")
+                    databaseLogger.error("Could not move aside \(dbPath + ext): \(error.localizedDescription)")
                 }
             }
 
@@ -224,9 +249,9 @@ final class DatabaseService: Sendable {
                 reason = movedAside
                     ? "The database schema could not be upgraded, so mull started a new one. Your previous data is saved at \(backupPath)."
                     : "The database schema could not be upgraded and has been reset."
-                logger.warning("\(reason!)")
+                databaseLogger.warning("\(reason!)")
             } catch {
-                logger.fault("Could not recover from migration failure: \(error.localizedDescription)")
+                databaseLogger.fault("Could not recover from migration failure: \(error.localizedDescription)")
                 reason = "The database schema is broken and could not be reset: \(error.localizedDescription)"
                 // Re-open the original so the app still runs read-mostly rather than
                 // dying; the schema is stale but the user's data is intact.
@@ -248,9 +273,29 @@ final class DatabaseService: Sendable {
         // pre-migration backup, and those hold the same data.
         FilePrivacy.protectDatabase(atPath: activePool.path)
 
+        // Put back whatever a previous launch moved aside. The two recovery paths
+        // above rename the live database and start an empty one; without this,
+        // that rename is where the user's history ends. See QuarantineRecovery —
+        // it is idempotent, it never deletes, and it skips any file that fails its
+        // own integrity check, so running it on every launch is safe and cheap
+        // (a drained file is renamed and never looked at again).
+        //
+        // Skipped on the temporary fallback: restoring the user's history into a
+        // database that is about to be thrown away would move it from a file that
+        // survives into one that does not.
+        var recoveryNote: String?
+        if !usedFallback {
+            let outcomes = QuarantineRecovery.reattachAll(into: activePool, primaryPath: dbPath)
+            recoveryNote = QuarantineRecovery.summary(of: outcomes)
+        }
+
         dbPool = activePool
         isFallback = usedFallback
-        fallbackReason = reason
+        isReadOnly = false
+        // The recovery note matters more than the fallback note when both exist —
+        // "your data came back" is the thing a person needs to read first.
+        let notes = [recoveryNote, reason].compactMap { $0 }
+        fallbackReason = notes.isEmpty ? nil : notes.joined(separator: " ")
     }
 
     // MARK: - Cross-process migration lock
@@ -282,7 +327,7 @@ final class DatabaseService: Sendable {
                 }
                 return pool
             } catch {
-                logger.error("Corruption re-check \(attempt)/3 failed: \(error.localizedDescription)")
+                databaseLogger.error("Corruption re-check \(attempt)/3 failed: \(error.localizedDescription)")
             }
         }
         return nil
@@ -295,11 +340,11 @@ final class DatabaseService: Sendable {
     private static func acquireMigrationLock(dbPath: String) -> Int32 {
         let fd = open(dbPath + ".migrate.lock", O_CREAT | O_RDWR, 0o644)
         guard fd >= 0 else {
-            logger.warning("Could not open the migration lock; migrating unlocked.")
+            databaseLogger.warning("Could not open the migration lock; migrating unlocked.")
             return -1
         }
         if flock(fd, LOCK_EX) != 0 {
-            logger.warning("Could not take the migration lock; migrating unlocked.")
+            databaseLogger.warning("Could not take the migration lock; migrating unlocked.")
             close(fd)
             return -1
         }
@@ -347,7 +392,130 @@ final class DatabaseService: Sendable {
 
         dbPool = pool
         isFallback = false
+        isReadOnly = false
         fallbackReason = nil
+    }
+
+    /// Open the live database **read-only**, with no migration and no recovery.
+    ///
+    /// The app and the MullMCP binary both attach to the same SQLite file. Until
+    /// now both did so with full read/write and both ran the migrator, and the
+    /// comment in MullMCP's main saying "read-only access" was enforced by
+    /// nothing — the binary held a type that can `deleteAllData()`. That shared
+    /// write access is what produced the quarantines: a second writer attached to
+    /// the WAL makes a reader see a page it cannot reconcile, SQLite reports
+    /// SQLITE_CORRUPT, and the recovery path renames the user's history away.
+    /// `reopenAfterCorruptionClaim` and the migration flock treat the symptom;
+    /// this draws the boundary.
+    ///
+    /// Read-only also means:
+    /// - **no migrator.** Two processes racing `ALTER TABLE` was the other half
+    ///   of the same problem. Schema ownership belongs to the app, exclusively.
+    /// - **no quarantine, no recovery.** A reader must never rename the writer's
+    ///   database out from under it.
+    /// - **no file creation.** Opening a database that is not there fails here
+    ///   rather than silently creating an empty one and answering every question
+    ///   with "no activity" — which is indistinguishable from a broken install.
+    static func openReadOnly(at path: String? = nil) throws -> DatabaseService {
+        let target = path ?? primaryDatabasePath()
+
+        guard FileManager.default.fileExists(atPath: target) else {
+            throw ReadOnlyOpenError.noDatabase(target)
+        }
+
+        // Two ways to be read-only, and both are needed.
+        //
+        // `config.readonly` opens the file O_RDONLY, which is the strongest form
+        // and the one to prefer. But a WAL database needs its `-shm` to
+        // coordinate readers, and an O_RDONLY connection cannot create one — so
+        // the moment the app shuts down cleanly and SQLite removes the sidecars,
+        // this fails with SQLITE_CANTOPEN. "The agent asks mull something while
+        // the app is closed" is a completely ordinary situation, and answering it
+        // with "unable to open database file" would be a worse bug than the one
+        // this whole boundary exists to fix.
+        //
+        // So: try O_RDONLY first (the normal case — the app is running and the
+        // sidecars are there), and fall back to a connection that may create the
+        // -shm but has `query_only` set. SQLite enforces `query_only` itself:
+        // every INSERT, UPDATE, DELETE and DDL returns SQLITE_READONLY. What it
+        // still permits is exactly the WAL bookkeeping a reader legitimately
+        // needs. `immutable=1` would also open, and is wrong — it promises the
+        // file cannot change while the app may well be writing to it.
+        var strict = poolConfiguration()
+        strict.readonly = true
+
+        let pool: DatabasePool
+        do {
+            pool = try DatabasePool(path: target, configuration: strict)
+        } catch {
+            do {
+                pool = try openQueryOnly(at: target)
+            } catch {
+                throw ReadOnlyOpenError.cannotOpen(target, error.localizedDescription)
+            }
+        }
+
+        // The schema is the app's to own, but a reader still has to know whether
+        // it is looking at one it understands. Checking a table it needs is
+        // cheaper and more honest than checking a version number.
+        let hasSchema = (try? pool.read { db in try db.tableExists("recording_events") }) ?? false
+        guard hasSchema else { throw ReadOnlyOpenError.schemaNotReady(target) }
+
+        return DatabaseService(readOnlyPool: pool)
+    }
+
+    /// The fallback read-only mode, for a WAL database whose `-shm` is gone.
+    ///
+    /// `query_only` is enforced by SQLite exactly as hard as O_RDONLY — INSERT,
+    /// UPDATE, DELETE and DDL all return SQLITE_READONLY — but the connection is
+    /// not opened O_RDONLY, so SQLite may create the `-shm` a WAL reader needs.
+    ///
+    /// The one wrinkle is that GRDB probes write access during `DatabasePool.init`
+    /// (`CREATE TABLE grdb_issue_102; DROP TABLE`) whenever the `-wal` is missing
+    /// or empty — which is precisely this case. So `query_only` is armed *after*
+    /// init: the latch keeps it off for the connection opened during the probe,
+    /// then it is switched on for that connection explicitly and for every reader
+    /// connection the pool opens afterwards.
+    private static func openQueryOnly(at path: String) throws -> DatabasePool {
+        final class Latch: @unchecked Sendable { var armed = false }
+        let latch = Latch()
+
+        var config = poolConfiguration()
+        config.prepareDatabase { db in
+            // Runs after poolConfiguration's own pragmas — `journal_mode` and
+            // `auto_vacuum` write to the header and query_only would reject them.
+            if latch.armed { try db.execute(sql: "PRAGMA query_only = 1") }
+        }
+
+        let pool = try DatabasePool(path: path, configuration: config)
+        latch.armed = true
+        // The writer connection already exists and missed the closure above.
+        try pool.writeWithoutTransaction { try $0.execute(sql: "PRAGMA query_only = 1") }
+        return pool
+    }
+
+    private init(readOnlyPool: DatabasePool) {
+        dbPool = readOnlyPool
+        isReadOnly = true
+        isFallback = false
+        fallbackReason = nil
+    }
+
+    enum ReadOnlyOpenError: LocalizedError {
+        case noDatabase(String)
+        case cannotOpen(String, String)
+        case schemaNotReady(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .noDatabase(let path):
+                return "No mull database at \(path). Launch the mull app once so it can record and create one."
+            case .cannotOpen(let path, let detail):
+                return "Could not open \(path) read-only: \(detail)"
+            case .schemaNotReady(let path):
+                return "The database at \(path) has no recording_events table yet. Launch the mull app once to set up the schema."
+            }
+        }
     }
 
     /// A throwaway database in a unique temp directory, for tests.
@@ -607,789 +775,4 @@ final class DatabaseService: Sendable {
         return migrator
     }
 
-    // MARK: - FTS Rebuild
-
-    /// Rebuild all FTS5 indexes. Call after data import or if search results seem
-    /// stale. Returns whether the rebuild happened — ForgetService reports a
-    /// `false` to the user, because a stale index still serves up forgotten text.
-    @discardableResult
-    func rebuildFTSIndexes() -> Bool {
-        do {
-            try dbPool.write { db in
-                try db.execute(sql: "INSERT INTO recording_events_fts(recording_events_fts) VALUES('rebuild')")
-                try db.execute(sql: "INSERT INTO daily_summaries_fts(daily_summaries_fts) VALUES('rebuild')")
-                try db.execute(sql: "INSERT INTO knowledge_entries_fts(knowledge_entries_fts) VALUES('rebuild')")
-            }
-            logger.info("FTS indexes rebuilt successfully")
-            return true
-        } catch {
-            logger.error("FTS rebuild failed: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    // MARK: - Recording Events
-
-    func insertEvent(_ event: RecordingEvent) {
-        do {
-            try dbPool.write { db in
-                let r = event
-                try r.insert(db)
-            }
-        } catch {
-            logger.error("Failed to insert event: \(error.localizedDescription)")
-        }
-    }
-
-    func eventCountToday() -> Int {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        do {
-            return try dbPool.read { db in
-                try RecordingEvent
-                    .filter(Column("timestamp") >= startOfDay)
-                    .fetchCount(db)
-            }
-        } catch {
-            logger.warning("Failed to count today's events: \(error.localizedDescription)")
-            return 0
-        }
-    }
-
-    func fetchEvents(from start: Date, to end: Date) -> [RecordingEvent] {
-        do {
-            return try dbPool.read { db in
-                try RecordingEvent
-                    .filter(Column("timestamp") >= start && Column("timestamp") <= end)
-                    .order(Column("timestamp"))
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch events: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func storageBytesToday() -> Int64 {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        do {
-            return try dbPool.read { db in
-                let row = try Row.fetchOne(db, sql: """
-                    SELECT SUM(LENGTH(textContent)) as total
-                    FROM recording_events
-                    WHERE timestamp >= ?
-                """, arguments: [startOfDay])
-                return row?["total"] as? Int64 ?? 0
-            }
-        } catch {
-            logger.warning("Failed to read storage bytes: \(error.localizedDescription)")
-            return 0
-        }
-    }
-
-    // MARK: - Summaries
-
-    /// Upsert: if a summary for this date already exists (e.g. "Summarize Now" twice),
-    /// replace it with the newer version instead of silently failing.
-    func insertSummary(_ summary: DailySummary) {
-        do {
-            try dbPool.write { db in
-                let calendar = Calendar.current
-                let startOfDay = calendar.startOfDay(for: summary.date)
-                let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-                try db.execute(
-                    sql: "DELETE FROM daily_summaries WHERE date >= ? AND date < ?",
-                    arguments: [startOfDay, endOfDay]
-                )
-                let s = summary
-                try s.insert(db)
-            }
-        } catch {
-            logger.error("Failed to insert summary for \(summary.date): \(error.localizedDescription)")
-        }
-    }
-
-    func fetchSummary(for date: Date) -> DailySummary? {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: date)
-        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-        do {
-            return try dbPool.read { db in
-                try DailySummary
-                    .filter(Column("date") >= startOfDay && Column("date") < endOfDay)
-                    .fetchOne(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch summary: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    func fetchRecentSummaries(limit: Int) -> [DailySummary] {
-        do {
-            return try dbPool.read { db in
-                try DailySummary
-                    .order(Column("date").desc)
-                    .limit(limit)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch recent summaries: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    /// How many daily summaries exist. A `COUNT(*)`, because the caller that wants
-    /// this number was fetching every row — decoding each summary's whole text —
-    /// purely to ask for `.count`.
-    func summaryCount() -> Int {
-        do {
-            return try dbPool.read { db in try DailySummary.fetchCount(db) }
-        } catch {
-            logger.warning("Failed to count summaries: \(error.localizedDescription)")
-            return 0
-        }
-    }
-
-    // MARK: - Search (FTS5)
-
-    /// Build a safe FTS5 MATCH expression, or nil if the query has no usable terms.
-    ///
-    /// Terms are reduced to alphanumerics and quoted, so user punctuation — `"`,
-    /// `(`, `-`, `:`, or a bare AND/OR/NOT/NEAR — cannot produce a syntax error.
-    /// Unquoted, `re-render` or `main()` threw, got swallowed by the catch, and
-    /// surfaced to the user as "no results".
-    static func ftsMatchExpression(_ query: String) -> String? {
-        let terms = query
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-        guard !terms.isEmpty else { return nil }
-        return terms.map { "\"\($0)\"*" }.joined(separator: " ")
-    }
-
-    /// Escape a string for use inside a LIKE pattern with `ESCAPE '\'`.
-    static func likePattern(_ s: String) -> String {
-        let escaped = s
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "%", with: "\\%")
-            .replacingOccurrences(of: "_", with: "\\_")
-        return "%\(escaped)%"
-    }
-
-    func searchSummaries(query: String) -> [DailySummary] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-
-        do {
-            return try dbPool.read { db in
-                if TextScript.containsCJK(trimmed) {
-                    let p = Self.likePattern(trimmed)
-                    return try DailySummary.fetchAll(db, sql: """
-                        SELECT * FROM daily_summaries
-                        WHERE content LIKE ? ESCAPE '\\'
-                           OR learnings LIKE ? ESCAPE '\\'
-                           OR inProgress LIKE ? ESCAPE '\\'
-                        ORDER BY date DESC
-                        LIMIT 50
-                    """, arguments: [p, p, p])
-                }
-                guard let match = Self.ftsMatchExpression(trimmed) else { return [] }
-                return try DailySummary.fetchAll(db, sql: """
-                    SELECT daily_summaries.*
-                    FROM daily_summaries
-                    JOIN daily_summaries_fts ON daily_summaries.id = daily_summaries_fts.rowid
-                    WHERE daily_summaries_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT 50
-                """, arguments: [match])
-            }
-        } catch {
-            logger.warning("Failed to search summaries: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    /// Candidate fetch for the selection layer (#4): narrows by time and, when
-    /// `useFTS` is set, by full-text match — pushing the heavy reduction into
-    /// SQLite instead of loading the whole window into memory. Entity/type
-    /// faceting and ranking then run in `Selection` over this smaller set (so
-    /// rows recorded before the v5 backfill still match via recompute).
-    /// FTS terms are reduced to alphanumerics, so a query can't break FTS syntax.
-    func fetchCandidates(query: String, since: Date, useFTS: Bool, limit: Int) -> [RecordingEvent] {
-        let terms = query
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count >= 2 }
-        do {
-            return try dbPool.read { db in
-                if useFTS && !terms.isEmpty {
-                    let match = terms.map { "\($0)*" }.joined(separator: " ")
-                    return try RecordingEvent.fetchAll(db, sql: """
-                        SELECT recording_events.*
-                        FROM recording_events
-                        JOIN recording_events_fts ON recording_events.id = recording_events_fts.rowid
-                        WHERE recording_events_fts MATCH ? AND recording_events.timestamp >= ?
-                        ORDER BY rank
-                        LIMIT ?
-                    """, arguments: [match, since, limit])
-                }
-                return try RecordingEvent
-                    .filter(Column("timestamp") >= since)
-                    .order(Column("timestamp").desc)
-                    .limit(limit)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("fetchCandidates failed: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func searchEvents(query: String, limit: Int = 100) -> [RecordingEvent] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-
-        do {
-            return try dbPool.read { db in
-                if TextScript.containsCJK(trimmed) {
-                    // Walks the timestamp index newest-first and stops at LIMIT.
-                    let p = Self.likePattern(trimmed)
-                    return try RecordingEvent.fetchAll(db, sql: """
-                        SELECT * FROM recording_events
-                        WHERE textContent LIKE ? ESCAPE '\\'
-                           OR windowTitle LIKE ? ESCAPE '\\'
-                           OR appName LIKE ? ESCAPE '\\'
-                        ORDER BY timestamp DESC
-                        LIMIT ?
-                    """, arguments: [p, p, p, limit])
-                }
-                guard let match = Self.ftsMatchExpression(trimmed) else { return [] }
-                return try RecordingEvent.fetchAll(db, sql: """
-                    SELECT recording_events.*
-                    FROM recording_events
-                    JOIN recording_events_fts ON recording_events.id = recording_events_fts.rowid
-                    WHERE recording_events_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                """, arguments: [match, limit])
-            }
-        } catch {
-            logger.warning("Failed to search events: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    /// Count events in a window without materializing them.
-    ///
-    /// The nightly gate used to call `fetchEvents` (SELECT *, every row decoded
-    /// into a struct including textContent) purely to compare `.count` against a
-    /// threshold — a full-table scan into memory on every check.
-    func countEvents(from start: Date, to end: Date) -> Int {
-        do {
-            return try dbPool.read { db in
-                try RecordingEvent
-                    .filter(Column("timestamp") >= start && Column("timestamp") <= end)
-                    .fetchCount(db)
-            }
-        } catch {
-            logger.warning("Failed to count events: \(error.localizedDescription)")
-            return 0
-        }
-    }
-
-    /// Per-day event counts over a range, aggregated in SQL.
-    ///
-    /// Backs the calendar's month/year heat grid, which previously fetched every
-    /// row of the range (a full year ≈ 1.5M rows with their text) just to bucket
-    /// them by day. Keys are start-of-day in the current calendar.
-    func dailyEventCounts(from start: Date, to end: Date) -> [Date: Int] {
-        do {
-            return try dbPool.read { db in
-                let rows = try Row.fetchAll(db, sql: """
-                    SELECT date(timestamp) AS day, COUNT(*) AS n
-                    FROM recording_events
-                    WHERE timestamp >= ? AND timestamp <= ?
-                    GROUP BY day
-                """, arguments: [start, end])
-
-                let parser = DateFormatter()
-                parser.dateFormat = "yyyy-MM-dd"
-                parser.timeZone = TimeZone(identifier: "UTC")
-                parser.locale = Locale(identifier: "en_US_POSIX")
-
-                var out: [Date: Int] = [:]
-                for row in rows {
-                    guard let day: String = row["day"],
-                          let parsed = parser.date(from: day) else { continue }
-                    // date() operates on the stored UTC string; re-anchor to the
-                    // local day so callers can key by Calendar.startOfDay.
-                    out[Calendar.current.startOfDay(for: parsed)] = row["n"] ?? 0
-                }
-                return out
-            }
-        } catch {
-            logger.warning("Failed to aggregate daily counts: \(error.localizedDescription)")
-            return [:]
-        }
-    }
-
-    // MARK: - Knowledge
-
-    func insertKnowledge(_ entry: KnowledgeEntry) {
-        do {
-            try dbPool.write { db in
-                let e = entry
-                try e.insert(db)
-            }
-        } catch {
-            logger.error("Failed to insert knowledge '\(entry.topic)': \(error.localizedDescription)")
-        }
-    }
-
-    // MARK: - Predictions
-
-    func insertPrediction(_ prediction: Prediction) {
-        do {
-            try dbPool.write { db in
-                let p = prediction
-                try p.insert(db)
-            }
-        } catch {
-            logger.error("Failed to insert prediction for '\(prediction.project)': \(error.localizedDescription)")
-        }
-    }
-
-    /// Pending predictions whose due time has passed — ready to grade.
-    func fetchDuePredictions(asOf date: Date = Date()) -> [Prediction] {
-        do {
-            return try dbPool.read { db in
-                try Prediction
-                    .filter(Column("outcome") == "pending" && Column("dueAt") <= date)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch due predictions: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    /// Whether a pending prediction already exists for a project+kind (avoids dupes).
-    func hasPendingPrediction(project: String, kind: String) -> Bool {
-        do {
-            return try dbPool.read { db in
-                try Prediction
-                    .filter(Column("outcome") == "pending"
-                            && Column("project") == project
-                            && Column("kind") == kind)
-                    .fetchCount(db) > 0
-            }
-        } catch {
-            return false
-        }
-    }
-
-    func updatePrediction(_ prediction: Prediction) {
-        do {
-            try dbPool.write { db in
-                try prediction.update(db)
-            }
-        } catch {
-            logger.error("Failed to update prediction \(prediction.id ?? -1): \(error.localizedDescription)")
-        }
-    }
-
-    /// Graded predictions created within the window, for hit-rate calculation.
-    func fetchGradedPredictions(since: Date) -> [Prediction] {
-        do {
-            return try dbPool.read { db in
-                try Prediction
-                    .filter(Column("outcome") != "pending" && Column("createdAt") >= since)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch graded predictions: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func fetchAllKnowledge() -> [KnowledgeEntry] {
-        do {
-            return try dbPool.read { db in
-                try KnowledgeEntry
-                    .order(Column("sourceDate").desc)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch knowledge: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func fetchKnowledge(forProject project: String) -> [KnowledgeEntry] {
-        let query = project.lowercased()
-        do {
-            return try dbPool.read { db in
-                try KnowledgeEntry
-                    .filter(Column("project").lowercased.like("%\(query)%")
-                        || Column("relatedProjects").lowercased.like("%\(query)%"))
-                    .order(Column("sourceDate").desc)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch knowledge for project '\(project)': \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func searchKnowledge(query: String, limit: Int = 20) -> [KnowledgeEntry] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-
-        do {
-            return try dbPool.read { db in
-                if TextScript.containsCJK(trimmed) {
-                    let p = Self.likePattern(trimmed)
-                    return try KnowledgeEntry.fetchAll(db, sql: """
-                        SELECT * FROM knowledge_entries
-                        WHERE topic LIKE ? ESCAPE '\\'
-                           OR decision LIKE ? ESCAPE '\\'
-                           OR reasoning LIKE ? ESCAPE '\\'
-                           OR project LIKE ? ESCAPE '\\'
-                           OR tags LIKE ? ESCAPE '\\'
-                        ORDER BY sourceDate DESC
-                        LIMIT ?
-                    """, arguments: [p, p, p, p, p, limit])
-                }
-                guard let match = Self.ftsMatchExpression(trimmed) else { return [] }
-                return try KnowledgeEntry.fetchAll(db, sql: """
-                    SELECT knowledge_entries.*
-                    FROM knowledge_entries
-                    JOIN knowledge_entries_fts ON knowledge_entries.id = knowledge_entries_fts.rowid
-                    WHERE knowledge_entries_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                """, arguments: [match, limit])
-            }
-        } catch {
-            logger.warning("Failed to search knowledge: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    /// Find knowledge relevant to a given window title / file / topic.
-    ///
-    /// This used to hand `searchKnowledge` a pre-built expression ("swift* OR
-    /// chart*"), which then appended `*` to every whitespace-separated component —
-    /// producing `swift** OR* chart**`, an FTS5 syntax error that was caught and
-    /// returned as an empty array. The feature never once returned a result.
-    /// Terms are now passed as plain words and the OR is built here.
-    func findRelevantKnowledge(context: String, limit: Int = 3) -> [KnowledgeEntry] {
-        let words = context.components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count > 3 }
-            .prefix(5)
-        guard !words.isEmpty else { return [] }
-
-        let match = words.map { "\"\($0)\"*" }.joined(separator: " OR ")
-        do {
-            return try dbPool.read { db in
-                try KnowledgeEntry.fetchAll(db, sql: """
-                    SELECT knowledge_entries.*
-                    FROM knowledge_entries
-                    JOIN knowledge_entries_fts ON knowledge_entries.id = knowledge_entries_fts.rowid
-                    WHERE knowledge_entries_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                """, arguments: [match, limit])
-            }
-        } catch {
-            logger.warning("findRelevantKnowledge failed: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    // MARK: - Memory
-
-    func insertMemory(_ entry: MemoryEntry) {
-        do {
-            try dbPool.write { db in
-                let e = entry
-                try e.insert(db)
-            }
-        } catch {
-            logger.error("Failed to insert memory '\(entry.name)': \(error.localizedDescription)")
-        }
-    }
-
-    func fetchAllMemories() -> [MemoryEntry] {
-        do {
-            return try dbPool.read { db in
-                try MemoryEntry
-                    .order(Column("updatedAt").desc)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch memories: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func updateMemory(_ entry: MemoryEntry) {
-        do {
-            try dbPool.write { db in
-                try entry.update(db)
-            }
-        } catch {
-            logger.error("Failed to update memory '\(entry.name)': \(error.localizedDescription)")
-        }
-    }
-
-    /// Delete exactly one memory, keyed by its unique `filePath` — never by
-    /// name. Two memories can share a name, and `DELETE WHERE name=?` would
-    /// wipe them all while removing only one file, orphaning the rest.
-    @discardableResult
-    func deleteMemory(_ entry: MemoryEntry) -> Bool {
-        do {
-            try dbPool.write { db in
-                try db.execute(sql: "DELETE FROM memory_entries WHERE filePath = ?",
-                               arguments: [entry.filePath])
-            }
-            return true
-        } catch {
-            logger.error("Failed to delete memory '\(entry.name)': \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    // MARK: - mull Lock (3-Gate System)
-
-    func fetchmullLock() -> mullLock? {
-        do {
-            return try dbPool.read { db in
-                try mullLock.fetchOne(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch mull lock: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    func updatemullLock(_ lock: mullLock) {
-        do {
-            try dbPool.write { db in
-                try lock.update(db)
-            }
-        } catch {
-            logger.error("Failed to update mull lock: \(error.localizedDescription)")
-        }
-    }
-
-    func incrementSessionCount() {
-        do {
-            try dbPool.write { db in
-                try db.execute(sql: """
-                    UPDATE mull_lock SET sessionsSinceLast = sessionsSinceLast + 1
-                """)
-            }
-        } catch {
-            logger.error("Failed to increment session count: \(error.localizedDescription)")
-        }
-    }
-
-    // MARK: - Data Management
-
-    func deleteAllData() throws {
-        try dbPool.write { db in
-            try db.execute(sql: "DELETE FROM recording_events")
-            try db.execute(sql: "DELETE FROM daily_summaries")
-            try db.execute(sql: "DELETE FROM memory_entries")
-            try db.execute(sql: "DELETE FROM knowledge_entries")
-            try db.execute(sql: "DELETE FROM predictions")
-            try db.execute(sql: "UPDATE mull_lock SET lastSummaryAt = NULL, sessionsSinceLast = 0")
-
-            // The delete triggers (v7) evict each row's text as it goes, but an
-            // explicit rebuild guarantees the shadow tables are empty even if a
-            // trigger was missing when some row was written. "Delete all" has to
-            // mean the text is gone from the file, not just from the base tables.
-            try db.execute(sql: "INSERT INTO recording_events_fts(recording_events_fts) VALUES('rebuild')")
-            try db.execute(sql: "INSERT INTO daily_summaries_fts(daily_summaries_fts) VALUES('rebuild')")
-            try db.execute(sql: "INSERT INTO knowledge_entries_fts(knowledge_entries_fts) VALUES('rebuild')")
-        }
-    }
-
-    /// Delete events recorded at or after `date` — backs Settings' "forget the
-    /// last hour/today" actions, which previously ran raw SQL from the View.
-    func deleteEvents(since date: Date) throws {
-        try dbPool.write { db in
-            try db.execute(sql: "DELETE FROM recording_events WHERE timestamp >= ?", arguments: [date])
-        }
-    }
-
-    // MARK: - Forget (time-scoped erasure)
-    //
-    // Raw events are only the INPUT. Within 60 seconds mull derives context files
-    // from them, and overnight it derives summaries, memories and knowledge. So a
-    // forget that stops at `recording_events` erases the source and leaves every
-    // conclusion drawn from it standing. These queries let ForgetService reach the
-    // derived layers too — and, first, tell the user what is about to go.
-
-    func deleteEvents(in interval: DateInterval) throws {
-        try dbPool.write { db in
-            try db.execute(sql: "DELETE FROM recording_events WHERE timestamp >= ? AND timestamp <= ?",
-                           arguments: [interval.start, interval.end])
-        }
-    }
-
-    /// Memories mull *formed* inside the window — these are conclusions about the
-    /// user drawn from the events being erased, so they go with them.
-    func fetchMemories(createdIn interval: DateInterval) -> [MemoryEntry] {
-        do {
-            return try dbPool.read { db in
-                try MemoryEntry
-                    .filter(Column("createdAt") >= interval.start && Column("createdAt") <= interval.end)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch memories created in window: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    /// Memories that predate the window but were *revised* inside it. Their text
-    /// is a blend of the erased window and everything before it, and mull cannot
-    /// unmix the two — so it keeps them and reports them rather than deleting a
-    /// month of accumulated understanding to erase fifteen minutes of it.
-    func fetchMemories(revisedIn interval: DateInterval) -> [MemoryEntry] {
-        do {
-            return try dbPool.read { db in
-                try MemoryEntry
-                    .filter(Column("updatedAt") >= interval.start && Column("updatedAt") <= interval.end)
-                    .filter(Column("createdAt") < interval.start)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch memories revised in window: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func deleteMemories(_ entries: [MemoryEntry]) throws {
-        guard !entries.isEmpty else { return }
-        try dbPool.write { db in
-            for entry in entries {
-                try db.execute(sql: "DELETE FROM memory_entries WHERE filePath = ?",
-                               arguments: [entry.filePath])
-            }
-        }
-    }
-
-    /// Daily summaries whose subject day overlaps the window.
-    func fetchSummaries(in interval: DateInterval) -> [DailySummary] {
-        do {
-            return try dbPool.read { db in
-                try DailySummary
-                    .filter(Column("date") >= Calendar.current.startOfDay(for: interval.start)
-                            && Column("date") <= interval.end)
-                    .order(Column("date").asc)
-                    .fetchAll(db)
-            }
-        } catch {
-            logger.warning("Failed to fetch summaries in window: \(error.localizedDescription)")
-            return []
-        }
-    }
-
-    func deleteSummaries(_ summaries: [DailySummary]) throws {
-        guard !summaries.isEmpty else { return }
-        try dbPool.write { db in
-            for summary in summaries where summary.id != nil {
-                try db.execute(sql: "DELETE FROM daily_summaries WHERE id = ?", arguments: [summary.id])
-            }
-        }
-    }
-
-    func countKnowledge(sourcedIn interval: DateInterval) -> Int {
-        do {
-            return try dbPool.read { db in
-                try KnowledgeEntry
-                    .filter(Column("sourceDate") >= interval.start && Column("sourceDate") <= interval.end)
-                    .fetchCount(db)
-            }
-        } catch {
-            logger.warning("Failed to count knowledge in window: \(error.localizedDescription)")
-            return 0
-        }
-    }
-
-    func deleteKnowledge(sourcedIn interval: DateInterval) throws {
-        try dbPool.write { db in
-            try db.execute(sql: "DELETE FROM knowledge_entries WHERE sourceDate >= ? AND sourceDate <= ?",
-                           arguments: [interval.start, interval.end])
-        }
-    }
-
-    func deleteEventsOlderThan(days: Int) throws {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
-        try dbPool.write { db in
-            try db.execute(sql: "DELETE FROM recording_events WHERE timestamp < ?", arguments: [cutoff])
-        }
-    }
-
-    func deleteSummariesOlderThan(days: Int) throws {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
-        try dbPool.write { db in
-            try db.execute(sql: "DELETE FROM daily_summaries WHERE date < ?", arguments: [cutoff])
-        }
-    }
-
-    /// Reclaim disk space after bulk deletes.
-    ///
-    /// `PRAGMA incremental_vacuum` only reclaims pages when the database was
-    /// *created* with auto_vacuum = INCREMENTAL. Databases that predate that
-    /// setting — including every `whatly.sqlite` migrated in at init — report
-    /// auto_vacuum = NONE and silently ignore it, so the file never shrinks after
-    /// a delete. Fall back to a full VACUUM for those.
-    ///
-    /// Returns whether the pages were actually reclaimed. Callers cleaning up
-    /// after a *forget* must report a `false`: until the vacuum runs, the
-    /// deleted text is still sitting in unreferenced pages of the file.
-    @discardableResult
-    func vacuum() -> Bool {
-        do {
-            let mode = try dbPool.read { db in
-                try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") ?? 0
-            }
-            if mode == 2 {   // INCREMENTAL
-                try dbPool.write { db in
-                    try db.execute(sql: "PRAGMA incremental_vacuum")
-                }
-            } else {
-                // Full VACUUM rewrites the file, so it cannot run inside a
-                // transaction — writeWithoutTransaction is required here.
-                try dbPool.writeWithoutTransaction { db in
-                    try db.execute(sql: "VACUUM")
-                }
-            }
-            return true
-        } catch {
-            logger.warning("Vacuum failed: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    /// Actual database file size on disk (more accurate than summing text columns).
-    func totalStorageBytes() -> Int64 {
-        guard let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first?.appendingPathComponent("mull/mull.sqlite") else { return 0 }
-
-        let attrs = try? FileManager.default.attributesOfItem(atPath: appSupport.path)
-        let mainSize = attrs?[.size] as? Int64 ?? 0
-
-        // WAL file
-        let walPath = appSupport.path + "-wal"
-        let walAttrs = try? FileManager.default.attributesOfItem(atPath: walPath)
-        let walSize = walAttrs?[.size] as? Int64 ?? 0
-
-        return mainSize + walSize
-    }
 }

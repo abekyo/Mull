@@ -32,7 +32,6 @@ targets:
       properties:
         LSUIElement: false
         NSAccessibilityUsageDescription: "Mull uses Accessibility to read on-screen text and record your activity for daily summaries."
-        NSMicrophoneUsageDescription: "Mull can optionally record audio for meeting transcription."
         NSCalendarsUsageDescription: "Mull reads your calendar to give AI context about your schedule."
         NSCalendarsFullAccessUsageDescription: "Mull reads your calendar to give AI context about your schedule."
         NSAppleEventsUsageDescription: "Mull asks your browser for the address of the page you are viewing, and Mail for the subject and sender of recent messages. It never reads message bodies."
@@ -41,7 +40,11 @@ targets:
       properties:
         com.apple.security.app-sandbox: false
         com.apple.security.automation.apple-events: true
-        com.apple.security.device.audio-input: true
+        # No microphone entitlement. Audio capture is a stated non-goal
+        # and there is no AVFoundation/CoreAudio code in the
+        # tree — an app that keeps keystrokes cannot also declare a permission
+        # it never uses, because §8.3 makes "you can read the code" the whole
+        # basis of trusting it.
         com.apple.security.network.client: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
@@ -54,6 +57,11 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
+        # Actor isolation was documented in comments and enforced by nothing
+        # (0 actors, 48 @MainActor, 63 Task, 17 timers, 6 NSLock). "targeted"
+        # checks the code that already opted in — which is now the whole capture
+        # path — without demanding a full Swift 6 migration of the frozen UI.
+        SWIFT_STRICT_CONCURRENCY: targeted
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: true
@@ -107,6 +115,11 @@ targets:
         PRODUCT_NAME: MullTests
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
+        # Actor isolation was documented in comments and enforced by nothing
+        # (0 actors, 48 @MainActor, 63 Task, 17 timers, 6 NSLock). "targeted"
+        # checks the code that already opted in — which is now the whole capture
+        # path — without demanding a full Swift 6 migration of the frozen UI.
+        SWIFT_STRICT_CONCURRENCY: targeted
         GENERATE_INFOPLIST_FILE: true
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Mull.app/Contents/MacOS/Mull"
         BUNDLE_LOADER: "$(TEST_HOST)"
@@ -137,6 +150,11 @@ targets:
         PRODUCT_NAME: MullMCP
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
+        # Actor isolation was documented in comments and enforced by nothing
+        # (0 actors, 48 @MainActor, 63 Task, 17 timers, 6 NSLock). "targeted"
+        # checks the code that already opted in — which is now the whole capture
+        # path — without demanding a full Swift 6 migration of the frozen UI.
+        SWIFT_STRICT_CONCURRENCY: targeted
         GENERATE_INFOPLIST_FILE: true
       # This binary is copied into Mull.app/Contents/Helpers, so notarization
       # inspects it too: an embedded executable without the hardened runtime

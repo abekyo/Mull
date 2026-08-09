@@ -36,12 +36,14 @@ enum Curator {
             ? """
             # 自分について、AI に必ず正しく伝えたいこと
 
-            > mull はこのファイルを絶対に上書きしません。
+            > ここに**あなたが書いた行**を mull が書き換えることはありません。
+            > （mull がこのファイルに書くのは2つだけ。この説明文を最初に置くときと、
+            > 設定画面で保存したプロフィールの回答を、印で囲んだ区画に入れるときです。）
             > ここに書いた行がそのまま me.md の先頭に載り、mull の自動推測より優先されます。
             > 自動では間違うこと・知りようがないことを、ここで確定できます。
             >
             > 例:
-            > - 複数の事業を経営。いまの最優先は FX。
+            > - 平日の午後はレビューに使う。午前は割り込みを入れない。
             > - 仕事は日本語。AI の返答も日本語で。
             >
             > 見出し（`#`）と引用（`>`）の行は読み飛ばされるので、この説明は消しても残しても構いません。
@@ -52,12 +54,15 @@ enum Curator {
             : """
             # Facts AI should always get right about you
 
-            > mull NEVER overwrites this file.
+            > No line **you** write here is ever rewritten by mull.
+            > (mull writes to this file in exactly two ways: laying down this note in the
+            > first place, and replacing the marked-off section holding the profile
+            > answers you saved in Settings.)
             > Lines you write here go straight to the top of me.md, above anything mull
             > guesses on its own — use it for what auto-detection gets wrong or cannot know.
             >
             > For example:
-            > - Founder running several businesses; FX trading is the current priority.
+            > - Afternoons are for review; mornings are not to be interrupted.
             > - I work in Japanese; AI should reply in Japanese.
             >
             > Heading (`#`) and quote (`>`) lines are skipped, so keep or delete this note
@@ -82,8 +87,8 @@ enum Curator {
     /// over a month.
     ///
     /// Two constraints shape the fix. mull must not keep publishing content that
-    /// says nothing; and mull must not edit a file whose own header promises
-    /// "you own this file, mull NEVER overwrites it". So the filtering happens at
+    /// says nothing; and mull must not edit a line the user wrote in a file whose
+    /// own header promises exactly that (CLAUDE.md §7.4). So the filtering happens at
     /// *read* time — the file on disk is untouched — and the withheld lines are
     /// returned rather than dropped silently, so a surface can tell the user what
     /// is being ignored and why. Deleting someone's writing without telling them
@@ -186,8 +191,17 @@ enum Curator {
             meta: [("updated", timestamp),
                    ("layer", "me.md — durable facts, ~200 tokens, always safe to include"),
                    ("sources", "me.pinned.md (yours) + nightly consolidation (mull's)")],
-            note: "Pinned and edited blocks win over mull's own. Correct anything here in place, "
-                + "or in `me.pinned.md`. For live work, call `whats_active_now` / `search` — it is not kept here.")
+            // "Correct anything here in place" was addressed to whoever opens the raw
+            // file in an editor, where it is true — every block below carries a
+            // provenance marker, and one you rewrite is promoted to `human` and never
+            // touched again. Read in mull's own Files tab it was a lie: that surface
+            // strips the markers to display them, so it refuses to write the file back
+            // and shows a lock instead. Say which is which, and name the place mull
+            // does take corrections.
+            note: "Your corrections win over mull's own text. In mull, write them under "
+                + "\"What you've told mull yourself\" at the foot of About Me (that is `me.pinned.md`); "
+                + "in any other editor, rewrite a block here and mull will stop touching it. "
+                + "For live work, call `whats_active_now` / `search` — it is not kept here.")
     }
 
     static func nowHeader(timestamp: String) -> String {
@@ -278,7 +292,7 @@ enum Curator {
                                       path: path, context: contextSnapshotProvider?())
         guard !cards.isEmpty else { return }
         for card in cards {
-            _ = MullDirectory.write(card.render(), to: "06_knowledge/corrections/\(card.id).md")
+            _ = MullDirectory.write(card.render(), to: "\(CorrectionIndex.directory)/\(card.id).md")
         }
         let onDisk = CorrectionIndex.parseLedger(MullDirectory.read(CorrectionIndex.ledgerPath) ?? "")
         let merged = CorrectionIndex.merge(onDisk, CorrectionIndex.fold(cards))

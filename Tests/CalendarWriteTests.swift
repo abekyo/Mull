@@ -115,3 +115,61 @@ final class TimeFormatTests: XCTestCase {
         XCTAssertEqual(Set(labels).count, 24, "two hours cannot carry the same label")
     }
 }
+
+/// How a month cell's chips are ordered.
+///
+/// A month grid has no hour axis, so a 14:00 meeting and a day of PTO are both
+/// simply "on that day" and share one list — and the order of that list decides
+/// which of them survives the cell's two-or-three-chip limit.
+final class CalendarMergeTests: XCTestCase {
+
+    private var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        return cal
+    }
+
+    private func event(_ title: String, hour: Int, allDay: Bool = false) -> CalendarEvent {
+        let start = calendar.date(from: DateComponents(year: 2026, month: 8, day: 10,
+                                                       hour: hour))!
+        return CalendarEvent(title: title, start: start,
+                             end: start.addingTimeInterval(3600), location: nil,
+                             calendarColor: CGColor(gray: 0, alpha: 1), isAllDay: allDay)
+    }
+
+    private var day: Date {
+        calendar.date(from: DateComponents(year: 2026, month: 8, day: 10))!
+    }
+
+    /// The bug: all-day events were appended *after* the timed ones, so a whole day
+    /// of PTO sat below a 14:00 meeting and was the first thing counted away into
+    /// "+2 more" — the one commitment least able to spare the room.
+    func testDayShapedCommitmentsComeFirst() {
+        let merged = CalendarService.merged(
+            timed: [day: [event("Standup", hour: 9), event("Review", hour: 14)]],
+            allDay: [day: [event("PTO", hour: 0, allDay: true)]]
+        )
+
+        XCTAssertEqual(merged[day]?.map(\.title), ["PTO", "Standup", "Review"])
+    }
+
+    func testTimedEventsKeepTheirOrderOfTheDay() {
+        let merged = CalendarService.merged(
+            timed: [day: [event("Late", hour: 16), event("Early", hour: 8)]],
+            allDay: [:]
+        )
+
+        XCTAssertEqual(merged[day]?.map(\.title), ["Early", "Late"])
+    }
+
+    func testADayWithOnlyOneKindStillAppears() {
+        let onlyAllDay = CalendarService.merged(
+            timed: [:], allDay: [day: [event("Birthday", hour: 0, allDay: true)]])
+
+        XCTAssertEqual(onlyAllDay[day]?.map(\.title), ["Birthday"])
+    }
+
+    func testNothingInNothingOut() {
+        XCTAssertTrue(CalendarService.merged(timed: [:], allDay: [:]).isEmpty)
+    }
+}

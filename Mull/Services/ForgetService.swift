@@ -207,6 +207,19 @@ enum ForgetService {
         try layer("memories") { try database.deleteMemories(plan.memories) }
         try layer("knowledge entries") { try database.deleteKnowledge(sourcedIn: plan.interval) }
 
+        // 1b. The same window, in every copy of the database that is not the live
+        //     one. A `.corrupt-*` quarantine is a copy a future launch will merge
+        //     back in — so without this, forgetting 15:00 and then relaunching can
+        //     hand 15:00 straight back — and a drained `.reattached-*` is a copy
+        //     that simply sits there holding the window forever. Scrubbed rather
+        //     than deleted: a pending quarantine holds rows the live database does
+        //     not, and taking the whole file to erase fifteen minutes would forget
+        //     months nobody asked to forget.
+        result.failedFiles += QuarantineRecovery.scrub(
+            interval: plan.interval,
+            memoryFilePaths: plan.memories.map(\.filePath),
+            besidePrimary: database.databaseFilePath)
+
         // 2. The memory files those rows pointed at, and the index entries that
         //    linked to them — otherwise MEMORY.md keeps advertising a description
         //    of the forgotten window and links into a hole.

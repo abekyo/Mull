@@ -3,11 +3,14 @@ import Foundation
 /// How far one piece of text had to travel to become another, on a 0…1 scale.
 ///
 /// This exists for one measurement: the distance between the draft the understudy
-/// wrote and the text the user actually kept. CLAUDE.md's roadmap ("fidelity の実測:
-/// 編集距離が日ごとに縮むことをログで確認") and DESIGN-NORTHSTAR §3.5 ("fidelity >
-/// capability —「あなたらしさ」を測り、磨く(編集距離の縮み)") both stake the product on
-/// that number shrinking over time, and until now nothing in mull computed it — the
-/// word "fidelity" appeared eight times in comments and zero times in an expression.
+/// wrote and the text the user actually kept. Fidelity — how close mull gets to what
+/// the person would have written themselves — is staked on that number shrinking over
+/// time, and until now nothing in mull computed it: the word "fidelity" appeared eight
+/// times in comments and zero times in an expression.
+///
+/// What it feeds now is not style. Every edit is a labelled example of what should and
+/// should not have been selected, which is the one training signal a capture tool that
+/// nobody corrects cannot have (CLAUDE.md §7.3).
 enum EditDistance {
 
     /// Characters compared before the inputs are truncated.

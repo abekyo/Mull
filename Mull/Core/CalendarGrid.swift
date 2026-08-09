@@ -134,6 +134,91 @@ enum CalendarGrid {
         return (laneX + width * CGFloat(span.column), width)
     }
 
+    // MARK: - The all-day band
+
+    /// A day-shaped commitment asking to be drawn above the hour grid — a flight, a
+    /// week of PTO, a birthday. Carries its own identity because the band draws one
+    /// bar per commitment and has to find the event again to open it.
+    struct DayInterval: Equatable {
+        let id: String
+        let start: Date
+        let end: Date
+
+        init(id: String, start: Date, end: Date) {
+            self.id = id
+            self.start = start
+            self.end = end
+        }
+    }
+
+    /// Where one bar sits in the band: the first displayed column it covers, how many
+    /// it covers, the lane it holds for the whole of that run, and whether it runs
+    /// past either edge of what is on screen.
+    struct Bar: Equatable, Identifiable {
+        let id: String
+        var column: Int
+        var span: Int
+        var lane: Int = 0
+        var continuesBefore: Bool = false
+        var continuesAfter: Bool = false
+    }
+
+    /// Lay day-shaped commitments across the days on screen.
+    ///
+    /// The band used to be one independent stack of chips per column, fed by a
+    /// dictionary that files a multi-day event under *every* day it covers. That drew
+    /// a four-day trip as four separate outlined chips carrying the same title — four
+    /// bookings, as far as the eye is concerned — and, because each column stacked
+    /// its own chips with no memory of its neighbours, a bar could sit in the second
+    /// row on Monday and the first on Tuesday the moment a one-day event above it
+    /// ended.
+    ///
+    /// So: one bar per commitment, and a lane held for the length of its run. Lanes
+    /// are handed out greedily in column order, which for intervals is the optimal
+    /// colouring — a bar never takes a lane a longer-running one still needs.
+    /// Ends that leave the range are reported rather than rounded off, so a trip that
+    /// began last Thursday cannot read as having begun on Monday.
+    static func allDayBars(_ intervals: [DayInterval],
+                           days: [Date],
+                           calendar: Calendar = .current) -> [Bar] {
+        guard !days.isEmpty else { return [] }
+        let columns = days.map { calendar.startOfDay(for: $0) }
+
+        var bars: [Bar] = []
+        for interval in intervals {
+            let first = calendar.startOfDay(for: interval.start)
+            // The last *moment* it occupies, not its end: an all-day event's end
+            // lands on midnight or on 23:59:59 depending on where it came from, and
+            // stepping back a second reads both without inventing a trailing day.
+            // Same rule as `CalendarService.dayEvents`, which fills the dictionary.
+            let last = calendar.startOfDay(
+                for: max(interval.end.addingTimeInterval(-1), interval.start))
+            let covered = columns.indices.filter { columns[$0] >= first && columns[$0] <= last }
+            guard let column = covered.first, let endColumn = covered.last else { continue }
+
+            bars.append(Bar(id: interval.id,
+                            column: column,
+                            span: endColumn - column + 1,
+                            continuesBefore: first < columns[column],
+                            continuesAfter: last > columns[endColumn]))
+        }
+
+        // Longest first where two begin on the same day, so the week-long thing sits
+        // above the afternoon of it — and `id` last, so the same week never lays
+        // itself out two different ways between one load and the next.
+        bars.sort { ($0.column, -$0.span, $0.id) < ($1.column, -$1.span, $1.id) }
+
+        var laneFreeFrom: [Int] = []
+        for i in bars.indices {
+            let free = laneFreeFrom.firstIndex { $0 <= bars[i].column }
+            let lane = free ?? laneFreeFrom.count
+            if free == nil { laneFreeFrom.append(0) }
+            laneFreeFrom[lane] = bars[i].column + bars[i].span
+            bars[i].lane = lane
+        }
+        return bars
+    }
+
     // MARK: - The time axis
 
     /// How far down a column a moment sits, measured from that day's midnight.
@@ -175,6 +260,52 @@ enum CalendarGrid {
         let midnight = calendar.startOfDay(for: day)
         let next = calendar.date(byAdding: .day, value: 1, to: midnight) ?? midnight.addingTimeInterval(86_400)
         return CGFloat(next.timeIntervalSince(midnight) / 3600) * hourHeight
+    }
+
+    // MARK: - Dragging a span
+
+    /// Where a dragged span's start lands: `shift` seconds down the axis and
+    /// `dayDelta` columns across, snapped, and held inside the day it was dropped on.
+    ///
+    /// The clamp is the point. A drag used to add its shift to the start and stop
+    /// there, so nudging an 00:15 meeting upward by a few points moved it to *the
+    /// previous day* — and, because a span is drawn at its offset from its own
+    /// midnight, the card leapt from the top of the column to the bottom of the same
+    /// column on the way. The same wrap happened downward at 23:45. Moving between
+    /// days is now something the pointer asks for sideways, in whole columns, and
+    /// never something the axis does to you by accident.
+    ///
+    /// Measured in elapsed seconds from midnight rather than in wall-clock hours, so
+    /// a 23- or 25-hour day clamps to its real length like everything else here.
+    static func draggedStart(from start: Date,
+                             shift: TimeInterval,
+                             dayDelta: Int,
+                             minutes: Int = 15,
+                             calendar: Calendar = .current) -> Date {
+        let originDay = calendar.startOfDay(for: start)
+        let targetDay = calendar.date(byAdding: .day, value: dayDelta, to: originDay) ?? originDay
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: targetDay)
+            ?? targetDay.addingTimeInterval(86_400)
+
+        let elapsed = start.timeIntervalSince(originDay) + shift
+        let moved = snapped(targetDay.addingTimeInterval(elapsed),
+                            minutes: minutes, rounding: .nearest)
+        // The last snap point that still begins on the target day. Clamping before
+        // snapping would let the snap push it back over the boundary it was held at.
+        let last = max(nextDay.addingTimeInterval(-TimeInterval(max(minutes, 1) * 60)), targetDay)
+        return min(max(moved, targetDay), last)
+    }
+
+    /// How many columns sideways a drag has asked for, given the width of one.
+    /// Clamped to the days actually on screen: an event dragged off the edge of the
+    /// week would otherwise be written to a day the reader cannot see it land on.
+    static func draggedColumns(_ translation: CGFloat,
+                               columnWidth: CGFloat,
+                               from column: Int,
+                               columns: Int) -> Int {
+        guard columnWidth > 1, columns > 1 else { return 0 }
+        let asked = Int((translation / columnWidth).rounded())
+        return min(max(column + asked, 0), columns - 1) - column
     }
 
     enum Rounding { case down, up, nearest }

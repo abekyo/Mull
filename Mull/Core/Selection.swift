@@ -19,11 +19,16 @@ struct Selection {
         let eventID: Int64?
 
         /// Cited one-liner for an MCP response.
+        ///
+        /// `text` is captured material — a clipboard entry, a window body — which
+        /// means a third party may have written it, and this line is about to be
+        /// read by an agent that holds tool permissions. Marked here rather than at
+        /// each call site so every consumer of a ranked slice gets the same frame.
         func line(_ formatter: DateFormatter) -> String {
             let when = formatter.string(from: timestamp)
             let ent = entity.map { " {\($0)}" } ?? ""
             let app = app.map { " [\($0)]" } ?? ""
-            return "- \(when)\(app)\(ent) \(type): \(text)"
+            return "- \(when)\(app)\(ent) \(type): \(InstructionText.marked(text))"
         }
     }
 

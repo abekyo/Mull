@@ -8,7 +8,7 @@ struct IngestedItem: Codable, Equatable {
     /// Stable id from the source, used for dedup (e.g. message id, event id).
     let id: String
     let timestamp: Date
-    /// Connector id this came from (matches FolderOntology.rawConnectors).
+    /// Connector id this came from (matches VaultLayout.rawConnectors).
     let source: String
     let title: String
     /// Short, privacy-safe summary. Connectors must not put secrets here.
@@ -29,7 +29,7 @@ struct IngestedItem: Codable, Equatable {
 /// A pull-based source mull ingests from. The pull is mechanical and must not
 /// require an LLM (per Direction v3: "just pulling MCP data doesn't need AI").
 protocol IngestionConnector {
-    /// Stable id; should match one of `FolderOntology.rawConnectors`.
+    /// Stable id; should match one of `VaultLayout.rawConnectors`.
     var id: String { get }
     /// Pull the latest items. Throwing is fine — IngestionService isolates failures.
     func pull() async throws -> [IngestedItem]

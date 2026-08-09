@@ -427,11 +427,19 @@ struct HomeTab: View {
 
                 // A Grid, so the bars beside the names start on one shared line —
                 // that alignment is what makes the strata readable as a comparison.
-                // The name column sizes itself to the longest of the three names
-                // instead of a fixed 120pt, which cut anything past ~15 characters
-                // (about eight in Japanese) permanently. The cap keeps a pathological
-                // title from squeezing the bars into meaninglessness; past it, the
-                // full name is on hover.
+                //
+                // The name column takes the width its longest name asks for, and the
+                // bar takes the rest. It used to be capped at 220pt, which is a
+                // number with nothing behind it: on a normal window the bars had
+                // some 700pt of empty track beside them while every Japanese project
+                // name was being cut at about fifteen characters. Measured: the three
+                // names on this Mac wanted 249–264pt against a cap of 220.
+                //
+                // The cap existed to stop a pathological title (a raw window title
+                // that became a project name) from squeezing the bars into
+                // meaninglessness. A floor under the *bar* says that directly and
+                // costs nothing when the names are ordinary: past it the name is what
+                // gives way, and the whole of it is on hover.
                 Grid(alignment: .leading, horizontalSpacing: DS.md, verticalSpacing: DS.sm) {
                     ForEach(top) { project in
                         GridRow {
@@ -439,9 +447,9 @@ struct HomeTab: View {
                                 .font(DS.bodyFont)
                                 .foregroundStyle(DS.ink)
                                 .lineLimit(1)
-                                .frame(maxWidth: 220, alignment: .leading)
                                 .help(project.name)
                             strataBar(fraction: project.totalDuration / maxDur)
+                                .frame(minWidth: 160)
                             Text(project.totalDurationFormatted)
                                 .font(DS.microFont)
                                 .foregroundStyle(DS.inkFaint)
@@ -893,17 +901,39 @@ struct HomeTab: View {
                     }
                     .frame(width: 12)
 
+                    // Both of these are one word each, and neither may be cut: a date
+                    // and a duration are the whole of what the row measures.
+                    //
+                    // A hard 65pt could not hold the date. It fits "8/9 (Sun)"
+                    // (56pt) and not "12/31 (Thu)" (68pt), so from October the
+                    // column began cutting itself — and `microFont` scales with
+                    // Dynamic Type, which put both columns over at the larger text
+                    // sizes whatever the month. `fixedSize` + `minWidth` makes the
+                    // number a floor rather than a ceiling: nothing is ever chopped,
+                    // and the column widens instead. (Same fix, same reason, as the
+                    // Live tab's clock column.)
+                    //
+                    // 76, not 68: the floor has to clear the *widest* reading the
+                    // format can produce, or rows with a short date and rows with a
+                    // long one sit at two different widths and the columns to their
+                    // right go ragged. Measured across locales, `M/d (EEE)` tops out
+                    // at "12/31 (jeu.)" — 74pt.
                     Text(session.dateFormatted)
                         .font(DS.microFont)
                         .foregroundStyle(isLast ? DS.inkDim : DS.inkFaint)
-                        .frame(width: 65, alignment: .leading)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(minWidth: 76, alignment: .leading)
 
-                    // 48pt, not 40: "1h 45m" is seven mono glyphs at 10pt, which is
-                    // ~42pt — the old width cut the longest durations to "1h 4…".
+                    // 48 clears the longest duration a session can carry ("12h 45m",
+                    // 43pt) for the same reason: every row lands on the floor, so
+                    // they all line up.
                     Text(session.durationFormatted)
                         .font(DS.microFont)
                         .foregroundStyle(isLast ? DS.moon : DS.inkDim)
-                        .frame(width: 48, alignment: .trailing)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(minWidth: 48, alignment: .trailing)
 
                     if !session.mainLabel.isEmpty && session.mainLabel != project.name {
                         Text(session.mainLabel)

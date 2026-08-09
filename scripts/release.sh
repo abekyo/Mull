@@ -233,7 +233,7 @@ done
 #
 # A plain read-only .dmg with an /Applications symlink: the gesture every Mac
 # user already knows, and nothing to learn. No background art, no window
-# geometry — that is DESIGN work, and it is frozen (CLAUDE.md §9).
+# geometry — that is visual design work, and none is being done.
 
 log "Building the disk image"
 rm -rf "$STAGE" "$DMG"

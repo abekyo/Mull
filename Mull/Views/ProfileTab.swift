@@ -5,8 +5,9 @@ import SwiftUI
 // This screen used to be an instrument panel: a 2×2 grid of chart cards, a
 // weighted keyword cloud, an unlabelled mix of 7-day and 30-day windows, and a
 // count set at heading scale that read as a productivity score.
-// DESIGN-NORTHSTAR §1 (Il bello) forbids "計器盤・カードの羅列"; CLAUDE.md §3.6
-// forbids the dashboard register outright. What belongs here is a *written
+// A dashboard is the wrong register for this screen: a grid of cards and a
+// number at heading scale invite the reader to score themselves, which is the
+// one thing mull must never ask a person to do. What belongs here is a *written
 // portrait* — the same measurements, carried by sentences and editorial
 // hierarchy instead of by cards and bars.
 //
@@ -32,7 +33,7 @@ import SwiftUI
 // "Your portrait" in its heading — three names for one place, so a bug report and
 // the code that fixes it had no word in common. "Profile" wins because that is
 // what the spec calls the tab (CLAUDE.md §5). "Portrait" is left to the Home hero,
-// where DESIGN-NORTHSTAR reserves 肖像 for the me.md surface.
+// which is where the me.md surface is rendered.
 
 struct ProfileTab: View {
     @EnvironmentObject var appState: AppState
@@ -81,6 +82,10 @@ struct ProfileTab: View {
     @State private var showAnswersEditor = false
     @State private var showResetConfirm = false
     @State private var answersResetDone = false
+    /// The explicit language choice. Stored as the raw value so `@AppStorage`
+    /// keeps working; `UserLanguage.Preference` is the meaning.
+    @AppStorage(UserLanguage.preferenceKey)
+    private var vaultLanguage = UserLanguage.Preference.system.rawValue
     /// Clears the "cleared" confirmation. A success message that never leaves
     /// stops being a confirmation and becomes a permanent label.
     @State private var resetNoticeTask: Task<Void, Never>?
@@ -247,6 +252,42 @@ struct ProfileTab: View {
                 .font(DS.bodyFont)
                 .foregroundStyle(DS.inkDim)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // The working-language answer is prose ("Terse, mostly 日本語"), and
+            // mull has to get a yes/no out of it to decide what language to write
+            // the vault in. Substring matching does that, and when the phrasing
+            // misses there is no symptom except a vault in the wrong language.
+            // This is the way to say it outright.
+            VStack(alignment: .leading, spacing: DS.xs) {
+                Picker("Language mull writes in", selection: $vaultLanguage) {
+                    ForEach(UserLanguage.Preference.allCases) { choice in
+                        Text(choice.label).tag(choice.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .font(DS.captionMedium)
+                .fixedSize()
+                .onChange(of: vaultLanguage) { old, _ in
+                    let was = UserLanguage.isJapanese(
+                        preference: UserLanguage.Preference(rawValue: old) ?? .system)
+                    // Only on a real flip: every picker change fires this, including
+                    // one that resolves to the same language.
+                    guard UserLanguage.isJapanese != was else { return }
+                    OnboardingProfile.reprojectSection()
+                    appState.regenerateContextNow()
+                    Task { await refresh() }
+                }
+
+                // Saying where the line falls, because the obvious expectation —
+                // "the whole app switches" — is the wrong one and would read as a
+                // bug. The contract files are English on purpose: they are read by
+                // whatever model you paste them into, not by you.
+                Text("Briefs, notifications and the note at the top of your pinned facts. me.md, now.md and full.md stay in English for the AI that reads them, and mull's own windows are English.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, DS.xs)
 
             HStack(spacing: DS.md) {
                 Button("Edit answers…") { showAnswersEditor = true }

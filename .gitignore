@@ -35,13 +35,36 @@ Mull*.xcodeproj/
 # is the tracked one project.yml points at; it #include?s this file when present.
 Local.xcconfig
 
-# Internal business documents — deliberately NOT published (decided 2026-08-09).
-# The technical docs (DIRECTION / SELECTION-LAYER / MAP-ARCHITECTURE / ROADMAP)
-# ship with the repo; these two hold the live commercial plan and the competitor
-# revenue ledger it rests on. Docs that reference them use plain text, not links,
-# so nothing dangles in the published tree.
+# Internal documents — deliberately NOT published (decided 2026-08-09).
+#
+# The test applied to every document in this repository: name the reader, and name
+# what that reader can decide after reading it. The ones that ship pass it —
+# README (use it), SECURITY (grant it permissions), CONTRIBUTING (send a patch),
+# SELECTION-LAYER (change the ranker), MAP-ARCHITECTURE (change the data model).
+# The ones below do not. They are the author's own working record, and a public
+# reader can decide nothing with them:
+#
+#   STRATEGY / MARKET      the commercial plan and the competitor revenue ledger
+#   ROADMAP                a route to publication, which publication ends
+#   DESIGN / -NORTHSTAR    the visual direction, frozen — nothing here to govern
+#   INTERNAL-*.md          chapters lifted out of CLAUDE / DIRECTION / HARNESS
+#
+# None of this is deleted. The files stay on disk and stay authoritative for the
+# person writing them; they are simply not part of the published surface.
+# Documents that ship reference them in plain text, never as links, so nothing
+# dangles in the published tree.
 STRATEGY-2026-08.md
 MARKET-2026-08.md
+ROADMAP.md
+DESIGN.md
+DESIGN-NORTHSTAR.md
+INTERNAL-*.md
 
 # Build artifacts that land in the repo root
 default.profraw
+
+# Real-log eval cases (eval/real/harvest.sh). These are windows cut straight out
+# of a live mull DB — raw keystrokes, clipboard, window titles — so the harness
+# ships and the corpus never does. The whole point of the real harness is that
+# each person runs it against their OWN log.
+eval/real/cases/*.json

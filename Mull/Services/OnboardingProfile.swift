@@ -8,8 +8,12 @@ import Foundation
 /// Answers are stored in UserDefaults (the editable source of truth) AND projected
 /// into me.pinned.md as a delimited section. Because both markers are markdown
 /// headings, Curator.filterPinned skips them as scaffold, while the `- …` fact
-/// lines between them become authoritative pinned facts placed atop me.md — and,
-/// like the rest of me.pinned.md, never overwritten.
+/// lines between them become authoritative pinned facts placed atop me.md.
+///
+/// This section is the one part of me.pinned.md mull *does* rewrite, and `writeSection`
+/// is the writer — replacing everything between the markers and nothing outside them.
+/// It runs only when the user saves their answers. The file's promise is about the lines
+/// the user writes themselves, not about this delimited block (CLAUDE.md §7.4).
 enum OnboardingProfile {
 
     struct Question: Identifiable {
@@ -27,11 +31,11 @@ enum OnboardingProfile {
               hint: "Your role — the core of who mull says you are.",
               placeholder: "e.g. Solo founder & Swift developer", label: "Role"),
         .init(id: "language", prompt: "What language should AI reply in?",
-              hint: "Locks your working language instead of guessing it.",
+              hint: "What the AI answers you in. Which language mull writes its own files in is set in Settings › Profile.",
               placeholder: "e.g. Japanese (日本語)", label: "Primary working language"),
         .init(id: "building", prompt: "What are you working on right now?",
               hint: "Seeds your current projects.",
-              placeholder: "e.g. mull, plus an FX trading business", label: "Currently working on"),
+              placeholder: "e.g. a macOS app, plus a side project", label: "Currently working on"),
         .init(id: "goal", prompt: "What do you want AI's help with?",
               hint: "Your aim for using mull — what to surface toward.",
               placeholder: "e.g. Ship faster, fewer re-explanations", label: "Goal with AI"),
@@ -91,6 +95,16 @@ enum OnboardingProfile {
     static func reset() {
         UserDefaults.standard.removeObject(forKey: answersKey)
         writeSection(lines: [])
+    }
+
+    /// Re-write the managed section from the answers already stored, changing
+    /// none of them. The markers are the one visible thing in this file that
+    /// follows the reader's language, so after a language change they would
+    /// otherwise sit in the old one until the user next edited their answers.
+    /// This replaces the marked block and nothing outside it — the whole of what
+    /// CLAUDE.md §7.4 permits mull to write here.
+    static func reprojectSection() {
+        writeSection(lines: factLines(from: answers))
     }
 
     // MARK: - Projection into me.pinned.md

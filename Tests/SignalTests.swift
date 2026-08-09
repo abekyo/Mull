@@ -44,7 +44,7 @@ final class SignalTests: XCTestCase {
     func testDecisionsAreTheirOwnKind() {
         // `salience(for:)` scored "decision" at note tier from the start, but
         // `kind` never returned it — the tier was unreachable, and a decision
-        // typed at the keyboard scored 0.20 as plain activity (ROADMAP §1, B2).
+        // typed at the keyboard scored 0.20 as plain activity.
         XCTAssertEqual(Signal.kind(text: "we'll use GRDB instead of Core Data",
                                    eventType: .clipboard, windowTitle: nil), "decision")
         XCTAssertEqual(Signal.kind(text: "その案は却下",
@@ -53,7 +53,7 @@ final class SignalTests: XCTestCase {
 
     func testDecisionVocabularyIsTradeNeutral() {
         // The same branch has to fire outside software, or the top salience tiers
-        // belong to one occupation (HARNESS.md 第I部 原理1).
+        // belong to one occupation.
         XCTAssertEqual(Signal.kind(text: "ロット数を0.5にする",
                                    eventType: .keystroke, windowTitle: nil), "decision")
         XCTAssertEqual(Signal.kind(text: "この条項は採用しない方針",

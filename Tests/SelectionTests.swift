@@ -155,7 +155,7 @@ final class SelectionTests: XCTestCase {
         // Same text, same age, same entity, same salience — only the MODE axis
         // differs (Xcode → produce, Safari → consume). MAP-ARCHITECTURE says mode
         // is used for 「重み付け・選別」, but nothing in this file read it until
-        // 2026-08-09 (ROADMAP §1, B1).
+        // 2026-08-09.
         let consumed = event("caching strategy", eventType: .clipboard,
                              app: "Safari", entity: "Mull")
         let authored = event("caching strategy", eventType: .clipboard,

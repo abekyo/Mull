@@ -1,10 +1,12 @@
 import XCTest
 @testable import mull
 
-/// The prose rules from DESIGN.md, asserted against the source itself.
+/// Two prose rules, asserted against the source itself. This test is where they
+/// live — there is no document to defer to, which is the point: a rule kept only in
+/// prose is a rule enforced only where a reviewer happened to look.
 ///
-/// DESIGN.md bans emoji "UIにも生成文にも入れない" — from the interface *and* from
-/// the text mull generates. The interface half held; the generated half did not.
+/// **Rule 1: no emoji**, in the interface *and* in the text mull generates.
+/// The interface half held; the generated half did not.
 /// `list_files` shipped a 📁/📄 file tree and `get_projects` shipped ⚠️ STALLED,
 /// because nothing was looking at the strings an agent reads. A rule that only a
 /// human reviewer enforces is a rule that holds wherever someone happened to look.
@@ -14,8 +16,7 @@ import XCTest
 /// lint wearing a test's clothes, and it belongs here rather than in a CI script
 /// because the same suite already defends the rest of what the vault says.
 ///
-/// The moon (☽) is exempt: DESIGN-NORTHSTAR §3 keeps it as mull's mark, and a
-/// mark is not decoration.
+/// The moon (☽) is exempt: it is mull's mark, and a mark is not decoration.
 final class ShippedVocabularyTests: XCTestCase {
 
     /// Directories that ship. `Tests/` is deliberately absent — a test may need an
@@ -57,14 +58,14 @@ final class ShippedVocabularyTests: XCTestCase {
         }
 
         XCTAssertTrue(offences.isEmpty, """
-            Emoji in shipped strings. DESIGN.md bans them from the UI and from
+            Emoji in shipped strings. They are banned from the UI and from
             generated text alike — say it in SF Symbols, or in words:
 
             \(offences.joined(separator: "\n"))
             """)
     }
 
-    /// The two SF Symbols DESIGN.md names outright: they are the "an AI made this"
+    /// Rule 2: the two SF Symbols that read as the "an AI made this"
     /// face, and mull's whole claim is that it reports what it observed.
     func testNoShippedStringLiteralAsksForTheAIGlyphs() throws {
         let banned = ["sparkles", "wand.and.stars", "wand.and.rays"]
