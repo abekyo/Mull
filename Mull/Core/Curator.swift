@@ -185,12 +185,15 @@ enum Curator {
     /// document, and they were occupying its first three lines — so the answer to
     /// "what am I working on" began two screens of italics later than it needed to.
 
+    // The front-matter *keys* stay English on purpose (`VaultText`): they are YAML
+    // identifiers, `generator` is matched byte-for-byte by `isGeneratedByMull`, and
+    // a key is not a sentence. Titles, values and notes are prose, and prose
+    // follows the reader.
+
     static func meHeader(timestamp: String) -> String {
         MarkdownDoc.header(
-            title: "Who I am",
-            meta: [("updated", timestamp),
-                   ("layer", "me.md — durable facts, ~200 tokens, always safe to include"),
-                   ("sources", "me.pinned.md (yours) + nightly consolidation (mull's)")],
+            title: VaultText.t("Who I am", "私について"),
+            meta: [("updated", timestamp)],
             // "Correct anything here in place" was addressed to whoever opens the raw
             // file in an editor, where it is true — every block below carries a
             // provenance marker, and one you rewrite is promoted to `human` and never
@@ -198,28 +201,24 @@ enum Curator {
             // strips the markers to display them, so it refuses to write the file back
             // and shows a lock instead. Say which is which, and name the place mull
             // does take corrections.
-            note: "Your corrections win over mull's own text. In mull, write them under "
-                + "\"What you've told mull yourself\" at the foot of About Me (that is `me.pinned.md`); "
-                + "in any other editor, rewrite a block here and mull will stop touching it. "
-                + "For live work, call `whats_active_now` / `search` — it is not kept here.")
+            note: VaultText.t("Rewrite a block and mull stops touching it.",
+                              "ブロックを書き換えれば、mull はそこに触れません。"))
     }
 
     static func nowHeader(timestamp: String) -> String {
         MarkdownDoc.header(
-            title: "What I'm working on",
-            meta: [("updated", timestamp),
-                   ("layer", "now.md — current work, ~500 tokens, include when task context helps"),
-                   ("refresh", "live every 60s · consolidated nightly")],
-            note: "Edit any of this — your edits are kept.")
+            title: VaultText.t("What I'm working on", "いま取り組んでいること"),
+            meta: [("updated", timestamp)],
+            note: VaultText.t("Your edits survive the next update.",
+                              "編集しても、次の更新で消えません。"))
     }
 
     static func fullHeader(timestamp: String) -> String {
         MarkdownDoc.header(
-            title: "Full context",
-            meta: [("updated", timestamp),
-                   ("layer", "full.md — me.md + now.md + today's material, ~1500 tokens"),
-                   ("refresh", "live every 60s · consolidated nightly")],
-            note: "Assembled from the other two files. Edit those, not this one.")
+            title: VaultText.t("Full context", "すべての文脈"),
+            meta: [("updated", timestamp)],
+            note: VaultText.t("Assembled from me.md and now.md. Edit those, not this.",
+                              "me.md と now.md から組み立てています。直すならそちらを。"))
     }
 
     // MARK: - Curate (chokepoint)

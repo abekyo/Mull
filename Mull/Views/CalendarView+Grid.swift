@@ -158,7 +158,7 @@ extension CalendarWeekView {
         .clipped()
         // VoiceOver cannot double-click an empty slot, so the gesture is offered as
         // an action on the column instead. Without this, ⌘N was the only way in.
-        .accessibilityAction(named: "New event on \(Self.shortDate(date))") {
+        .accessibilityAction(named: String(localized: "New event on \(Self.shortDate(date))")) {
             newEvent(on: date)
         }
     }

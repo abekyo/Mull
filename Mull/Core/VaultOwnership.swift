@@ -54,12 +54,23 @@ enum VaultOwnership {
         "proactive.md", // the briefs the proactive loop keeps
     ]
 
-    /// Folders whose entire contents mull generates.
-    private static let mullWrittenFolders: Set<String> = ["daily", "memory"]
+    /// Folders whose entire contents mull generates, matched at the vault ROOT.
+    ///
+    /// `_raw/` is here because MAP-ARCHITECTURE 法則① calls it the territory —
+    /// immutable, lossless, never hand-edited. It was missing, so `write_note` would
+    /// let an agent overwrite `_raw/<connector>/items.ndjson`: the one layer the
+    /// architecture says must never be destroyed was the one with no guard on it.
+    ///
+    /// At the root, not at any depth. Matching anywhere meant a folder the user named
+    /// `daily/` or `memory/` inside their own `notes/` was locked read-only and closed
+    /// to agents — mull only ever creates these two at the top of the vault, so that
+    /// is where they mean something. (The old behaviour was a leftover from a
+    /// `path.contains("/daily/")` substring check.)
+    private static let mullWrittenFolders: Set<String> = ["daily", "memory", "_raw"]
 
-    /// Folders mull writes into through the Curator — its own blocks only.
-    /// Named here rather than taken from `VaultLayout`, which is not compiled into
-    /// `MullMCP`; `VaultLayoutTests` pins the two together.
+    /// Folders mull writes into through the Curator — its own blocks only. Root-level,
+    /// for the same reason as above. Named here rather than taken from `VaultLayout`,
+    /// which is not compiled into `MullMCP`; `VaultLayoutTests` pins the two together.
     private static let curatedFolders: Set<String> = ["projects", "corrections"]
 
     /// Root-level files mull assembles but does not own.
@@ -71,6 +82,19 @@ enum VaultOwnership {
     /// exactly `.shared`, and the reason this set exists alongside the `.mull` one.
     private static let curatedRootFiles: Set<String> = ["rules.md"]
 
+    /// Files the user alone writes. mull lays a scaffold down and then only ever
+    /// reads them; **no agent tool may write one, including `curate`.**
+    ///
+    /// This is a stronger promise than `.user`, and it needs to be, because both of
+    /// these files are read back as the user's own words. A line an agent added to
+    /// `me.pinned.md` is served to every later assistant as something the user
+    /// declared about themselves (CLAUDE.md §7.4). `inbox.md` carries the same claim
+    /// in its own header — "Yours — mull never rewrites this file" — and in
+    /// `QuickCapture`'s doc comment, "a file NO agent ever writes". Neither claim was
+    /// enforced anywhere until this set existed; `inbox.md` was simply absent from
+    /// every table and answered `.user`, which the MCP server lets an agent overwrite.
+    static let userOnlyFiles: Set<String> = [Curator.pinnedFileName, "inbox.md"]
+
     /// Accepts a vault-relative path *or* an absolute one — the Files tab has URLs and
     /// the MCP server has relative paths, and the answer must not depend on which.
     static func of(path: String) -> VaultOwnership {
@@ -78,10 +102,10 @@ enum VaultOwnership {
         guard let name = components.last else { return .user }
         let parents = components.dropLast()
 
-        // Anything inside a generated folder, at any depth. Asked first, so a file
-        // that could match two rules answers as mull's.
-        if parents.contains(where: mullWrittenFolders.contains) { return .mull }
-        if parents.contains(where: curatedFolders.contains) { return .shared }
+        // The vault root's own folders. Asked first, so a file that could match two
+        // rules answers as mull's.
+        if let top = parents.first, mullWrittenFolders.contains(top) { return .mull }
+        if let top = parents.first, curatedFolders.contains(top) { return .shared }
         // AT THE ROOT — not by name anywhere. Matching the name at any depth meant
         // `projects/mull.md` was read as the orientation file mull rewrites whole,
         // so the MCP server refused an agent the very path its own `write_note`
@@ -111,5 +135,18 @@ enum VaultOwnership {
     /// not stamp over. The editor asks the narrower question, the MCP server asks this
     /// one, and both still get their answer from this type — which is what the two
     /// hand-written lists that preceded it failed to do.
-    static func refusesWholesaleWrite(path: String) -> Bool { of(path: path) != .user }
+    static func refusesWholesaleWrite(path: String) -> Bool {
+        refusesAllAgentWrites(path: path) || of(path: path) != .user
+    }
+
+    /// Is this a file no agent tool may write, by any route — `write_note` *or*
+    /// `curate`? See `userOnlyFiles`. Being unable to overwrite a file is not the same
+    /// as being allowed to add to it, and for these two the difference is whose words
+    /// the reader is looking at.
+    static func refusesAllAgentWrites(path: String) -> Bool {
+        // At the root, like every other name-matched rule here: `notes/inbox.md` is a
+        // note the user happened to name that, not the capture file.
+        let components = vaultRelative(path).split(separator: "/").map(String.init)
+        return components.count == 1 && userOnlyFiles.contains(components[0])
+    }
 }

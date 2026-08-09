@@ -666,7 +666,7 @@ final class MCPServer {
     /// Being unable to overwrite the file is not the same as being allowed to add
     /// to it. The promise in CLAUDE.md §7.4 is about whose words are in there.
     private static func pinnedRefusal(for relative: String) -> String? {
-        guard (relative as NSString).lastPathComponent == Curator.pinnedFileName else { return nil }
+        guard VaultOwnership.refusesAllAgentWrites(path: relative) else { return nil }
         return "Error: ~/mull/\(relative) is the user's own file — mull never writes "
             + "a line there and neither may you, by any tool. Anything you put in it "
             + "would be read back as something the user said about themselves. Ask "
@@ -860,8 +860,19 @@ final class MCPServer {
             } else if name.hasSuffix(".md") {
                 let size = (try? item.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
                 let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-                let auto = ["me.md", "now.md", "full.md", "MEMORY.md"].contains(name) ? " (auto)" : ""
-                lines.append("\(prefix)\(name) [\(sizeStr)]\(auto)")
+                // Asked, not listed. This literal is the fourth hand-written copy of
+                // "who writes this file" that `VaultOwnership` was created to end, and
+                // it outlived the other three: `mull.md` and `proactive.md` are
+                // regenerated every 60 seconds and were offered here as ordinary notes,
+                // while a note the user put at `notes/me.md` was marked `(auto)` because
+                // the match was on the bare name at any depth.
+                let mark: String
+                switch VaultOwnership.of(path: item.path) {
+                case .mull:   mark = " (auto)"       // mull rewrites it whole
+                case .shared: mark = " (curated)"    // yours, but add to it with `curate`
+                case .user:   mark = ""
+                }
+                lines.append("\(prefix)\(name) [\(sizeStr)]\(mark)")
             }
         }
     }

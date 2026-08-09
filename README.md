@@ -196,7 +196,12 @@ re-record yesterday, so this is the one place where being thorough now actually 
 | Browser URLs | AppleScript | Safari, Chrome, Arc, Brave, Edge |
 | App switches | NSWorkspace | Time allocation |
 | Calendar | EventKit | Today's schedule |
-| Email | AppleScript, Mail.app (opt-in) | Subject and sender only, never the body |
+| Email | AppleScript, Mail.app (opt-in) | Headers only on this channel: subject, sender, date |
+
+The rows are not independent of each other. "Headers only" is true of the Mail channel and
+false of the product: Mail.app is not on the excluded-apps list, so while you are reading a
+message the "Window body" row picks up the text on screen. [SECURITY.md](SECURITY.md) has the
+exact promise and how to turn that off; it is the source of truth for this one.
 
 Not captured, on purpose: screen OCR and screenshots (Screenpipe does that; it is heavy and
 noisy), and audio (Granola and Omi do that, and recording other people raises a consent problem
@@ -286,7 +291,9 @@ about role, tech stack, and domain were removed in 2026-07 for exactly this reas
 ### Requirements
 
 - macOS 14.0+ (Sonoma), Apple Silicon
-- [Ollama](https://ollama.com/) — optional, only for local LLM summaries
+- [Ollama](https://ollama.com/), or any OpenAI-compatible local server (LM Studio, Jan, llama.cpp,
+  vLLM) — optional. Needed only to run the LLM features on-device: nightly summaries, Chat, and
+  per-project deliberation. The MCP tools never call an LLM, so they work without either.
 
 ### Download
 
@@ -377,9 +384,11 @@ Read ~/mull/me.md and ~/mull/now.md for context about who I am.
 There is no mull server. No account, no sync, no usage statistics. There is not even a telemetry
 toggle, because there is nothing to toggle.
 
-- LLM use is off by default. Nothing leaves the machine until you choose a provider. If you pick
-  a cloud one, mull talks to it directly with your own API key, with nothing in between. Ollama
-  keeps everything on-device.
+- LLM use is off by default. Nothing leaves the machine until you choose a provider. Point it at
+  Ollama or an OpenAI-compatible local server and nothing leaves it even then: mull runs with the
+  network off, summaries and Chat included. If you pick a cloud provider instead, mull talks to it
+  directly with your own API key, with nothing in between. The full list of boundaries, and where
+  in the source to check each one, is in [SECURITY.md](SECURITY.md).
 - Password fields are skipped automatically (`IsSecureEventInputEnabled`).
 - 1Password, Keychain Access and similar are excluded by default. mull never records itself.
 - A copy your password manager marked `org.nspasteboard.ConcealedType` is dropped before its

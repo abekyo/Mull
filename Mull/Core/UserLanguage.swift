@@ -4,11 +4,27 @@ import Foundation
 /// writes *for the user* (me.pinned.md's scaffold, proactive briefs, folder
 /// indexes, inbox digests) and for notifications.
 ///
-/// Three sources, in order: the explicit choice in Settings › Profile, then the
-/// user's *stated* working language (the onboarding "What language should AI
-/// reply in?" answer), then the system locale. The locale is the wrong first
-/// witness: plenty of people run macOS in English and work in Japanese — this
-/// vault's own history is typed through a Japanese IME on an en-US system.
+/// Two sources, in order: the explicit choice in Settings › General, then the
+/// language macOS itself is set to. That is all.
+///
+/// **It used to read the onboarding answer first, and that was wrong.** The
+/// question mull asks at setup — "what language should AI reply in?" — is
+/// answered in free prose ("Terse, mostly 日本語", "にほんご", "JP"), so getting a
+/// yes/no out of it meant substring matching, and a match that misses has no
+/// symptom: the vault is simply in the wrong language and nothing says why. The
+/// old code shipped a picker to work around that, which is a setting that exists
+/// to undo a guess.
+///
+/// The macOS language setting is not a guess. The user chose it, it is one value
+/// rather than a sentence, and every other app on the machine already obeys it —
+/// so it is the default a reader can predict without being told. The argument
+/// against it (people run macOS in English and work in Japanese) is real, and it
+/// is exactly what the explicit picker is for: a stated choice, made once, that
+/// beats the system. What it is not is a reason to infer the answer from prose.
+///
+/// The onboarding answer still does its own job — it is prose, it stays prose,
+/// and it is what the AI reads in me.pinned.md. It just no longer decides
+/// anything on the user's behalf.
 ///
 /// Deliberately NOT applied to the AI-facing contract files — me.md, now.md,
 /// full.md, MEMORY.md stay in stable English because their audience is whatever
@@ -20,24 +36,22 @@ enum UserLanguage {
     /// stays free of Services imports; a test asserts the two agree.
     static let onboardingAnswersKey = "onboardingProfileAnswers"
 
-    /// The explicit choice. Absent (`.system`) reproduces the original two-step
-    /// behaviour exactly, so nobody's vault changes language on upgrade.
+    /// The explicit choice. Absent (`.system`) means "whatever macOS is set to".
     static let preferenceKey = "vaultLanguage"
 
-    /// Why an explicit control exists on top of the stated answer: that answer is
-    /// free prose — "Terse, mostly 日本語", "にほんご", "JP" — and deciding a binary
-    /// from prose means substring matching, which fails *silently*. Someone whose
-    /// phrasing missed the match read a vault in the wrong language with no way
-    /// to say otherwise. The prose still does its job (it is what the AI reads);
-    /// this decides only what mull itself writes.
     enum Preference: String, CaseIterable, Identifiable {
         case system, english, japanese
 
         var id: String { rawValue }
 
+        /// Named for what it does, not for how it is implemented. "Follow my
+        /// answer, then the system" was the old label, and it described a
+        /// precedence the reader had no way to check — they would have had to
+        /// remember what they typed at setup and guess whether mull's matcher
+        /// saw it the same way.
         var label: String {
             switch self {
-            case .system:   return "Follow my answer, then the system"
+            case .system:   return "Same as macOS"
             case .english:  return "English"
             case .japanese: return "日本語"
             }
@@ -48,9 +62,16 @@ enum UserLanguage {
         Preference(rawValue: UserDefaults.standard.string(forKey: preferenceKey) ?? "") ?? .system
     }
 
-    /// The free-text onboarding answer, if the user gave one.
+    /// The free-text onboarding answer, if the user gave one. Read by the profile
+    /// projection, which puts it in front of the AI verbatim. Nothing decides a
+    /// language from it — see the note at the top of this file.
     static var statedLanguage: String? {
         (UserDefaults.standard.dictionary(forKey: onboardingAnswersKey) as? [String: String])?["language"]
+    }
+
+    /// What macOS itself is set to, as a yes/no.
+    static var systemIsJapanese: Bool {
+        Locale.preferredLanguages.first?.hasPrefix("ja") == true
     }
 
     static var isJapanese: Bool { isJapanese(preference: preference) }
@@ -60,22 +81,15 @@ enum UserLanguage {
     /// `@AppStorage` has already written the new one, and it needs both to know
     /// whether the language actually flipped.
     static func isJapanese(preference: Preference) -> Bool {
-        resolve(preference: preference, stated: statedLanguage)
+        resolve(preference: preference, systemIsJapanese: systemIsJapanese)
     }
 
-    /// Pure, so the precedence is testable without UserDefaults or the vault.
-    static func resolve(preference: Preference, stated: String?) -> Bool {
+    /// Pure, so the precedence is testable without UserDefaults or a locale.
+    static func resolve(preference: Preference, systemIsJapanese: Bool) -> Bool {
         switch preference {
         case .japanese: return true
         case .english:  return false
-        case .system:   break
+        case .system:   return systemIsJapanese
         }
-        if let stated = stated?
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-           !stated.isEmpty {
-            return stated.contains("日本語") || stated.contains("japanese")
-                || stated == "ja" || stated.hasPrefix("ja-") || stated.hasPrefix("ja_")
-        }
-        return Locale.preferredLanguages.first?.hasPrefix("ja") == true
     }
 }

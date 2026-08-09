@@ -162,13 +162,17 @@ final class CalendarService {
         var errorDescription: String? {
             switch self {
             case .noAccess:
-                return "mull doesn't have calendar access, so it can't add this."
+                return VaultText.t("mull doesn't have calendar access, so it can't add this.",
+                               "mull にカレンダーへのアクセス権がないため、これは追加できません。")
             case .noWritableCalendar:
-                return "There's no calendar on this Mac that accepts new events."
+                return VaultText.t("There's no calendar on this Mac that accepts new events.",
+                               "この Mac には、新規イベントを受け付けるカレンダーがありません。")
             case .notFound:
-                return "That event isn't in your calendar any more."
+                return VaultText.t("That event isn't in your calendar any more.",
+                               "その予定はもうカレンダーにありません。")
             case .notEditable:
-                return "That calendar is subscribed, so its events can't be changed here."
+                return VaultText.t("That calendar is subscribed, so its events can't be changed here.",
+                               "このカレンダーは購読しているものなので、ここから予定は変更できません。")
             case .underlying(let message):
                 return message
             }
@@ -200,7 +204,7 @@ final class CalendarService {
         func normalized() -> EventFields {
             var out = self
             let title = out.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            out.title = title.isEmpty ? "New Event" : title
+            out.title = title.isEmpty ? VaultText.t("New Event", "新規イベント") : title
             let place = out.location?.trimmingCharacters(in: .whitespacesAndNewlines)
             out.location = (place?.isEmpty == false) ? place : nil
             if out.end <= out.start {
@@ -253,6 +257,16 @@ final class CalendarService {
         let color: CGColor
         /// The one EventKit would pick on its own.
         let isDefault: Bool
+        /// The account it belongs to — "iCloud", "Google", "On My Mac".
+        let accountName: String
+        /// Whether it lives only on this Mac.
+        ///
+        /// Carried because writing *observed* activity is not the same act as writing
+        /// an event the user typed: block titles are window titles, and a calendar on
+        /// an account leaves the machine. §8.1 promises the data stays here, so the UI
+        /// that offers the mirror has to be able to say when a choice would change
+        /// that — before the choice, not after.
+        let isLocal: Bool
 
         static func == (lhs: WritableCalendar, rhs: WritableCalendar) -> Bool { lhs.id == rhs.id }
     }
@@ -296,9 +310,38 @@ final class CalendarService {
             .filter(\.allowsContentModifications)
             .map {
                 WritableCalendar(id: $0.calendarIdentifier, title: $0.title,
-                                 color: $0.cgColor, isDefault: $0.calendarIdentifier == defaultID)
+                                 color: $0.cgColor, isDefault: $0.calendarIdentifier == defaultID,
+                                 accountName: $0.source.title,
+                                 isLocal: $0.source.sourceType == .local)
             }
             .sorted { ($0.isDefault ? 0 : 1, $0.title) < ($1.isDefault ? 0 : 1, $1.title) }
+    }
+
+    // MARK: - The mirror's own events
+
+    /// Events mull's calendar mirror wrote into one calendar, in one range.
+    ///
+    /// Filtered by the marker in `url`, not by which calendar they sit in. The mirror
+    /// deletes and rewrites what it finds here, so "mull wrote this" has to be a fact
+    /// about the event rather than an assumption about the calendar — a user who
+    /// points the mirror at a calendar they also use themselves must not lose a real
+    /// appointment to it.
+    func mirroredEvents(in calendarID: String, from start: Date, to end: Date) -> [CalendarMirror.Existing] {
+        if !hasAccess { recheckAccess() }
+        guard hasAccess, let calendar = calendar(calendarID) else { return [] }
+
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [calendar])
+        return store.events(matching: predicate).compactMap { event in
+            guard let key = CalendarMirror.key(fromMarker: event.url),
+                  let identifier = event.eventIdentifier else { return nil }
+            return CalendarMirror.Existing(
+                key: key,
+                // Nothing the mirror writes repeats, so the identifier names one row.
+                handle: EventHandle(identifier: identifier, occurrenceDate: nil),
+                title: event.title ?? "",
+                start: event.startDate,
+                end: event.endDate)
+        }
     }
 
     /// Whether a new event could be written at all. The difference between "saving
@@ -519,7 +562,7 @@ final class CalendarService {
 
         guard !events.isEmpty else { return nil }
 
-        var lines: [String] = ["Today's schedule:"]
+        var lines: [String] = [VaultText.t("Today's schedule:", "今日の予定:")]
         for event in events {
             // 24-hour, locale-pinned: this text goes into now.md for an AI to read.
             let start = TimeFormat.machine(event.startDate)

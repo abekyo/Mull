@@ -45,6 +45,27 @@ struct MullApp: App {
                 .environmentObject(appState)
                 .mullChrome()
         }
+        .commands {
+            // SwiftUI puts a Help menu in the menu bar whether or not the app has
+            // anything to put in it. mull registers no help book (no
+            // CFBundleHelpBookName in the bundle), so "mull Help" sat there
+            // enabled and clickable and did nothing at all: no Help Viewer, no
+            // alert, no window.
+            //
+            // §7.4 is the standing rule for what that costs. A promise that fails
+            // one check makes every other promise suspect, which is why the
+            // never-overwrite wording was weakened until it matched the code. A
+            // menu item that says Help and answers nothing is the same failure,
+            // sitting above everything the app does keep — in the first place
+            // somebody deciding whether to hand over Input Monitoring will look.
+            //
+            // Removed rather than repointed: the repository is private, so a link
+            // to the README would 404, and a second broken promise is not an
+            // improvement on the first. What explanation the app has is
+            // onboarding, still reachable from "Finish Setting Up mull…" for as
+            // long as there is setup left to finish.
+            CommandGroup(replacing: .help) { }
+        }
     }
 
     /// The words for what `menuBarIconName` and the badge say in shape and colour.
@@ -61,10 +82,16 @@ struct MullApp: App {
         return state
     }
 
+    /// Three states, drawn as one family: the brand mark, the brand mark filled in
+    /// while mull is actually writing, and the brand asleep. The idle state used to
+    /// be `moon.fill` — a fourth moon, and the only place the app's own face was a
+    /// bare crescent rather than the `moon.stars` it is everywhere else.
+    /// `menuBarStateDescription` carries the same three states in words, which is
+    /// what a reader who cannot tell two 16pt glyphs apart actually needs.
     private var menuBarIconName: String {
-        if appState.isSummarizing { return "moon.stars.fill" }
-        if appState.isPaused { return "moon.zzz" }
-        return "moon.fill"
+        if appState.isSummarizing { return DS.Glyph.brandWorking }
+        if appState.isPaused { return DS.Glyph.asleep }
+        return DS.Glyph.brand
     }
 }
 
@@ -81,7 +108,6 @@ enum SettingsTab: Int, Hashable, CaseIterable {
     case general = 0
     case ai = 1
     case data = 2
-    case profile = 3
 }
 
 /// Carries "open Settings *there*" from any call site to the Settings window.
@@ -199,10 +225,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.center()
         window.setFrameAutosaveName("MullMainWindow")
         window.isReleasedWhenClosed = false
+        installSidebarToggle(on: window, appState: appState)
         window.makeKeyAndOrderFront(nil)
 
         self.mainWindow = window
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Put mull's own show/hide-sidebar button in the title bar, at a place it
+    /// cannot leave.
+    ///
+    /// `NavigationSplitView` offers a toggle for free and `FullWindowView` declines
+    /// it (`.toolbar(removing: .sidebarToggle)`), because AppKit lays that one out
+    /// against the split divider: collapse the sidebar and the divider goes to x=0,
+    /// taking the button ~190pt left to sit by the traffic lights; expand it and the
+    /// button comes back. Every press moved the thing that had just been pressed.
+    ///
+    /// A title-bar accessory with `layoutAttribute = .leading` is measured from the
+    /// traffic lights instead. Those never move, so neither does this, in either
+    /// state — which is the whole point of moving it here. The button is the same
+    /// button in both states, so there is also no second one to find.
+    ///
+    /// The title bar is otherwise empty (`titleVisibility = .hidden`, no toolbar),
+    /// so this costs no window chrome: it occupies space that was already blank.
+    private func installSidebarToggle(on window: NSWindow, appState: AppState) {
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .leading
+        let hosting = NSHostingController(rootView: SidebarToggle(appState: appState).mullChrome())
+        // Sized here rather than left to the hosting controller's fitting size: an
+        // accessory taller than the title bar makes AppKit grow the title bar to fit
+        // it, which would push the whole page down by however much the button asked
+        // for. 28pt is the strip that is already there.
+        hosting.view.frame = NSRect(x: 0, y: 0, width: 40, height: 28)
+        accessory.view = hosting.view
+        window.addTitlebarAccessoryViewController(accessory)
     }
 
     // MARK: - Settings Window
@@ -411,5 +467,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard response == .alertFirstButtonReturn else { return }
             self?.appState?.openSettingsFor(permission)
         }
+    }
+}
+
+// MARK: - Sidebar toggle (title-bar accessory)
+
+/// The one control that shows and hides the main window's sidebar.
+///
+/// Lives in the title bar rather than in either column, for the reason
+/// `AppDelegate.installSidebarToggle` gives: measured from the traffic lights, it
+/// is in the same spot whether the sidebar is open or shut. Put in a column, it
+/// would have to be two buttons — or one that moves.
+private struct SidebarToggle: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        Button {
+            appState.sidebarVisible.toggle()
+        } label: {
+            Image(systemName: DS.Glyph.sidebar)
+                .font(DS.iconBody)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(DS.inkDim)
+        // ⌃⌘S is macOS's own sidebar shortcut, and it rides on the visible button
+        // rather than on a hidden one in the window's background — the same reason
+        // ⌘K rides on the search field's magnifier.
+        .keyboardShortcut("s", modifiers: [.control, .command])
+        .help(appState.sidebarVisible ? "Hide sidebar (⌃⌘S)" : "Show sidebar (⌃⌘S)")
+        .accessibilityLabel(appState.sidebarVisible ? "Hide sidebar" : "Show sidebar")
+        .padding(.leading, DS.sm)
     }
 }

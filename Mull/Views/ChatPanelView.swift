@@ -225,7 +225,7 @@ final class ChatViewModel: ObservableObject {
             withAnimation(Self.appear) {
                 messages.append(Message(
                     role: .assistant,
-                    text: "That one needs a model to read your records. Ollama and LM Studio "
+                    text: String(localized: "That one needs a model to read your records. Ollama and LM Studio ")
                         + "run on this Mac and never send anything out.",
                     retryPrompt: prompt,
                     offersProviderSetup: true))
@@ -646,9 +646,9 @@ struct ChatPanelView: View {
     private static let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private let suggestions = [
-        "What was I mainly working on this week?",
-        "What project should I resume?",
-        "Summarize what I did today.",
+        String(localized: "What was I mainly working on this week?"),
+        String(localized: "What project should I resume?"),
+        String(localized: "Summarize what I did today."),
     ]
 
     var body: some View {
@@ -681,9 +681,15 @@ struct ChatPanelView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: DS.sm) {
-            Image(systemName: "moon")
-                .font(DS.iconSmall)
+        // `.firstTextBaseline`, not the default centre. Centred, the mark aligned to
+        // the middle of a *two-line* block — so it floated between the title and the
+        // subtitle, belonging to neither, and sat at a different height here than the
+        // identical mark does over the one-line "Ask mull about you" below. On the
+        // title's baseline it reads as part of the title, at any text size and
+        // whether or not the subtitle wraps.
+        HStack(alignment: .firstTextBaseline, spacing: DS.sm) {
+            Image(systemName: DS.Glyph.brand)
+                .font(DS.iconBody)
                 .foregroundStyle(DS.moon)
             VStack(alignment: .leading, spacing: DS.hair) {
                 Text("Chat with mull")
@@ -704,7 +710,7 @@ struct ChatPanelView: View {
                 // Confirmed, because the transcript is held in memory only: a mis-click
                 // used to destroy the whole conversation with nothing to undo it with.
                 Button { confirmingClear = true } label: {
-                    Image(systemName: "trash").font(DS.iconSmall)
+                    Image(systemName: DS.Glyph.trash).font(DS.iconSmall)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DS.inkFaint)
@@ -724,9 +730,11 @@ struct ChatPanelView: View {
     /// notes to a cloud vendor on day one. It now states what already works.
     private var llmOffBanner: some View {
         HStack(spacing: DS.sm) {
-            Image(systemName: "moon.zzz").foregroundStyle(DS.paused)
-            Text("No AI provider. Questions like \"what did I do today?\" are answered "
-                 + "from your records anyway.")
+            Image(systemName: DS.Glyph.asleep).font(DS.iconSmall).foregroundStyle(DS.paused)
+            // One literal, not two joined by `+`. `Text("a" + "b")` takes the
+            // plain-String overload, so the line never reaches Localizable.xcstrings
+            // and ships English to every reader.
+            Text("No AI provider. Questions like \"what did I do today?\" are answered from your records anyway.")
                 .font(DS.captionFont).foregroundStyle(DS.inkDim)
                 // Same reason as `disclosureLine`: priority over the Spacer, not a
                 // fixed size — `fixedSize` in this shape oversizes the whole window.
@@ -757,13 +765,13 @@ struct ChatPanelView: View {
     /// one click away rather than a description of it.
     private var disclosureLine: some View {
         HStack(spacing: DS.xs) {
-            Image(systemName: onDevice ? "lock" : "arrow.up.forward.square")
+            Image(systemName: onDevice ? DS.Glyph.locked : "arrow.up.forward.square")
                 .font(DS.iconMini)
                 .foregroundStyle(onDevice ? DS.recording : DS.paused)
             Text(onDevice
                  ? (isLLMOff
-                    ? "Stays on this Mac. No provider is on, so nothing is uploaded."
-                    : "Stays on this Mac — \(providerLabel) runs locally.")
+                    ? String(localized: "Stays on this Mac. No provider is on, so nothing is uploaded.")
+                    : String(localized: "Stays on this Mac — \(providerLabel) runs locally."))
                  : "Each question sends me.md, now.md, up to 5 project notes and 7 days of "
                    + "activity to \(providerLabel).")
                 .font(DS.miniFont)
@@ -800,8 +808,8 @@ struct ChatPanelView: View {
     }
 
     private var payloadTitle: String {
-        if isLLMOff { return "What a model would be given" }
-        return onDevice ? "Given to \(providerLabel), on this Mac" : "Sent to \(providerLabel)"
+        if isLLMOff { return String(localized: "What a model would be given") }
+        return onDevice ? String(localized: "Given to \(providerLabel), on this Mac") : String(localized: "Sent to \(providerLabel)")
     }
 
     /// The payload, verbatim. No summary stands in for it — a claim about what leaves
@@ -932,7 +940,7 @@ struct ChatPanelView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: DS.md) {
             HStack(spacing: DS.sm) {
-                Image(systemName: "moon.stars").font(DS.iconBody).foregroundStyle(DS.moon)
+                Image(systemName: DS.Glyph.brand).font(DS.iconBody).foregroundStyle(DS.moon)
                 Text("Ask mull about you")
                     .font(DS.readH2Font).foregroundStyle(DS.ink)
             }
@@ -1079,7 +1087,7 @@ struct ChatPanelView: View {
     private func retryButton(_ msg: ChatViewModel.Message) -> some View {
         Button { Task { await vm.retry(msg) } } label: {
             HStack(spacing: DS.hair) {
-                Image(systemName: "arrow.clockwise").font(DS.iconMini.weight(.medium))
+                Image(systemName: DS.Glyph.refresh).font(DS.iconMini.weight(.medium))
                 Text("Retry").font(DS.miniMedium)
             }
             .foregroundStyle(DS.moon)

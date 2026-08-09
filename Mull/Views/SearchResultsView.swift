@@ -81,7 +81,7 @@ struct SearchResultsView<ProjectCard: View>: View {
                 .padding(.vertical, 48)
             } else if matchingProjects.isEmpty && hits.isEmpty && summaries.isEmpty {
                 VStack(spacing: DS.md) {
-                    Image(systemName: "magnifyingglass")
+                    Image(systemName: DS.Glyph.search)
                         .font(DS.heroFont)
                         .foregroundStyle(DS.inkGhost)
                     // When filters are what emptied this, the bar above already says so
@@ -302,7 +302,7 @@ struct SearchResultsView<ProjectCard: View>: View {
         if timeRange != .all { clauses.append(timeRange.label) }
         if enabledKinds != allKinds {
             let names = SearchHit.Kind.allCases.filter(enabledKinds.contains).map(\.label)
-            clauses.append(names.isEmpty ? "no kinds" : names.joined(separator: ", "))
+            clauses.append(names.isEmpty ? String(localized: "no kinds") : names.joined(separator: ", "))
         }
         if !selectedApps.isEmpty { clauses.append(selectedApps.sorted().joined(separator: ", ")) }
         let scope = clauses.isEmpty ? "" : " — \(clauses.joined(separator: " · "))"
@@ -310,7 +310,7 @@ struct SearchResultsView<ProjectCard: View>: View {
         // timeline lists at most `rowsPerDay` of them per day. Calling that a count of
         // what is on screen was simply false whenever a day ran long — and the days
         // that run long say so themselves now.
-        return "Filters are narrowing this search: \(digest.shown) of \(digest.inPeriod) matched\(scope)"
+        return String(localized: "Filters are narrowing this search: \(digest.shown) of \(digest.inPeriod) matched\(scope)")
     }
 
     /// The dead end made walkable — the way out sits inside the empty state itself.
@@ -350,7 +350,7 @@ struct SearchResultsView<ProjectCard: View>: View {
         }
         .buttonStyle(.plain)
         // On/off was a tobacco fill and nothing else — no tooltip, no glyph change.
-        .help(on ? "Hide \(app)" : "Show only \(app)")
+        .help(on ? String(localized: "Hide \(app)") : String(localized: "Show only \(app)"))
         .accessibilityLabel(app)
         .accessibilityValue(on ? "Filtering to this app" : "Not filtered")
         .accessibilityHint("\(count) results")
@@ -379,7 +379,7 @@ struct SearchResultsView<ProjectCard: View>: View {
             .overlay(Capsule().strokeBorder(on ? kind.color.opacity(0.3) : DS.hairline, lineWidth: 0.75))
         }
         .buttonStyle(.plain)
-        .help(on ? "Hide \(kind.label)" : "Show \(kind.label)")
+        .help(on ? String(localized: "Hide \(kind.label)") : String(localized: "Show \(kind.label)"))
     }
 
     // MARK: - Timeline

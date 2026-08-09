@@ -304,4 +304,63 @@ final class RecordingServiceTests: XCTestCase {
 
         XCTAssertTrue(db.written.isEmpty)
     }
+
+    // MARK: - App switching
+    //
+    // The gap the four tests above could not see. Every channel they cover asks
+    // the exclusion list about the *frontmost* app, which is right for a poller
+    // and wrong for the app-switch handler: it runs after the switch, and the row
+    // it writes describes the app just left. So Settings said the exclusion list
+    // covered window titles, and leaving 1Password wrote
+    // "1Password: <title> (2m10s)" every time.
+
+    /// Drive the real sequence: the handler records the session for the app being
+    /// left, and only then moves the current-app pointer.
+    private func leaveApp(toBundleID bundleID: String, named name: String) {
+        env.frontmostBundleID = bundleID
+        env.frontmostAppName = name
+        recorder.recordAppSession()
+        recorder.updateCurrentApp()
+    }
+
+    func testLeavingAnExcludedAppDoesNotRecordItsTitleOrDuration() {
+        env.frontmostBundleID = "com.1password.1password"
+        env.frontmostAppName = "1Password"
+        env.activeWindowTitle = "1Password — Personal"
+        recorder.updateCurrentApp()
+
+        env.now = env.now.addingTimeInterval(130)
+        leaveApp(toBundleID: "com.microsoft.VSCode", named: "Code")
+
+        XCTAssertTrue(db.written.isEmpty,
+                      "an excluded app's session reached the database: \(db.texts)")
+    }
+
+    /// The other end of the same switch: arriving at an excluded app must not
+    /// record its window title either.
+    func testSwitchingIntoAnExcludedAppDoesNotRecordItsTitle() {
+        env.activeWindowTitle = "Selection.swift — Mull"
+        recorder.updateCurrentApp()
+
+        env.frontmostBundleID = "com.apple.keychainaccess"
+        env.frontmostAppName = "Keychain Access"
+        env.activeWindowTitle = "Keychain Access"
+        recorder.updateCurrentApp()
+        recorder.pollWindowTitle()
+
+        XCTAssertTrue(db.written.isEmpty,
+                      "an excluded app's title reached the database: \(db.texts)")
+    }
+
+    /// The control. Without this, the two tests above pass just as well against a
+    /// gate that has swallowed app sessions entirely.
+    func testLeavingAnOrdinaryAppStillRecordsTheSession() {
+        env.activeWindowTitle = "Selection.swift — Mull"
+        recorder.updateCurrentApp()
+
+        env.now = env.now.addingTimeInterval(130)
+        leaveApp(toBundleID: "com.apple.Safari", named: "Safari")
+
+        XCTAssertEqual(db.texts, ["Code: Selection.swift — Mull (2m10s)"])
+    }
 }

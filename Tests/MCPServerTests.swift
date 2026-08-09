@@ -17,10 +17,32 @@ import XCTest
 /// response *shape* rather than on content — there is no real content to expect.
 final class MCPServerTests: XCTestCase {
 
+    // MARK: - Language
+
+    // These assertions quote text mull generates, and since `VaultText` that text
+    // follows the reader's language — so without pinning it the suite passes on an
+    // English Mac and fails on a Japanese one, reporting a translation as a broken
+    // format. English, because that is what the expected strings here are written in.
+    private static var savedVaultLanguage: String??
+    private func pinEnglish() {
+        Self.savedVaultLanguage = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        UserDefaults.standard.set(UserLanguage.Preference.english.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
+    }
+    private func unpinLanguage() {
+        UserDefaults.standard.set(Self.savedVaultLanguage ?? nil, forKey: UserLanguage.preferenceKey)
+    }
+
+    override func tearDown() {
+        unpinLanguage()
+        super.tearDown()
+    }
+
     private var db: DatabaseService!
     private var server: MCPServer!
 
     override func setUp() {
+        pinEnglish()
         super.setUp()
         // A throwaway database — never DatabaseService(), which would open the
         // user's real recorded history.

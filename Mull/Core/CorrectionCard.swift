@@ -106,7 +106,7 @@ struct CorrectionCard {
 
         out += "\n\n### 2. Failed move  ← 自動\n"
         if let w = wouldWrite {
-            out += "\n**mull がこの id に書こうとしている内容**（訂正直前の版そのものではない — 上の doc comment 参照）:\n\n"
+            out += "\n**mull がこの id に書こうとしている内容**（訂正直前の版そのものではない。上の doc comment 参照）:\n\n"
             out += "```\n\(w)\n```\n"
         } else {
             out += "\n_この pass では mull はこの id に候補を出していない。人間が書いた内容のみ記録する。_\n"

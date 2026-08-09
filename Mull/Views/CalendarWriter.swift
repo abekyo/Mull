@@ -69,11 +69,11 @@ final class CalendarWriter {
 
     func update(ref: Ref, from previous: CalendarService.EventFields,
                 to fields: CalendarService.EventFields, undo: UndoManager?) {
-        performUpdate(ref: ref, from: previous, to: fields, undo: undo, name: "Edit Event")
+        performUpdate(ref: ref, from: previous, to: fields, undo: undo, name: String(localized: "Edit Event"))
     }
 
     func delete(ref: Ref, fields: CalendarService.EventFields, undo: UndoManager?) {
-        performDelete(ref: ref, fields: fields, undo: undo, name: "Delete Event")
+        performDelete(ref: ref, fields: fields, undo: undo, name: String(localized: "Delete Event"))
     }
 
     /// The fields an event has right now — the "before" half of an edit, read from
@@ -119,7 +119,7 @@ final class CalendarWriter {
             // creates — so undo writes a standalone event at that hour instead. The
             // Edit menu says which of the two it is about to do rather than
             // promising to restore something it cannot.
-            register(undo, name: extras?.wasRecurring == true ? "Delete Occurrence" : name) {
+            register(undo, name: extras?.wasRecurring == true ? String(localized: "Delete Occurrence") : name) {
                 [weak self] undo in
                 self?.performCreate(ref: ref, fields: restore, extras: extras,
                                     undo: undo, name: name)

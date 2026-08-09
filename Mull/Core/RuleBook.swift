@@ -102,7 +102,6 @@ enum RuleBook {
             title: "Rules",
             meta: [("rules", "\(count)"),
                    ("pending", "\(pending)"),
-                   ("source", "corrections/ — あなたが直した記録"),
                    ("provenance", "agent = mull が集めた / human = あなたが書き換えた")],
             note: note)
     }

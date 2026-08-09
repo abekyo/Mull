@@ -23,7 +23,7 @@ import Foundation
 /// - **One of them contradicted `me.md`.** `00_identity/index.md` declared
 ///   `canonical: ../me.md` while carrying rule-based facts that `me.md`
 ///   deliberately drops (DIRECTION §4/§9.1 — the pre-digestion mull cut). Those
-///   facts are still produced, at use-time, by `ContextComposer` and `ProfileTab`.
+///   facts are still produced, at use-time, by `ContextComposer`.
 ///
 /// The line the shape follows now:
 ///

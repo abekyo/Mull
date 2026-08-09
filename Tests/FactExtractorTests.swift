@@ -19,12 +19,26 @@ final class FactExtractorTests: XCTestCase {
     private var db: DatabaseService!
     private var analytics: AnalyticsEngine!
     private var extractor: FactExtractor!
+    private var savedLanguage: String?
 
     override func setUp() {
         super.setUp()
+        // A fact is a sentence, and since `VaultText` these sentences follow the
+        // reader's language — so every assertion below that quotes one is really an
+        // assertion about a language too. Pin it, or the suite passes or fails
+        // depending on what the machine running it is set to. English, because that
+        // is what the expected strings in this file are written in.
+        savedLanguage = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        UserDefaults.standard.set(UserLanguage.Preference.english.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
         db = try! DatabaseService.temporary()
         analytics = AnalyticsEngine(database: db)
         extractor = FactExtractor(analytics: analytics, database: db)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.set(savedLanguage, forKey: UserLanguage.preferenceKey)
+        super.tearDown()
     }
 
     // MARK: - Empty database

@@ -1144,7 +1144,7 @@ private enum MarkdownHighlighter {
             // editor, and a link that opens on click cannot be edited).
             s.addAttribute(.mdLinkURL, value: ns.substring(with: m.range(at: 2)), range: label)
             s.addAttribute(.cursor, value: NSCursor.pointingHand, range: label)
-            s.addAttribute(.toolTip, value: "⌘-click to open", range: label)
+            s.addAttribute(.toolTip, value: String(localized: "⌘-click to open"), range: label)
         }
     }
 

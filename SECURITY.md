@@ -24,7 +24,7 @@ assumption is that your Mac is yours and the software on it is not automatically
 
 | Boundary | The guarantee |
 |---|---|
-| Network | No mull server exists. With the default configuration nothing leaves the machine. There is no telemetry, no analytics, no crash reporting, and no toggle for them because there is nothing to toggle. |
+| Network | No mull server exists. Point mull at Ollama or an OpenAI-compatible local server (LM Studio, Jan, llama.cpp, vLLM) and it runs with the network off entirely — nightly summaries, Chat and per-project deliberation included. The default configuration sends nothing either: the LLM ships off, and the MCP tools never call one at any setting. There is no telemetry, no analytics, no crash reporting, and no toggle for them because there is nothing to toggle. |
 | Cloud LLMs | Off by default. Turning one on sends data directly from your machine to the provider you chose, with your own API key. There is no intermediary. |
 | Secrets | Content classified as sensitive (API keys, card numbers, private keys, credentials) is filtered before it can reach a provider. See `Mull/Core/SensitiveText.swift` and `Mull/Core/Redactor.swift`. |
 | Password fields | Skipped at capture via `IsSecureEventInputEnabled`, so they are never written in the first place. |
@@ -34,7 +34,8 @@ assumption is that your Mac is yours and the software on it is not automatically
 | API keys | macOS Keychain. Never written in plaintext. |
 | Deletion | "Delete everything" and a time-scoped Forget both reach the quarantined copies of the database (`mull.sqlite.corrupt-*`, `.reattached-*`) that the recovery path leaves beside the live file, not just the live tables. |
 | `me.pinned.md` | Yours alone. No MCP tool will write it, by any path. Content there is served to assistants as something *you* asserted, so an agent being able to add a line to it would be an agent putting words in your mouth. |
-| Your calendar | mull can create, move and delete events, and four lines bound that. It keeps no copy: it writes to EventKit and reads back from EventKit, and nothing about your calendar enters mull's database. It writes only to a calendar you already chose, and never creates one. It writes nothing without an explicit gesture from you: double-click, type a title, press Return. And every write is registered with `UndoManager`, so ⌘Z reverses it. Recurring events are touched as `.thisEvent` only, and subscribed calendars stay read-only. The MCP `calendar` tool is read-only, so an agent can see your schedule but cannot change it. |
+| Your calendar | mull can create, move and delete events, and four lines bound that. It keeps no copy: it writes to EventKit and reads back from EventKit, and nothing about your calendar enters mull's database. It writes only to a calendar you already chose, and never creates one. It writes nothing without an explicit gesture from you — double-click, type a title, press Return — **except the mirror described below, if you turn it on**. And every such write is registered with `UndoManager`, so ⌘Z reverses it. Recurring events are touched as `.thisEvent` only, and subscribed calendars stay read-only. The MCP `calendar` tool is read-only, so an agent can see your schedule but cannot change it. |
+| The calendar mirror | Off unless you turn it on and name a calendar; mull will not pick one for you and will not create one. On, it writes what you worked on into that calendar on an interval you set. Three limits bound it. It writes only work that has **finished** — a block mull can still extend is never written, so nothing it puts in your calendar moves afterwards or claims you stopped at a moment you did not. It touches only events carrying its own marker, so a real appointment in the same calendar is never rewritten or removed. And a mirrored event you delete is **never written again**: mull remembers the deletion rather than restoring it on the next run. What it writes are the names of the things you worked on, taken from your window titles — so if the calendar you pick belongs to an account rather than to this Mac, that text leaves the machine, and mull says so in Settings beside the choice rather than afterwards. |
 
 ## What mull will not do to you
 
@@ -77,6 +78,16 @@ Stating these explicitly is part of the point:
   signs, not walls. The marking is keyword matching, and a determined phrasing walks past
   it. **The real mitigation is on your side: give an agent reading mull the same trust you
   would give the web pages you had open, and keep destructive tools behind confirmation.**
+- **"mull does not read your email body" is narrower than it sounds.** The Mail integration
+  is opt-in and reads headers only: subject, sender, date received, and nothing else
+  (`Mull/Services/EmailService.swift`). But Mail.app is an ordinary application as far as
+  the rest of capture is concerned. While you are reading a message, the window-body
+  capture reads the text on screen the same way it reads a browser or an editor, because
+  Mail is not on the excluded-apps list. The honest form of the promise is: *the mail
+  channel reads only headers; your screen is read wherever you are.* Add Mail under
+  Settings › Data › "Don't record in these apps" if you want the message text left alone
+  as well.
+
 - **Anything you send to a cloud LLM has left your machine.** After that, the provider's
   retention policy governs, not this one.
 
@@ -88,7 +99,8 @@ The claims above are checkable, and checking them is the intended use of this re
 |---|---|
 | What is captured, and when is capture skipped? | `Mull/Services/RecordingService.swift` |
 | What counts as sensitive, and what is filtered? | `Mull/Core/SensitiveText.swift`, `Mull/Core/Redactor.swift` |
-| Does anything make a network call? | `Mull/Services/LLMClient.swift`, the only outbound path |
+| Does anything make a network call? | `Mull/Services/LLMClient.swift` for every provider request, and the connection tests in `Mull/Views/Settings/SettingsView.swift`. Those two files are the whole outbound surface — `rg -l URLSession Mull/` finds no others |
+| Can it run with the network off? | The `MullMCP` binary is built from `MullMCP` and `Mull/Core` only (see `project.yml`), and every file that touches `LLMClient` sits in `Mull/Services` or `Mull/Views`. The server your agent talks to does not contain a model call to make. Which providers stay on-device is one switch: `LLMProvider.isCloud` in `Mull/Core/Models.swift` |
 | What does the MCP server expose to an agent? | `Mull/Core/MCPServer.swift` |
 | How is captured text framed for an agent? | `Mull/Core/InstructionText.swift` |
 | What is written to disk, and where? | `Mull/Core/DatabaseService.swift`, `Mull/Core/MullDirectory.swift` |

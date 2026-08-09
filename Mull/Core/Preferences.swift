@@ -47,6 +47,38 @@ enum Preferences {
         return TimeInterval(max(stored, 0))
     }
 
+    // MARK: - Calendar mirror
+
+    static let mirrorEnabledKey = "calendarMirrorEnabled"
+    static let mirrorCalendarKey = "calendarMirrorCalendarID"
+    static let mirrorIntervalKey = "calendarMirrorInterval"
+
+    /// Off unless the user turns it on. A feature that writes to somebody's real
+    /// calendar does not get to be on by default, and one that can carry window
+    /// titles to an account server gets it twice.
+    static var mirrorEnabled: Bool { store.bool(forKey: mirrorEnabledKey) }
+
+    /// Which calendar the mirror writes into. No default: mull never picks a calendar
+    /// on the user's behalf and never creates one (SECURITY.md), so an unset value
+    /// means the mirror does nothing at all.
+    static var mirrorCalendarID: String? {
+        store.string(forKey: mirrorCalendarKey).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    static let defaultMirrorInterval: TimeInterval = 3600
+
+    /// How often the mirror reconciles, in seconds.
+    ///
+    /// This governs *latency* rather than volume: only settled blocks are written and
+    /// each is written once, so a shorter interval means finished work reaches the
+    /// calendar sooner, not that more of it is written.
+    static var mirrorInterval: TimeInterval {
+        guard let stored = store.object(forKey: mirrorIntervalKey) as? Int, stored > 0 else {
+            return defaultMirrorInterval
+        }
+        return TimeInterval(max(stored, 60))
+    }
+
     // MARK: - Output
 
     /// Character ceiling on assembled context, or `0` for no ceiling. Read here

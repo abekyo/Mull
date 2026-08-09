@@ -54,17 +54,18 @@ struct CurrentState {
     /// of its own.
     func summary() -> String {
         var lines: [String] = []
-        if let entity = activeEntity { lines.append("- **Active:** \(MarkdownDoc.inline(entity))") }
-        else if let title = activeTitle { lines.append("- **Active:** \(MarkdownDoc.inline(title))") }
-        if let app = activeApp { lines.append("- **App:** \(MarkdownDoc.inline(app))") }
+        if let entity = activeEntity { lines.append("- **" + VaultText.t("Active", "作業中") + ":** \(MarkdownDoc.inline(entity))") }
+        else if let title = activeTitle { lines.append("- **" + VaultText.t("Active", "作業中") + ":** \(MarkdownDoc.inline(title))") }
+        if let app = activeApp { lines.append("- **" + VaultText.t("App", "アプリ") + ":** \(MarkdownDoc.inline(app))") }
         if !recentActions.isEmpty {
-            lines.append("- **Recently:**")
+            lines.append("- **" + VaultText.t("Recently", "直近") + ":**")
             // Clipboard entries and window titles — so this is other people's text
             // as often as it is the user's, and `whats_active_now` is the call an
             // agent is told to make first. Same frame as every other MCP surface.
             lines.append(contentsOf: recentActions.map { "  - \(InstructionText.marked(MarkdownDoc.inline($0)))" })
         }
-        return lines.isEmpty ? "(no recent activity)" : lines.joined(separator: "\n")
+        return lines.isEmpty ? VaultText.t("(no recent activity)", "（直近の活動なし）")
+                             : lines.joined(separator: "\n")
     }
 
     // MARK: - Derivation (cheap, rule-based — structure, not summarization)

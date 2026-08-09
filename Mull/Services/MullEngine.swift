@@ -140,8 +140,7 @@ final class MullEngine {
             // What actually wrote this summary, not what was configured to. The
             // setting was stamped even when the model never answered, so a row
             // produced by the rule-based fallback claimed to be Claude's work —
-            // and the Profile tab reads this field to tell the user how their
-            // record was made.
+            // and this field is what tells the user how their record was made.
             let provider = llmFailure == nil
                 ? (UserDefaults.standard.string(forKey: "llmProvider") ?? "off")
                 : "rule-based"
@@ -359,7 +358,12 @@ final class MullEngine {
         rhythm and length of the WRITING SAMPLES below, in the first person, in \(language).
         A tool acting on the user's behalf may read it afterwards; that is not a reason to
         write like a machine. The MEMORY_UPDATES section is separate bookkeeping and stays
-        plain and factual.
+        plain and factual — but it is still written **in \(language)**, because those
+        entries are what the user reads at the top of me.md. Without this line the model
+        defaulted to English there whatever the rest of the pass was in, and a Japanese
+        reader opened me.md to find four English bullets under a Japanese heading.
+        Names, descriptions and content all follow \(language); only the JSON keys and
+        the `action` / `type` values stay as written below, because mull parses them.
 
         **Today's date: \(dateStr)**
 
@@ -532,17 +536,17 @@ final class MullEngine {
 
         if hasStructuredContent {
             if let m = morning {
-                md.append("## Morning")
+                md.append("## " + VaultText.t("Morning", "午前"))
                 md.append(m)
                 md.append("")
             }
             if let a = afternoon {
-                md.append("## Afternoon")
+                md.append("## " + VaultText.t("Afternoon", "午後"))
                 md.append(a)
                 md.append("")
             }
             if let e = evening {
-                md.append("## Evening")
+                md.append("## " + VaultText.t("Evening", "夜"))
                 md.append(e)
                 md.append("")
             }
@@ -558,12 +562,12 @@ final class MullEngine {
         }
 
         if let l = learnings {
-            md.append("## Learned")
+            md.append("## " + VaultText.t("Learned", "わかったこと"))
             md.append(l)
             md.append("")
         }
         if let ip = inProgress {
-            md.append("## In progress")
+            md.append("## " + VaultText.t("In progress", "途中"))
             md.append(ip)
             md.append("")
         }
@@ -629,9 +633,7 @@ final class MullEngine {
 
         switch action {
         case "create":
-            let fileName = name.lowercased()
-                .replacingOccurrences(of: " ", with: "_")
-                .appending(".md")
+            let fileName = MemoryFiles.fileName(for: name)
             let filePath = memoryDir.appendingPathComponent(fileName)
 
             // Write the file FIRST; only record the DB row if it actually

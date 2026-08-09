@@ -97,9 +97,7 @@ enum LiveContextGenerator {
         var l: [String] = []
         l.append(MarkdownDoc.header(
             title: "mull — start here",
-            meta: [("updated", timestamp),
-                   ("scope", "the mull record of one person — local, automatically kept"),
-                   ("ownership", "kept on the user's Mac; lent to you, not owned by you")]))
+            meta: [("updated", timestamp)]))
         l.append("")
         l.append("This is the mull record of one person: an automatically-kept, local context")
         l.append("vault. Read it to understand who they are and what they are doing, so you can")
@@ -134,7 +132,7 @@ enum LiveContextGenerator {
     // FactExtractor pre-digestion that `generateMe` had already, deliberately,
     // stopped writing into me.md — so the same rule-based facts mull removed from
     // one file were being baked into another. They are still available, assembled
-    // at use-time, through `ContextComposer` and the Profile tab.
+    // at use-time, through `ContextComposer`.
 
     // MARK: - Daily Snapshot
     //
@@ -256,19 +254,22 @@ enum LiveContextGenerator {
         // this function used to do between every block is gone with it.
         let state = CurrentState.current(database: database)
         let activity = state.summary()
-        sections.append(MarkdownDoc.section("Right now", activity == "(no recent activity)" ? nil :
-            activity + "\n\n_Fresher and deeper than this: call `whats_active_now` / `search`._"))
+        sections.append(MarkdownDoc.section(VaultText.t("Right now", "いまのところ"), activity == "(no recent activity)" ? nil :
+            activity + "\n\n_" + VaultText.t(
+                "Fresher and deeper than this: call `whats_active_now` / `search`.",
+                "これより新しく、詳しいものは `whats_active_now` / `search` を呼んでください。") + "_"))
 
         // Active projects from memories
-        sections.append(MarkdownDoc.section("Projects", items:
+        sections.append(MarkdownDoc.section(VaultText.t("Projects", "プロジェクト"), items:
             memories.filter { $0.memoryType == .project }
                 .map { "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))" }))
 
         // Email metadata — already read, on the main actor, by the caller.
         if let emailSummary = inbox.summary {
-            sections.append(MarkdownDoc.section("Inbox", emailSummary))
+            sections.append(MarkdownDoc.section(VaultText.t("Inbox", "受信トレイ"), emailSummary))
         } else if let problem = inbox.problem {
-            sections.append(MarkdownDoc.section("Inbox", "Unavailable — \(problem)"))
+            sections.append(MarkdownDoc.section(VaultText.t("Inbox", "受信トレイ"),
+                                                VaultText.t("Unavailable — ", "取得できません: ") + problem))
         }
 
         // Calendar events
@@ -277,9 +278,9 @@ enum LiveContextGenerator {
         // and omitting the block let every AI reading this file conclude the day
         // was free. Naming the blind spot is the same rule ColdReadService follows.
         if let schedule = calendar?.todaySchedule() {
-            sections.append(MarkdownDoc.section("Today's schedule", schedule))
+            sections.append(MarkdownDoc.section(VaultText.t("Today's schedule", "今日の予定"), schedule))
         } else if let calendar, calendar.accessState != .granted {
-            sections.append(MarkdownDoc.section("Today's schedule",
+            sections.append(MarkdownDoc.section(VaultText.t("Today's schedule", "今日の予定"),
                 "Unavailable — mull has not been granted calendar access, so today's events are unknown (not absent)."))
         }
 
@@ -291,11 +292,15 @@ enum LiveContextGenerator {
         // Recent summaries (if mull has run before). A summary older than a week is
         // reported as the gap it is, not as a "recent day" — see `splitByRecency`.
         let (recentDays, staleDay) = summaries.splitByRecency()
-        sections.append(MarkdownDoc.section("Recent days", items:
+        sections.append(MarkdownDoc.section(VaultText.t("Recent days", "ここ数日"), items:
             recentDays.isEmpty
-                ? (staleDay.map { ["- No day has been consolidated since **\($0.dateShort)**. "
-                                   + "Nightly consolidation needs an LLM provider; the days since are "
-                                   + "in the event record but have not been summarised."] } ?? [])
+                ? (staleDay.map { day in [VaultText.t(
+                        "- No day has been consolidated since **\(day.dateShort)**. "
+                            + "Nightly consolidation needs an LLM provider; the days since are "
+                            + "in the event record but have not been summarised.",
+                        "- **\(day.dateShort)** 以降、集約された日がありません。"
+                            + "夜間の集約には LLM プロバイダが要ります。それ以降の日はイベントとしては"
+                            + "記録に残っていますが、要約はされていません。")] } ?? [])
                 : recentDays.prefix(5).map { "- **\($0.dateShort)** — \(MarkdownDoc.inline($0.preview))" }))
 
         // NOTE: the day "narrative" ("A focused day…"), the keyword/topic cloud,
@@ -305,7 +310,7 @@ enum LiveContextGenerator {
         // Those belong in the Insights UI, not the AI context.
 
         // References
-        sections.append(MarkdownDoc.section("Key references", items:
+        sections.append(MarkdownDoc.section(VaultText.t("Key references", "主な参照先"), items:
             memories.filter { $0.memoryType == .reference }.prefix(5)
                 .map { "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))" }))
 
@@ -345,8 +350,8 @@ enum LiveContextGenerator {
             let body = MarkdownDoc.body(of: ContextBlockFile.stripMarkers(raw))
             return body.isEmpty ? nil : MarkdownDoc.demoteHeadings(body, by: 1)
         }
-        sections.append(MarkdownDoc.section("Who I am", embed("me.md")))
-        sections.append(MarkdownDoc.section("What I'm working on", embed("now.md")))
+        sections.append(MarkdownDoc.section(VaultText.t("Who I am", "私について"), embed("me.md")))
+        sections.append(MarkdownDoc.section(VaultText.t("What I'm working on", "いま取り組んでいること"), embed("now.md")))
 
         // Clipboard grouped by project/context — the "pagpag dish"
         let calendar = Calendar.current
@@ -361,7 +366,7 @@ enum LiveContextGenerator {
         let titleEvents = todayEvents.filter { $0.eventType == .screenText }
         let grouped = groupClipboardByContext(clips: clipEvents, titles: titleEvents)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        sections.append(MarkdownDoc.section("What you were dealing with today",
+        sections.append(MarkdownDoc.section(VaultText.t("What you were dealing with today", "今日あつかっていたこと"),
                                             grouped.isEmpty ? nil : grouped))
 
         Curator.curate(relativePath: "full.md", header: Curator.fullHeader(timestamp: timestamp),

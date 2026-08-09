@@ -104,7 +104,7 @@ extension CalendarWeekView {
         /// Said on the card's tooltip, in the read-only popover and in the editor,
         /// because the alternative is a repeating event that looks exactly like a
         /// one-off and quietly detaches an occurrence the first time it is touched.
-        static let recurrenceNote = "Repeats · changes here affect this one occurrence"
+        static let recurrenceNote = String(localized: "Repeats · changes here affect this one occurrence")
 
         var tooltip: String {
             if let event {
@@ -113,7 +113,7 @@ extension CalendarWeekView {
                 // both midnight — "12:00 AM – 12:00 AM · drag to move" was three
                 // wrong things in one line.
                 let hint = (event.isEditable && !event.isAllDay)
-                    ? " · drag to move, drag the lower edge to stretch" : ""
+                    ? String(localized: " · drag to move, drag the lower edge to stretch") : ""
                 let repeats = event.isRecurring ? " · \(Self.recurrenceNote.lowercased())" : ""
                 let when = event.isAllDay ? "all-day" : event.timeFormatted
                 return "\(title) · \(when)\(place)\(repeats)\(hint)"
@@ -122,7 +122,7 @@ extension CalendarWeekView {
             let label = (block.label.isEmpty || block.label == block.app) ? "" : " · \(block.label)"
             let away = block.pauses.isEmpty
                 ? ""
-                : " · away \(CalendarWeekView.durationLabel(block.pausedDuration))"
+                : String(localized: " · away \(CalendarWeekView.durationLabel(block.pausedDuration))")
             return "\(block.startFormatted) – \(block.endFormatted) · \(block.durationFormatted)\(label)\(away)"
         }
     }
@@ -131,8 +131,8 @@ extension CalendarWeekView {
     /// on every surface that can show a repeating event at all — a series that looks
     /// like a one-off is a series somebody is about to break a piece off.
     var recurrenceMark: some View {
-        Image(systemName: "arrow.triangle.2.circlepath")
-            .font(.system(size: 7, weight: .semibold))
+        Image(systemName: DS.Glyph.repeats)
+            .font(DS.iconMini.weight(.semibold))
             .foregroundStyle(DS.inkFaint)
             .accessibilityLabel("Repeats")
     }
@@ -141,7 +141,7 @@ extension CalendarWeekView {
     /// cut by midnight, not that it began or ended there.
     func continuationMark(_ symbol: String, tint: Color) -> some View {
         Image(systemName: symbol)
-            .font(.system(size: 7, weight: .semibold))
+            .font(DS.iconMini.weight(.semibold))
             .foregroundStyle(tint.opacity(0.75))
             .padding(.horizontal, DS.hair)
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -285,9 +285,9 @@ extension CalendarWeekView {
     /// which day the rest of the span is on.
     private static func continuationNote(_ span: CalendarGrid.Span) -> String {
         switch (span.continuesBefore, span.continuesAfter) {
-        case (true, true):   return " · runs through this whole day"
-        case (true, false):  return " · continues from the previous day"
-        case (false, true):  return " · continues into the next day"
+        case (true, true):   return String(localized: " · runs through this whole day")
+        case (true, false):  return String(localized: " · continues from the previous day")
+        case (false, true):  return String(localized: " · continues into the next day")
         case (false, false): return ""
         }
     }
@@ -340,7 +340,7 @@ extension CalendarWeekView {
                     HStack(spacing: DS.xs) {
                         Text("Scheduled")
                         if event.isRecurring {
-                            Label("Repeats", systemImage: "arrow.triangle.2.circlepath")
+                            Label("Repeats", systemImage: DS.Glyph.repeats)
                                 .labelStyle(.titleAndIcon)
                         }
                     }
@@ -352,9 +352,9 @@ extension CalendarWeekView {
             Divider()
 
             HStack(spacing: DS.md) {
-                Label(event.timeFormatted, systemImage: "clock")
+                Label(event.timeFormatted, systemImage: DS.Glyph.timeOfDay)
                     .font(DS.captionFont)
-                Label(CalendarWeekView.durationLabel(event.duration), systemImage: "hourglass")
+                Label(CalendarWeekView.durationLabel(event.duration), systemImage: DS.Glyph.duration)
                     .font(DS.captionFont)
             }
             .foregroundStyle(DS.inkDim)
@@ -375,10 +375,7 @@ extension CalendarWeekView {
     }
 
     static func durationLabel(_ duration: TimeInterval) -> String {
-        let minutes = max(Int(duration / 60), 0)
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60, rest = minutes % 60
-        return rest > 0 ? "\(hours)h \(rest)m" : "\(hours)h"
+        VaultText.duration(minutes: max(Int(duration / 60), 0))
     }
 
     func blockDetail(_ block: TimeBlock) -> some View {
@@ -401,9 +398,9 @@ extension CalendarWeekView {
             Divider()
 
             HStack(spacing: DS.md) {
-                Label(block.startFormatted + " – " + block.endFormatted, systemImage: "clock")
+                Label(block.startFormatted + " – " + block.endFormatted, systemImage: DS.Glyph.timeOfDay)
                     .font(DS.captionFont)
-                Label(block.durationFormatted, systemImage: "hourglass")
+                Label(block.durationFormatted, systemImage: DS.Glyph.duration)
                     .font(DS.captionFont)
                 // A bare number beside a "#" glyph left the reader to guess what had
                 // been counted. It is captures, and it says so.
@@ -439,7 +436,7 @@ extension CalendarWeekView {
 
             if let title = block.topWindowTitle {
                 HStack(spacing: DS.xs) {
-                    Image(systemName: "doc.text")
+                    Image(systemName: DS.Glyph.file)
                         .font(DS.miniFont)
                         .foregroundStyle(DS.inkFaint)
                     Text(title)
@@ -451,7 +448,7 @@ extension CalendarWeekView {
 
             if let clip = block.topClipboard {
                 HStack(spacing: DS.xs) {
-                    Image(systemName: "text.quote")
+                    Image(systemName: DS.Glyph.quote)
                         .font(DS.miniFont)
                         .foregroundStyle(DS.inkFaint)
                     Text("\"\(String(clip.prefix(100)))\"")

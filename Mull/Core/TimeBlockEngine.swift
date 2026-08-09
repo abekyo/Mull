@@ -144,7 +144,7 @@ struct TimeBlockEngine {
         for block in blocks {
             let gap = merged.last.map { block.start.timeIntervalSince($0.end) } ?? 0
             guard var previous = merged.last, gap >= 0, gap <= resumeGap,
-                  normalizeTaskKey(previous, chrome: chrome) == normalizeTaskKey(block, chrome: chrome)
+                  continues(previous, block, chrome: chrome)
             else {
                 merged.append(block)
                 continue
@@ -163,6 +163,56 @@ struct TimeBlockEngine {
         return merged
     }
 
+    /// Whether the second block is the first one resumed, rather than something new.
+    ///
+    /// Graded, because the evidence is. Keying this on `normalizeTaskKey` alone —
+    /// which is what the first version did — sounds strict and is, but it fails in
+    /// the one direction that matters: when no project can be parsed the key falls
+    /// back to the *label*, and a label is close to unique per block. Two stretches
+    /// of browsing have two page titles, two stretches of terminal work have none at
+    /// all, and both split forever however short the break. Which is the report:
+    /// "the same app is open and it still says these are separate tasks".
+    ///
+    /// So the question asked here is not "can mull prove these are the same work?"
+    /// but "can mull show they are *different* work?" — and only a named, different
+    /// project can show that.
+    private func continues(_ previous: TimeBlock, _ next: TimeBlock, chrome: Set<String>) -> Bool {
+        // Two blocks that each name a project continue each other only if it is the
+        // same project. Leaving Nocturne for PantryApp is a boundary however short
+        // the gap, and this is the case worth being strict about.
+        if let before = projectName(of: previous, chrome: chrome),
+           let after = projectName(of: next, chrome: chrome) {
+            return before == after
+        }
+
+        // Otherwise there is nothing in the record that separates them, and the app
+        // still being in front of the user is the strongest thing left. Splitting
+        // here would assert a boundary nothing observed — which §7.1 puts on the
+        // wrong side of the line between an observation and a claim.
+        if previous.app == next.app { return true }
+
+        // Different apps, at most one of them naming anything: fall back to the
+        // grouping `analyzDay` uses, so a project followed into a second app across a
+        // break still reads as one session.
+        return normalizeTaskKey(previous, chrome: chrome) == normalizeTaskKey(next, chrome: chrome)
+    }
+
+    /// The project a block can be *shown* to be about, or nil when its titles do not
+    /// name one.
+    ///
+    /// Content-driven apps never name one, by the same rule `ProjectNames.rank` uses
+    /// to keep them out of the vault: a web page title is not a project. Without this
+    /// the parser reads "Swift Concurrency — Apple Developer" as the project "Swift
+    /// Concurrency", and every page a reader opens becomes a different piece of work.
+    private func projectName(of block: TimeBlock, chrome: Set<String>) -> String? {
+        guard !ProjectNames.contentDrivenApps.contains(block.app.lowercased()),
+              let title = block.topWindowTitle,
+              let project = parseWindowTitle(title, app: block.app).project,
+              isValidLabel(project, chrome: chrome)
+        else { return nil }
+        return project.lowercased()
+    }
+
     /// Generate a human-readable label for a time block.
     /// Priority: project name > file name > window title > clipboard > app name
     private func generateLabel(for block: TimeBlock, chrome: Set<String>) -> String {
@@ -171,14 +221,16 @@ struct TimeBlockEngine {
             // A segment that is really the app's own furniture is not a project,
             // whatever position it occupies in the title.
             let project = parsed.project.flatMap { isValidLabel($0, chrome: chrome) ? $0 : nil }
-            // Prefer "Project — File" format if both exist
-            if let project, let file = parsed.file {
-                return "\(project) — \(file)"
+            // Prefer "Project — File" format if both exist. `task` stands in for the
+            // file when the window is not on one, so a card reads "Mull — the thing
+            // you were doing" rather than "Mull" over and over down the column.
+            if let project, let detail = parsed.file ?? parsed.task {
+                return "\(project) — \(detail)"
             }
             if let project {
                 return project
             }
-            if let file = parsed.file {
+            if let file = parsed.file ?? parsed.task {
                 return file
             }
             // Fallback to cleaned title
@@ -195,6 +247,11 @@ struct TimeBlockEngine {
     struct ParsedTitle {
         var project: String?  // e.g. "PantryApp", "notes-site"
         var file: String?     // e.g. "ViewController.swift"
+        /// What the window is about when it is not a file — the conversation a
+        /// coding agent named, the document, the ticket. Captions the block beside
+        /// the project; deliberately *not* folded into `file`, which feeds
+        /// "resume at:" and has to stay a path someone can actually open.
+        var task: String?
         var display: String   // cleaned display string
     }
 
@@ -205,6 +262,11 @@ struct TimeBlockEngine {
     ///   Browser: "Page Title — Site Name"
     private func parseWindowTitle(_ title: String, app: String) -> ParsedTitle {
         let separators = [" — ", " - ", " | "]
+        // An editor puts the project last and what you are looking at first; a
+        // browser puts the page first and the site last. Which end to trust is the
+        // whole difference, and it is a property of the app — the same rule
+        // `ProjectNames` uses to keep page titles out of the vault.
+        let projectIsLast = !ProjectNames.contentDrivenApps.contains(app.lowercased())
 
         for sep in separators {
             let parts = title.components(separatedBy: sep)
@@ -221,7 +283,19 @@ struct TimeBlockEngine {
                 if isFileName(part) {
                     file = part
                 } else if isProjectName(part) {
-                    project = project ?? part // Keep the first project-like name
+                    // Last project-like segment for an editor, first for a browser.
+                    //
+                    // Keeping the *first* everywhere is what made VS Code's
+                    // "「Mdファイル編集時のサイドバー位置ずれ問題」 — Mull" report the project as the
+                    // Claude Code conversation. The header of this function has
+                    // documented the shape as "Chat title — ProjectName" all along;
+                    // only the fallback below implemented it, and it never ran
+                    // because the chat title had already claimed the slot. One day
+                    // of real capture produced 75 distinct titles for one editor,
+                    // so every conversation read as a separate project: separate
+                    // cards, separate entries in `get_projects`, and a session that
+                    // could not be rejoined across a four-minute break.
+                    project = (projectIsLast || project == nil) ? part : project
                 }
             }
 
@@ -238,7 +312,16 @@ struct TimeBlockEngine {
                 project = parts.last
             }
 
-            return ParsedTitle(project: project, file: file, display: parts.joined(separator: " — "))
+            // Settling the project on the last segment would otherwise throw away
+            // the specific half of the title, and "Mull" six times in a column says
+            // less than the old (wrongly grouped) captions did.
+            var task: String?
+            if projectIsLast, file == nil, let first = parts.first, first != project {
+                task = first
+            }
+
+            return ParsedTitle(project: project, file: file, task: task,
+                               display: parts.joined(separator: " — "))
         }
 
         // No separator found — single-part title
@@ -316,11 +399,8 @@ struct TimeBlock: Identifiable {
 
     var durationFormatted: String {
         let minutes = Int(duration / 60)
-        if minutes < 1 { return "<1m" }
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        let remainingMinutes = minutes % 60
-        return remainingMinutes > 0 ? "\(hours)h \(remainingMinutes)m" : "\(hours)h"
+        if minutes < 1 { return VaultText.t("<1m", "1分未満") }
+        return VaultText.duration(minutes: minutes)
     }
 
     /// Shown to a person, so it follows their clock — see `TimeFormat`. The MCP
@@ -422,10 +502,21 @@ struct TimeBlock: Identifiable {
 
     /// Most frequent window title, preferring titles that belong to the dominant app —
     /// so a Safari page name never captions a block whose face is Xcode.
+    ///
+    /// Ties break on the title itself rather than on `Dictionary`'s iteration order,
+    /// which is seeded per process: two titles seen the same number of times used to
+    /// caption the same block differently between one launch and the next. Rejoining
+    /// two halves of a session is the case that produces exact ties routinely.
     var topWindowTitle: String? {
         let dominantOwned = windowTitles.filter { windowTitleApps[$0.key] == app }
-        if let best = dominantOwned.max(by: { $0.value < $1.value }) { return best.key }
-        return windowTitles.max(by: { $0.value < $1.value })?.key
+        if let best = mostSeen(in: dominantOwned) { return best }
+        return mostSeen(in: windowTitles)
+    }
+
+    private func mostSeen(in counts: [String: Int]) -> String? {
+        counts.max { a, b in
+            a.value == b.value ? a.key > b.key : a.value < b.value
+        }?.key
     }
 
     var topClipboard: String? {
@@ -445,7 +536,7 @@ struct DailyActivity {
     func asText() -> String {
         var lines: [String] = []
 
-        lines.append("What you mainly did today:")
+        lines.append(VaultText.t("What you mainly did today:", "今日おもにしたこと:"))
         for activity in mainActivities where !AnalyticsEngine.isNoiseApp(activity.app) {
             lines.append("- \(activity.label) (\(activity.durationFormatted), \(activity.app))")
         }
@@ -453,14 +544,14 @@ struct DailyActivity {
         let filteredOther = otherActivities.filter { !AnalyticsEngine.isNoiseApp($0.app) }
         if !filteredOther.isEmpty {
             lines.append("")
-            lines.append("Also:")
+            lines.append(VaultText.t("Also:", "ほかに:"))
             for activity in filteredOther {
                 lines.append("- \(activity.label) (\(activity.durationFormatted), \(activity.app))")
             }
         }
 
         lines.append("")
-        lines.append("App usage:")
+        lines.append(VaultText.t("App usage:", "アプリの使用:"))
         for (app, _, pct) in appBreakdown.prefix(6) {
             lines.append("- \(app): \(String(format: "%.0f", pct))%")
         }
@@ -479,11 +570,8 @@ struct ActivitySummary: Identifiable {
 
     var durationFormatted: String {
         let minutes = Int(totalDuration / 60)
-        if minutes < 1 { return "<1m" }
-        if minutes < 60 { return "\(minutes)m" }
-        let h = minutes / 60
-        let m = minutes % 60
-        return m > 0 ? "\(h)h \(m)m" : "\(h)h"
+        if minutes < 1 { return VaultText.t("<1m", "1分未満") }
+        return VaultText.duration(minutes: minutes)
     }
 
 }
@@ -678,9 +766,9 @@ struct ProjectSnapshot: Identifiable {
     }
 
     var lastActiveFormatted: String {
-        if daysSinceActive == 0 { return "Today" }
-        if daysSinceActive == 1 { return "Yesterday" }
-        return "\(daysSinceActive) days ago"
+        if daysSinceActive == 0 { return VaultText.t("Today", "今日") }
+        if daysSinceActive == 1 { return VaultText.t("Yesterday", "昨日") }
+        return VaultText.t("\(daysSinceActive) days ago", "\(daysSinceActive)日前")
     }
 
 }
@@ -761,11 +849,7 @@ struct WeekComparison {
     }
 
     private func formatDuration(_ d: TimeInterval) -> String {
-        let h = Int(d / 3600)
-        let m = Int(d.truncatingRemainder(dividingBy: 3600) / 60)
-        if h > 0 && m > 0 { return "\(h)h \(m)m" }
-        if h > 0 { return "\(h)h" }
-        return "\(m)m"
+        VaultText.duration(seconds: d)
     }
 }
 

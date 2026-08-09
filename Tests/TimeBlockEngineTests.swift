@@ -21,6 +21,22 @@ import XCTest
 /// they cannot straddle a midnight boundary.
 final class TimeBlockEngineTests: XCTestCase {
 
+    // MARK: - Language
+
+    // These assertions quote text mull generates, and since `VaultText` that text
+    // follows the reader's language — so without pinning it the suite passes on an
+    // English Mac and fails on a Japanese one, reporting a translation as a broken
+    // format. English, because that is what the expected strings here are written in.
+    private static var savedVaultLanguage: String??
+    private func pinEnglish() {
+        Self.savedVaultLanguage = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        UserDefaults.standard.set(UserLanguage.Preference.english.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
+    }
+    private func unpinLanguage() {
+        UserDefaults.standard.set(Self.savedVaultLanguage ?? nil, forKey: UserLanguage.preferenceKey)
+    }
+
     private var db: DatabaseService!
     private var engine: TimeBlockEngine!
 
@@ -31,6 +47,7 @@ final class TimeBlockEngineTests: XCTestCase {
     private let fixtureDay = 10   // Tuesday
 
     override func setUp() {
+        pinEnglish()
         super.setUp()
         db = try! DatabaseService.temporary()
         // `resumeGap` is pinned to the shipped default rather than left to
@@ -41,6 +58,7 @@ final class TimeBlockEngineTests: XCTestCase {
     }
 
     override func tearDown() {
+        unpinLanguage()
         engine = nil
         db = nil
         super.tearDown()
@@ -190,6 +208,59 @@ final class TimeBlockEngineTests: XCTestCase {
         XCTAssertEqual(block.pausedDuration, 300, accuracy: 0.5)
         XCTAssertEqual(block.pauses[0].start, at(9, 30))
         XCTAssertEqual(block.pauses[0].end, at(9, 35))
+    }
+
+    func testSameAppWithNothingToTellTwoStretchesApartRejoins() {
+        // Browsing is one session even though every page has its own title. Nothing
+        // in either half names a project, so there is nothing to tell them apart —
+        // and "the same app is still open" is the strongest signal left.
+        seedMinutes(from: at(9, 0), minutes: 20, app: "Google Chrome",
+                    title: "Swift Concurrency — Apple Developer")
+        seedMinutes(from: at(9, 25), minutes: 20, app: "Google Chrome",
+                    title: "Structured logging in production — Some Blog")
+
+        XCTAssertEqual(engine.generateBlocks(for: fixtureDate).count, 1)
+    }
+
+    func testSameAppRejoinsWhenOnlyOneHalfNamesItsProject() {
+        // Forty minutes in Xcode on Nocturne, a break, then Xcode again with nothing
+        // but keystrokes to go on. mull cannot show that the second half is a
+        // *different* project, so it must not draw it as one.
+        seedMinutes(from: at(9, 0), minutes: 20, app: "Xcode", title: "Nocturne — IngestPipeline.swift")
+        seedRun(start: at(9, 25), count: 21, spacing: 60, app: "Xcode",
+                type: .keystroke, text: "func parse(_ line: String)")
+
+        XCTAssertEqual(engine.generateBlocks(for: fixtureDate).count, 1)
+    }
+
+    func testEditorTitleTakesTheProjectFromTheLastSegmentNotTheFirst() {
+        // VS Code driven by a coding agent: "<conversation> — <project>". Taking the
+        // first project-like segment made the conversation the project, and one real
+        // day produced 75 distinct ones for a single editor — so the same repository
+        // arrived as 75 projects that could never be rejoined across a break.
+        seedMinutes(from: at(9, 0), minutes: 20, app: "Code",
+                    title: "サイドバーのスクロール問題を修正 — Mull")
+        seedMinutes(from: at(9, 25), minutes: 20, app: "Code",
+                    title: "ドキュメント整備とOSS公開準備 — Mull")
+
+        let blocks = engine.generateBlocks(for: fixtureDate)
+
+        XCTAssertEqual(blocks.count, 1, "two conversations in one repository are one session")
+        // The project is settled, and the specific half of the title survives to
+        // caption the card.
+        XCTAssertTrue(blocks[0].label.hasPrefix("Mull — "), "got \(blocks[0].label)")
+    }
+
+    func testBrowserTitlesStillReadFrontToBack() {
+        // The rule above is an editor rule. A browser puts the page first and the
+        // site last, so a page must not start being captioned "GitHub".
+        seedMinutes(from: at(9, 0), minutes: 20, app: "Safari",
+                    title: "Structured concurrency — Swift Forums")
+
+        let blocks = engine.generateBlocks(for: fixtureDate)
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].label, "Structured concurrency")
     }
 
     func testABreakBetweenDifferentProjectsStillSplits() {

@@ -46,51 +46,37 @@ struct ContextComposer {
     /// What excludes them now is the anchor: consumption is included only when it
     /// belongs to the entity the user is actually working in, because "what I read
     /// about this project" is context and "what played in another tab" is not.
+    ///
+    /// ## The shape of the block (2026-08-09)
+    ///
+    /// It used to be three `#` headings, in the order mull stores things:
+    /// identity, then now, then project snapshots. Read as a reader rather than as
+    /// a data model, that shape has one large defect and several small ones. The
+    /// large one: **the same fact appeared in all three sections.** A real block
+    /// said "Mull" nine times, as `取り組み中: Mull`, `作業中: Mull`, six
+    /// `— Mull` suffixes, and a bolded snapshot. Three headings tell a reader that
+    /// three different things are coming, so they read all three looking for the
+    /// difference and pay for a distinction that is not there.
+    ///
+    /// The small ones: `[produce]` leaked mull's own mode vocabulary into a block
+    /// meant for someone else; the `#` headings collided with whatever document
+    /// the block was pasted into; and the most load-bearing number (hours today)
+    /// was last.
+    ///
+    /// So: one sentence for the anchor, one list for the work, and one trailing
+    /// line for everything else. The project name is stated once and stripped from
+    /// the lines beneath it, because a suffix repeated six times is not
+    /// information.
     func compose() async -> String {
         await Task.detached { [database] in
-            var sections: [String] = []
-
-            // 1. Who I am — the user's own stated facts first, then rule-based ones
-            //    (role, stack, work patterns).
-            //    NOT me.md: its header is MCP-oriented boilerplate ("call the tools"),
-            //    which is useless once pasted somewhere no tools exist.
-            //
-            //    The pinned layer used to be missing here entirely, which meant the
-            //    seven answers onboarding asks for — role, working language, how the
-            //    AI should reply — were written to me.pinned.md and then left out of
-            //    the one payload the user actually hands an AI. It also left a fresh
-            //    install with nothing to copy at all: inference needs days of events,
-            //    while a stated fact is true the moment it is typed.
-            var identityParts: [String] = []
-            let pinned = Curator.pinnedFacts().trimmingCharacters(in: .whitespacesAndNewlines)
-            if !pinned.isEmpty { identityParts.append(pinned) }
-
-            let identity = FactExtractor(analytics: AnalyticsEngine(database: database),
-                                         database: database)
-                .generateFactSummary(days: 14)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !identity.isEmpty { identityParts.append(identity) }
-
-            if !identityParts.isEmpty {
-                sections.append("# Who I am\n\n" + identityParts.joined(separator: "\n\n"))
+            let facts = FactExtractor(analytics: AnalyticsEngine(database: database),
+                                      database: database).extractFacts(days: 14)
+            func factTexts(_ category: FactCategory) -> [String] {
+                facts.filter { $0.category == category }.map(\.text)
             }
 
-            // 2. Right now — organized by MODE, not filtered by deletion
-            //    (MAP-ARCHITECTURE.md: keep everything, mean it with mode). The lens
-            //    for a small-context model surfaces what you're DOING
-            //    (produce/decide/think/communicate) and keeps consumption but
-            //    compacts it as research/consume — nothing is silently dropped.
             let state = CurrentState.current(database: database)
-            var nowLines: [String] = []
-            // The raw window title used to be the fallback here, which meant that
-            // whatever page happened to be frontmost was pasted verbatim under
-            // "Active:". `activeEntity` is nil exactly when the title names no
-            // project — a browser tab, a video — so the fallback fired precisely in
-            // the cases where the title was somebody else's words. The app name
-            // alone is the honest answer: mull knows which app, and does not know
-            // what it was for.
-            if let entity = state.activeEntity { nowLines.append("Active: \(entity)") }
-            if let app = state.activeApp { nowLines.append("App: \(app)") }
+            let snaps = TimeBlockEngine(database: database).projectSnapshots(days: 14)
 
             var doing: [String] = []        // produce / decide / think / communicate
             var researching: [String] = []  // consume / research, kept when anchored
@@ -138,13 +124,13 @@ struct ContextComposer {
                     // and it does not depend on the order events arrive in.
                     if let i = doingText.firstIndex(where: { sameUtterance($0, snippet) }) {
                         if snippet.count > doingText[i].count {
-                            doing[i] = "- [\(e.resolvedMode.rawValue)] \(snippet)"
+                            doing[i] = snippet
                             doingText[i] = snippet
                         }
                         continue
                     }
                     if doing.count < 6 {
-                        doing.append("- [\(e.resolvedMode.rawValue)] \(snippet)")
+                        doing.append(snippet)
                         doingText.append(snippet)
                     }
                 case .consume, .research:
@@ -164,19 +150,9 @@ struct ContextComposer {
                 }
                 if doing.count >= 6 && researching.count >= 4 { break }
             }
-            if !doing.isEmpty {
-                nowLines.append("Recently (doing):")
-                nowLines.append(contentsOf: doing)
-            }
-            if !researching.isEmpty {
-                nowLines.append("Also (research/consume): " + researching.joined(separator: " · "))
-            }
-            if !nowLines.isEmpty { sections.append("# Right now\n\n\(nowLines.joined(separator: "\n"))") }
-
-            // 3. Where I left off — ranked active projects with resume points.
-            //    Drop window-title / file-path junk masquerading as a project
-            //    (full paths, "NNN notes" counters, truncated titles): better an
-            //    empty section than "projects" the AI would wrongly trust.
+            // Drop window-title / file-path junk masquerading as a project (full
+            // paths, "NNN notes" counters, truncated titles): better to say nothing
+            // than to name a "project" the AI would wrongly trust.
             func isJunkProject(_ name: String) -> Bool {
                 if name.contains("/") { return true }
                 if name.contains("…") || name.hasSuffix("...") { return true }
@@ -195,18 +171,87 @@ struct ContextComposer {
             // exactly that in a real paste.
             let minimumWorth: TimeInterval = 300
 
-            let snaps = TimeBlockEngine(database: database).projectSnapshots(days: 14)
             let active = snaps
                 .filter { $0.daysSinceActive < 3 && $0.totalDuration >= minimumWorth && !isJunkProject($0.name) }
                 .prefix(5)
-            if !active.isEmpty {
-                var lines = ["# Active work — where I left off"]
-                for p in active {
-                    var line = "- **\(p.name)** — \(p.totalDurationFormatted), \(p.primaryApp), last \(p.lastActiveFormatted)"
-                    if let file = p.lastFile { line += "\n  - resume at: \(file)" }
-                    lines.append(line)
+
+            // MARK: - Assemble
+
+            /// Drop a trailing `— Mull` when the whole list is about Mull. The
+            /// suffix is the window title's, and repeating it under a heading that
+            /// already names the project is six copies of one fact.
+            func withoutProjectSuffix(_ line: String, _ project: String?) -> String {
+                guard let project, !project.isEmpty else { return line }
+                for sep in ProjectNames.separators where line.hasSuffix(sep + project) {
+                    return String(line.dropLast(sep.count + project.count))
+                        .trimmingCharacters(in: .whitespaces)
                 }
-                sections.append(lines.joined(separator: "\n"))
+                return line
+            }
+
+            let anchor = state.activeEntity
+            let anchorSnapshot = anchor.flatMap { name in active.first { $0.name == name } }
+            var sections: [String] = []
+
+            // The user's own answers, first and verbatim. They were typed rather
+            // than inferred, which makes them true on a fresh install where
+            // everything below needs days of events before it says anything.
+            let pinned = Curator.pinnedFacts().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pinned.isEmpty { sections.append(pinned) }
+
+            // One sentence: where you are, in what, for how long.
+            var opening: [String] = []
+            switch (anchor, state.activeApp) {
+            case let (entity?, app?):
+                opening.append(VaultText.t("Working on \(entity) in \(app).",
+                                           "いま \(entity) を \(app) で作業中。"))
+            case let (entity?, nil):
+                opening.append(VaultText.t("Working on \(entity).", "いま \(entity) を作業中。"))
+            case let (nil, app?):
+                opening.append(VaultText.t("In \(app).", "いま \(app) を使用中。"))
+            case (nil, nil):
+                break
+            }
+            if let snapshot = anchorSnapshot {
+                opening.append(VaultText.t("\(snapshot.totalDurationFormatted) today.",
+                                           "今日ここまで \(snapshot.totalDurationFormatted)。"))
+            }
+            if !opening.isEmpty { sections.append(opening.joined(separator: " ")) }
+
+            // Language and tools, as observations rather than as instructions. The
+            // useful form would be "reply in Japanese", and that is a claim about
+            // what the user wants rather than a record of what they did (§7.1).
+            let about = (factTexts(.identity) + factTexts(.skills)).joined(separator: VaultText.t(". ", "。"))
+            if !about.isEmpty { sections.append(about + VaultText.t(".", "。")) }
+
+            if !doing.isEmpty {
+                let header = VaultText.t("Today, most recent first:", "今日やったこと（新しい順）:")
+                let lines = doing.map { "- " + withoutProjectSuffix($0, anchor) }
+                sections.append(([header] + lines).joined(separator: "\n"))
+            }
+
+            if !researching.isEmpty {
+                let label = anchor.map { VaultText.t("Read about \($0): ", "\($0) について見ていたもの: ") }
+                    ?? VaultText.t("Also read: ", "ほかに見ていたもの: ")
+                sections.append(label + researching.joined(separator: VaultText.t(" · ", "、")))
+            }
+
+            // Everything that is not the anchor, named once. `Working on:` facts and
+            // the snapshots are two answers to the same question, so they are merged
+            // here rather than printed as two lists (PITFALLS.md §7).
+            var others: [String] = []
+            for text in factTexts(.projects) {
+                let name = text
+                    .replacingOccurrences(of: VaultText.t("Working on: ", "取り組み中: "), with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty, name != anchor, !others.contains(name) { others.append(name) }
+            }
+            for p in active where p.name != anchor && !others.contains(p.name) {
+                others.append(p.name)
+            }
+            if !others.isEmpty {
+                sections.append(VaultText.t("Also open: ", "ほかに開いていたもの: ")
+                                + others.joined(separator: VaultText.t(", ", "、")))
             }
 
             guard !sections.isEmpty else { return "" }

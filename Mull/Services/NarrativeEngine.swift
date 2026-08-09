@@ -93,7 +93,7 @@ struct NarrativeEngine {
     /// One sentence for what the day mostly consisted of.
     private func openingLine(stated: inout StatedFacts) -> String {
         guard !analysis.mainActivities.isEmpty else {
-            return "Not much recorded today yet."
+            return VaultText.t("Not much recorded today yet.", "今日はまだあまり記録がありません。")
         }
 
         let totalMinutes = Int(analysis.totalDuration / 60)
@@ -108,9 +108,11 @@ struct NarrativeEngine {
             if let leadingApp { stated.noteLead(leadingApp) }
             stated.noteActivityCount()
             if pct > 70 {
-                return "Almost all of today was \(mainLabel), \(Int(pct))% of the recorded time."
+                return VaultText.t("Almost all of today was \(mainLabel), \(Int(pct))% of the recorded time.",
+                       "今日はほぼ \(mainLabel) でした。記録した時間の \(Int(pct))% です。")
             }
-            return "Today was mostly \(mainLabel), \(analysis.mainActivities.first?.durationFormatted ?? "")."
+            return VaultText.t("Today was mostly \(mainLabel), \(analysis.mainActivities.first?.durationFormatted ?? "").",
+                   "今日は主に \(mainLabel)、\(analysis.mainActivities.first?.durationFormatted ?? "") でした。")
         }
 
         // Multi-project day
@@ -120,7 +122,8 @@ struct NarrativeEngine {
             // to add, so only the lead is spent here.
             stated.noteLead(mainLabel)
             if let leadingApp { stated.noteLead(leadingApp) }
-            return "Today moved between \(names.joined(separator: ", "))."
+            return VaultText.t("Today moved between \(names.joined(separator: ", ")).",
+                   "今日は \(names.joined(separator: "、")) のあいだを行き来しました。")
         }
 
         // Two-focus day
@@ -131,12 +134,15 @@ struct NarrativeEngine {
                 stated.noteLead(a.label)
                 if let leadingApp { stated.noteLead(leadingApp) }
                 stated.noteQuantity(of: b.label)
-                return "Today was mostly \(a.label), with \(b.durationFormatted) on \(b.label)."
+                return VaultText.t("Today was mostly \(a.label), with \(b.durationFormatted) on \(b.label).",
+                       "今日は主に \(a.label)、\(b.label) に \(b.durationFormatted) でした。")
             }
-            return "Today split between \(a.label) and \(b.label)."
+            return VaultText.t("Today split between \(a.label) and \(b.label).",
+                   "今日は \(a.label) と \(b.label) に分かれました。")
         }
 
-        return "\(totalMinutes / 60)h \(totalMinutes % 60)m recorded today."
+        return VaultText.t("\(VaultText.duration(minutes: totalMinutes)) recorded today.",
+               "今日は \(VaultText.duration(minutes: totalMinutes)) を記録しました。")
     }
 
     // MARK: - Main Activity Story
@@ -161,16 +167,20 @@ struct NarrativeEngine {
             // Frame the activity based on the app type
             if isCodeEditor(app) {
                 if label.contains("swift") || label.contains("Swift") {
-                    sentences.append("You coded in \(label) for \(duration).")
+                    sentences.append(VaultText.t("You coded in \(label) for \(duration).",
+                                                 "\(label) を \(duration) 書きました。"))
                 } else {
-                    sentences.append("You worked on \(label) for \(duration) in \(app).")
+                    sentences.append(VaultText.t("You worked on \(label) for \(duration) in \(app).",
+                                                 "\(app) で \(label) に \(duration) 取り組みました。"))
                 }
             } else if isBrowser(app) {
-                sentences.append("You spent \(duration) in \(app) on \(label).")
+                sentences.append(VaultText.t("You spent \(duration) in \(app) on \(label).",
+                                             "\(app) で \(label) に \(duration) 使いました。"))
             } else if isCommApp(app) {
-                sentences.append("\(app) took \(duration).")
+                sentences.append(VaultText.t("\(app) took \(duration).", "\(app) に \(duration)。"))
             } else {
-                sentences.append("\(label) took \(duration) in \(app).")
+                sentences.append(VaultText.t("\(label) took \(duration) in \(app).",
+                                             "\(app) での \(label) に \(duration)。"))
             }
 
             stated.noteQuantity(of: label)
@@ -182,12 +192,13 @@ struct NarrativeEngine {
         let remainder = Array(unspoken.dropFirst(Self.maxActivitySentences)) + analysis.otherActivities
         if remainder.count > 3 {
             let total = remainder.reduce(0.0) { $0 + $1.totalDuration }
-            sentences.append("Another \(remainder.count) activities took \(durationPhrase(total)) between them.")
+            sentences.append(VaultText.t("Another \(remainder.count) activities took \(durationPhrase(total)) between them.",
+                                         "ほかに \(remainder.count)件で、合わせて \(durationPhrase(total))。"))
         } else if !remainder.isEmpty {
             let others = remainder
                 .map { "\($0.label) (\($0.durationFormatted))" }
                 .joined(separator: ", ")
-            sentences.append("There was also \(others).")
+            sentences.append(VaultText.t("There was also \(others).", "ほかに \(others)。"))
         }
 
         return sentences.joined(separator: " ")
@@ -431,11 +442,8 @@ struct NarrativeEngine {
     /// same units as the sentences above it.
     private func durationPhrase(_ interval: TimeInterval) -> String {
         let minutes = Int(interval / 60)
-        if minutes < 1 { return "<1m" }
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        let remaining = minutes % 60
-        return remaining > 0 ? "\(hours)h \(remaining)m" : "\(hours)h"
+        if minutes < 1 { return VaultText.t("<1m", "1分未満") }
+        return VaultText.duration(minutes: minutes)
     }
 
     private func isCodeEditor(_ app: String) -> Bool {

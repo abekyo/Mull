@@ -66,14 +66,14 @@ final class VaultOwnershipTests: XCTestCase {
                       "the MCP server asks this — write_note would flatten the markers")
     }
 
-    /// `VaultProvenance` answers the same question for the same directories, from a
-    /// separate copy of the list (it is compiled into MullMCP, which VaultLayout is
-    /// not). They drifted apart once already; this is what stops it happening twice.
-    func testProvenanceAgreesAboutWhichDirectoriesAreCurated() {
+    /// `VaultProvenance` used to answer this same question from a second copy of the
+    /// list. It was deleted on 2026-08-09: nothing in production ever called it, the
+    /// `VaultProvenanceTests` its own doc comment cited did not exist, and its two
+    /// tables had already drifted from these — `_raw/` was generated in one and absent
+    /// from the other. A duplicate nobody reads is still a duplicate that can disagree.
+    func testCuratedDirectoriesAreTheOnesWithACuratorBehindThem() {
         for path in ["projects/mull.md", "corrections/ledger.md"] {
             XCTAssertEqual(VaultOwnership.of(path: path), .shared, path)
-            XCTAssertEqual(VaultProvenance.rule(forVaultRelativePath: path),
-                           VaultProvenance.curated, path)
         }
     }
 

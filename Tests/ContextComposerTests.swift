@@ -135,6 +135,45 @@ final class ContextComposerTests: XCTestCase {
         XCTAssertTrue(leaked.isEmpty, "leaked into the paste: \(leaked)")
     }
 
+    // MARK: - Shape
+
+    /// A block that says one project name nine times makes a reader look for nine
+    /// different facts. The name is stated once and stripped from the lines under
+    /// it.
+    func testTheProjectNameIsNotRepeatedOnEveryLine() async {
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            event(2, .clipboard, "UIの使いやすさ問題を改善 — Mull"),
+            event(3, .clipboard, "アプリにヘルプ機能を追加 — Mull")
+        ])
+        XCTAssertTrue(text.contains("UIの使いやすさ問題を改善"))
+        XCTAssertFalse(text.contains("改善 — Mull"), "the suffix is the heading's job, not the line's")
+        XCTAssertEqual(text.components(separatedBy: "Mull").count - 1, 1,
+                       "the project is named once:\n\(text)")
+    }
+
+    /// Pasted text lands inside someone else's document. Three `#` headings of our
+    /// own collided with whatever structure was already there.
+    func testTheBlockBringsNoHeadingsOfItsOwn() async {
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            event(2, .clipboard, "TODO: wire the ledger into Selection")
+        ])
+        XCTAssertFalse(text.contains("#"), "no markdown headings:\n\(text)")
+    }
+
+    /// `[produce]` is mull's own vocabulary for the MODE axis. A reader has no way
+    /// to know what it means and no use for it if they did.
+    func testInternalModeLabelsDoNotLeak() async {
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            event(2, .clipboard, "TODO: wire the ledger into Selection")
+        ])
+        for mode in Mode.allCases {
+            XCTAssertFalse(text.contains("[\(mode.rawValue)]"), "leaked mode label: \(mode.rawValue)")
+        }
+    }
+
     // MARK: - One utterance, caught mid-flush
 
     /// Dictation emits the sentence repeatedly as it grows. The exact-prefix key
@@ -185,7 +224,12 @@ final class ContextComposerTests: XCTestCase {
             event(2, .clipboard, "動画の要点 | https://www.youtube.com/watch?v=NoMl3bbUR_o",
                   title: "メモ — Mull")
         ])
-        XCTAssertFalse(text.contains("[produce] 動画の要点"))
+        // `[produce]` no longer appears anywhere, so asserting on it would pass
+        // for the wrong reason. The claim is about which list it lands in: the
+        // work list is bulleted, the consumed line is not.
+        let bulleted = text.split(separator: "\n").filter { $0.hasPrefix("- ") }.joined()
+        XCTAssertFalse(bulleted.contains("動画の要点"),
+                       "a watched video must not appear among the things the user did")
     }
 
     /// A sentence is not a project. It may still be reported as something the user
@@ -201,6 +245,6 @@ final class ContextComposerTests: XCTestCase {
                   title: "プロダクトの事業価値と社会的インパクトを検討")
         ])
         XCTAssertFalse(text.contains("Working on: プロダクトの事業価値"))
-        XCTAssertFalse(text.contains("**プロダクトの事業価値"))
+        XCTAssertFalse(text.contains("取り組み中: プロダクトの事業価値"))
     }
 }

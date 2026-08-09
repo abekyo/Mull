@@ -2,13 +2,21 @@ import SwiftUI
 import ServiceManagement
 import EventKit
 
-/// Settings window — 4 tabs, no redundancy.
+/// Settings window — 3 tabs, no redundancy.
 ///
-///   General:  Schedule, startup, output size
-///   AI:       LLM provider, API keys, connection test, MCP client setup
-///   Data:     Permissions, data sources, storage, retention, cleanup
-///   Profile:  Everything about you — the answers you gave (editable), what
-///             capture observed (read-only), the notes mull wrote (correctable)
+///   General:  Language, your setup answers, schedule, startup, output size
+///   AI:       Which AI tools read mull, then LLM provider, API keys, tests
+///   Data:     Permissions, data sources, storage, the notes mull keeps,
+///             retention, cleanup
+///
+/// There was a fourth tab, "Profile". Ten sections, of which seven were
+/// read-only statistics: facts, rhythm, attention, language, words, today, and
+/// today's summary. None of them answered a question the reader could act on,
+/// and five restated what Home and me.md already carry, at a different window
+/// length — Language was 7-day there and 14-day in me.md. The three sections
+/// that were load-bearing are now sections here: the setup answers and the
+/// withheld me.pinned.md lines in General (`AnswersSection`), the correctable
+/// notes in Data (`NotesSection`).
 /// `@MainActor` because it holds `SettingsRouter.shared`, which is main-actor
 /// isolated — the annotation keeps that read legal from the view's initialiser.
 @MainActor
@@ -29,7 +37,7 @@ struct SettingsView: View {
         TabView(selection: $router.selected) {
             GeneralTab()
                 .environmentObject(appState)
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label("General", systemImage: DS.Glyph.settings) }
                 .tag(SettingsTab.general)
 
             AITab()
@@ -44,11 +52,6 @@ struct SettingsView: View {
                 .environmentObject(appState)
                 .tabItem { Label("Data", systemImage: "externaldrive") }
                 .tag(SettingsTab.data)
-
-            ProfileTab()
-                .environmentObject(appState)
-                .tabItem { Label("Profile", systemImage: "person.text.rectangle") }
-                .tag(SettingsTab.profile)
         }
         .frame(width: 520, height: 520)
     }
@@ -67,6 +70,13 @@ struct GeneralTab: View {
     @AppStorage("aiAutoCopy") private var aiAutoCopy = true
     @AppStorage("summaryNotifications") private var summaryNotifications = true
     @AppStorage(Preferences.resumeGapKey) private var resumeGap = Int(TimeBlockEngine.defaultResumeGap)
+    @AppStorage(Preferences.mirrorEnabledKey) private var mirrorEnabled = false
+    @AppStorage(Preferences.mirrorCalendarKey) private var mirrorCalendarID = ""
+    @AppStorage(Preferences.mirrorIntervalKey) private var mirrorInterval = Int(Preferences.defaultMirrorInterval)
+    /// The explicit language choice. Stored as the raw value so `@AppStorage`
+    /// keeps working; `UserLanguage.Preference` is the meaning.
+    @AppStorage(UserLanguage.preferenceKey)
+    private var vaultLanguage = UserLanguage.Preference.system.rawValue
     // `autoExport`, `exportPath` and `obsidianVault` used to live here, behind an
     // "Export Destinations" section and an "Auto-export after each mull" toggle.
     // Nothing in the app ever read any of the three: the user typed a vault path,
@@ -75,16 +85,27 @@ struct GeneralTab: View {
     // spends the user's trust. The vault is already plain markdown on disk, and
     // FullWindowView has a working export, so the honest fix is removal.
     //
-    // The "Profile" section (Edit answers… / Reset answers) has moved to the
-    // Profile tab. Two things called "Profile" in one Settings window — a section
-    // here and a tab over there, about different data — meant the person looking
-    // for either found the wrong one first. Everything about *you* now lives on
-    // the one tab named for you.
+    // The Language picker came out of the Profile tab's "What you told mull"
+    // section. It sat there because the vault language used to be inferred from a
+    // setup answer, but it stopped being a fact about you the moment it became an
+    // explicit choice: it sets the language of every file mull writes *and* of
+    // mull's own windows. That is an application preference, and General is where
+    // macOS has trained people to look for one.
+    //
+    // The setup answers followed it (`AnswersSection`), when the Profile tab was
+    // retired. They were a section here once, also called "Profile", and moved to
+    // the tab because two things with one name in one window sent people to the
+    // wrong one. With the tab gone the collision is gone with it.
 
     /// What macOS actually says about the login item, as opposed to what the
     /// checkbox claims. Empty when the two agree.
     @State private var loginItemNote: String?
     @State private var loginItemIsProblem = false
+
+    /// The picker moved the app's chrome to a language this launch is not running
+    /// in. Session state: it is true from the change until the app is quit, which
+    /// is exactly how long the discrepancy lasts.
+    @State private var languageNeedsRelaunch = false
 
     /// Seconds, matching `Preferences.resumeGap`. "Off" is a real option rather than
     /// a hidden floor: someone who wants every interruption drawn separately should
@@ -95,6 +116,18 @@ struct GeneralTab: View {
         (600, "10 minutes"),
         (900, "15 minutes"),
         (1800, "30 minutes"),
+    ]
+
+    /// Seconds. This picks how soon a finished stretch of work reaches the calendar,
+    /// not how much is written: only settled blocks are mirrored and each is written
+    /// once, so a shorter interval costs latency, not volume.
+    private let mirrorIntervalOptions = [
+        (900, "Every 15 minutes"),
+        (1800, "Every 30 minutes"),
+        (3600, "Every hour"),
+        (7200, "Every 2 hours"),
+        (14400, "Every 4 hours"),
+        (86400, "Once a day"),
     ]
 
     private let charOptions = [
@@ -108,6 +141,54 @@ struct GeneralTab: View {
 
     var body: some View {
         Form {
+            // One language, everywhere. Defaults to whatever macOS is set to, and
+            // this is the way to say otherwise. It used to default to a substring
+            // match against the free-prose setup answer — see `UserLanguage`.
+            Section("Language") {
+                Picker("Write and display in", selection: $vaultLanguage) {
+                    ForEach(UserLanguage.Preference.allCases) { choice in
+                        Text(choice.label).tag(choice.rawValue)
+                    }
+                }
+                .onChange(of: vaultLanguage) { old, new in
+                    let was = UserLanguage.isJapanese(
+                        preference: UserLanguage.Preference(rawValue: old) ?? .system)
+                    // Only on a real flip: every picker change fires this, including
+                    // one that resolves to the same language.
+                    guard UserLanguage.isJapanese != was else { return }
+                    applyToAppChrome(UserLanguage.Preference(rawValue: new) ?? .system)
+                    OnboardingProfile.reprojectSection()
+                    appState.regenerateContextNow()
+                }
+
+                // Where the line falls. The vault turns over on the next write —
+                // seconds — while the windows are a real macOS localization and are
+                // resolved once, at launch, from the bundle. Saying so is the whole
+                // job of this line: a setting that visibly changes half of what it
+                // named and silently defers the other half reads as a bug.
+                Text("Everything mull writes, and mull's own windows. The files in ~/mull change on the next write; the windows change when mull next opens.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+
+                if languageNeedsRelaunch {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                        Image(systemName: "info.circle")
+                            .font(DS.miniFont)
+                        Text("Quit and reopen mull to see the windows in this language.")
+                            .font(DS.captionFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Quit mull") { NSApp.terminate(nil) }
+                            .font(DS.captionFont)
+                            .controlSize(.small)
+                    }
+                    .foregroundStyle(DS.moon)
+                }
+            }
+
+            // Directly under Language, because both are about what mull writes
+            // down about you before any capture has happened.
+            AnswersSection()
+
             Section("mull") {
                 HStack {
                     Text("Nightly summary at")
@@ -140,7 +221,7 @@ struct GeneralTab: View {
 
                 if let loginItemNote {
                     HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                        Image(systemName: loginItemIsProblem ? "exclamationmark.triangle.fill" : "info.circle")
+                        Image(systemName: loginItemIsProblem ? DS.Glyph.problem : "info.circle")
                             .font(DS.miniFont)
                         Text(loginItemNote)
                             .font(DS.captionFont)
@@ -164,10 +245,14 @@ struct GeneralTab: View {
                     }
                 }
                 Text(resumeGap > 0
-                     ? "Coming back to the same project inside this window continues the session instead of starting a second one that looks unrelated. The break itself is never counted as working time — the block says how long you were away."
+                     ? "Coming back to the same project inside this window continues the session instead of starting a second one. The break is not counted as working time."
                      : "Every break of more than three minutes begins a new block, even when you come straight back to the same file.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
+            }
+
+            Section("Mirror to Calendar") {
+                mirrorControls
             }
 
             Section("Notifications") {
@@ -227,6 +312,68 @@ struct GeneralTab: View {
         .onChange(of: summaryTimeMinute) { _, m in
             appState.mullEngine.scheduleSummary(at: summaryTimeHour, minute: m)
         }
+        .onChange(of: mirrorEnabled) { _, _ in appState.calendarMirror.reschedule() }
+        .onChange(of: mirrorInterval) { _, _ in appState.calendarMirror.reschedule() }
+        .onChange(of: mirrorCalendarID) { _, _ in
+            // Which events mull wrote is a fact about one calendar. Carried into a
+            // different one, every absent event would read as a deletion by the user
+            // and the whole range would be tombstoned unwritten.
+            appState.calendarMirror.forgetLedger()
+            appState.calendarMirror.reschedule()
+        }
+    }
+
+    // MARK: - Mirror to Calendar
+
+    @ViewBuilder
+    private var mirrorControls: some View {
+        let calendars = appState.calendar.writableCalendars
+        let chosen = calendars.first { $0.id == mirrorCalendarID }
+
+        Toggle("Write finished work to a calendar", isOn: $mirrorEnabled)
+        Text("Blocks are copied once they can no longer change. Work still in progress is never written, so nothing mull puts in your calendar moves afterwards, and anything you delete there stays deleted.")
+            .font(DS.captionFont)
+            .foregroundStyle(DS.inkFaint)
+
+        if mirrorEnabled {
+            if calendars.isEmpty {
+                Text("No calendar on this Mac accepts new events. Make one in Calendar.app first — mull never creates one.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.error)
+            } else {
+                Picker("Calendar", selection: $mirrorCalendarID) {
+                    Text("Choose…").tag("")
+                    ForEach(calendars) { cal in
+                        Text("\(cal.title) — \(cal.accountName)").tag(cal.id)
+                    }
+                }
+                // Make one in Calendar.app and point mull at it. Sharing a calendar
+                // with real appointments is allowed — the mirror only ever touches
+                // events carrying its own marker — but it is nobody's idea of tidy.
+                Text("A calendar of its own is worth making: File ▸ New Calendar in Calendar.app.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+
+                Picker("Check for finished work", selection: $mirrorInterval) {
+                    ForEach(mirrorIntervalOptions, id: \.0) { value, label in
+                        Text(label).tag(value)
+                    }
+                }
+                Text("How soon finished work appears, not how much is written — each block is written once.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+
+                if let chosen, !chosen.isLocal {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(DS.miniFont)
+                        Text("“\(chosen.title)” syncs with \(chosen.accountName). What mull writes are the names of the things you worked on, taken from your window titles, and they will leave this Mac for that account. A calendar under “On My Mac” stays here.")
+                            .font(DS.captionFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(DS.error)
+                }
+            }
+        }
     }
 
     // MARK: - Launch at login
@@ -247,7 +394,7 @@ struct GeneralTab: View {
             // Registered, but macOS is holding it in Login Items until the user
             // says yes. Reporting this as plain "on" would be the same lie again.
             launchAtLogin = true
-            loginItemNote = "macOS is waiting for you to approve mull in System Settings › General › Login Items."
+            loginItemNote = String(localized: "macOS is waiting for you to approve mull in System Settings › General › Login Items.")
             loginItemIsProblem = true
         default:
             // .notRegistered / .notFound — honour the stored preference by
@@ -266,13 +413,13 @@ struct GeneralTab: View {
             launchAtLogin = on
             clearLoginItemNote()
             if on, SMAppService.mainApp.status == .requiresApproval {
-                loginItemNote = "Almost there — approve mull in System Settings › General › Login Items."
+                loginItemNote = String(localized: "Almost there — approve mull in System Settings › General › Login Items.")
                 loginItemIsProblem = true
             }
         } catch {
             // Show the state the system is actually in, not the one just asked for.
             launchAtLogin = SMAppService.mainApp.status == .enabled
-            loginItemNote = "macOS refused: \(error.localizedDescription)"
+            loginItemNote = String(localized: "macOS refused: \(error.localizedDescription)")
             loginItemIsProblem = true
         }
     }
@@ -280,6 +427,38 @@ struct GeneralTab: View {
     private func clearLoginItemNote() {
         loginItemNote = nil
         loginItemIsProblem = false
+    }
+
+    /// Point the *bundle* at the chosen language, so mull's windows follow the same
+    /// setting its files do.
+    ///
+    /// The two halves of "language" are resolved by different machinery and there is
+    /// no honest way to make them switch together. The vault is written by mull, so
+    /// `VaultText` reads the preference at every write and the next 60-second pass
+    /// picks it up. The windows are a real macOS localization: `Text("…")` resolves
+    /// against the bundle's `.lproj`, which CoreFoundation binds **once, at process
+    /// start**, from `AppleLanguages`. Writing it here is what makes the next launch
+    /// come up in the chosen language; nothing can make this one.
+    ///
+    /// `.system` removes the override rather than writing a value, so mull goes back
+    /// to following System Settings › General › Language & Region — including its
+    /// per-app entry for mull, which exists because the bundle now ships two
+    /// localizations. Pinning `en`/`ja` there would make that per-app picker a
+    /// control that silently does nothing.
+    private func applyToAppChrome(_ preference: UserLanguage.Preference) {
+        let key = "AppleLanguages"
+        switch preference {
+        case .system:   UserDefaults.standard.removeObject(forKey: key)
+        case .english:  UserDefaults.standard.set(["en"], forKey: key)
+        case .japanese: UserDefaults.standard.set(["ja"], forKey: key)
+        }
+        // Compare against what this process actually launched with, not against the
+        // preference: switching to `.japanese` on a Mac already running mull in
+        // Japanese changes nothing on screen, and offering to relaunch for it would
+        // be asking the user to fix a problem they do not have.
+        let running = Bundle.main.preferredLocalizations.first ?? "en"
+        let wanted = UserLanguage.isJapanese(preference: preference) ? "ja" : "en"
+        languageNeedsRelaunch = !running.hasPrefix(wanted)
     }
 }
 
@@ -307,8 +486,8 @@ private enum TestOutcome: Equatable {
     var symbol: String? {
         switch self {
         case .idle, .testing: nil
-        case .ok: "checkmark.circle"
-        case .failed: "exclamationmark.triangle"
+        case .ok: DS.Glyph.success
+        case .failed: DS.Glyph.problem
         }
     }
 
@@ -387,6 +566,46 @@ private struct ConnectionTest: View {
     }
 }
 
+/// A result line with a Dismiss and no Retry.
+///
+/// Connect and Disconnect used to report through the `ConnectionTest` control at
+/// the foot of the section, which had two consequences. "Claude Code connected"
+/// appeared beside a button labelled "Test mull's MCP server", reading as that
+/// button's answer to a question nobody had asked it. And the Retry offered on a
+/// failure ran the test rather than the write that had just failed — the one thing
+/// the user wanted retried was the one thing it would not do. The row that
+/// produced this message is a few pixels above it, so retrying is pressing it
+/// again; what this line owes the user is the message, kept until they are done
+/// with it.
+private struct OutcomeLine: View {
+    @Binding var outcome: TestOutcome
+
+    var body: some View {
+        if let message = outcome.message {
+            HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                if let symbol = outcome.symbol {
+                    Image(systemName: symbol)
+                        .font(DS.miniFont)
+                }
+                Text(message)
+                    .font(DS.captionFont)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: DS.sm)
+
+                Button("Dismiss") {
+                    withAnimation { outcome = .idle }
+                }
+                .font(DS.captionFont)
+                .buttonStyle(.plain)
+                .foregroundStyle(DS.inkFaint)
+            }
+            .foregroundStyle(outcome.tint)
+            .transition(.opacity)
+        }
+    }
+}
+
 /// A connect request waiting on the user, carrying the JSON they are approving.
 ///
 /// Not private: onboarding's final step offers the same connect, and a second
@@ -396,6 +615,35 @@ struct PendingConnect: Identifiable {
     let tool: AIToolSetup.AITool
     let fragment: String
     var id: String { tool.id }
+}
+
+/// Copy to the clipboard, with the confirmation in the label rather than a toast.
+private struct CopyButton: View {
+    let text: String
+    /// A `LocalizedStringKey`, not a `String`: the label is written here as a
+    /// literal at every call site, and that is what puts it in the catalogue.
+    var label: LocalizedStringKey = "Copy"
+
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            copied = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                copied = false
+            }
+        } label: {
+            HStack(spacing: DS.xs) {
+                Image(systemName: copied ? DS.Glyph.confirm : DS.Glyph.copy)
+                Text(copied ? LocalizedStringKey("Copied") : label)
+            }
+        }
+        .font(DS.captionFont)
+        .controlSize(.small)
+    }
 }
 
 /// The consent step in front of "Connect".
@@ -435,7 +683,13 @@ struct MCPConnectSheet: View {
             }
 
             VStack(alignment: .leading, spacing: DS.hair) {
-                Text("Exactly this").sectionLabel()
+                HStack {
+                    Text("Exactly this").sectionLabel()
+                    Spacer()
+                    // Selectable text in a 150pt scroll box was the only way to get
+                    // this out of the app, which is not a way.
+                    CopyButton(text: fragment)
+                }
                 ScrollView {
                     Text(fragment)
                         .font(DS.microFont)
@@ -444,7 +698,7 @@ struct MCPConnectSheet: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(DS.sm)
                 }
-                .frame(height: 150)
+                .frame(height: 120)
                 .background(
                     RoundedRectangle(cornerRadius: DS.radiusInset).fill(DS.surface)
                 )
@@ -454,8 +708,27 @@ struct MCPConnectSheet: View {
                 )
             }
 
+            // Claude Code owns this file while it runs — it writes per-project state
+            // back into it — so an edit made underneath a live session can be lost.
+            // The success message asks for a restart, which quietly invites exactly
+            // that order. `claude mcp add` hands the edit to the process instead.
+            if tool.id == "claude-code", let command = AIToolSetup.cliCommand() {
+                VStack(alignment: .leading, spacing: DS.xs) {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                        Image(systemName: DS.Glyph.problem)
+                            .font(DS.miniFont)
+                        Text("If Claude Code is open, quit it first. It writes this file itself while it runs, and can overwrite an edit made underneath it.")
+                            .font(DS.captionFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(DS.paused)
+
+                    CopyButton(text: command, label: "Copy the CLI command instead")
+                }
+            }
+
             // A footnote is type, not an icon row — the sentence carries itself.
-            Text("A timestamped copy of the current file is saved beside it first, as \(AIToolSetup.backupDescription(for: tool)). You can undo this at any time with Disconnect.")
+            Text("A timestamped copy of the current file is saved beside it first, as \(AIToolSetup.backupDescription(for: tool)) — the \(AIToolSetup.backupsKept) most recent are kept and older ones are deleted. You can undo this at any time with Disconnect.")
                 .font(DS.captionFont)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(DS.inkDim)
@@ -475,7 +748,7 @@ struct MCPConnectSheet: View {
             }
         }
         .padding(DS.xl)
-        .frame(width: 460, height: 440)
+        .frame(width: 460, height: 540)
         .background(DS.canvas)
     }
 }
@@ -494,7 +767,11 @@ struct AITab: View {
     @State private var keyReadProblem: String?
     @State private var testOutcome: TestOutcome = .idle
     @State private var aiTools: [AIToolSetup.AITool] = []
+    /// The MCP server handshake. Only the test writes here.
     @State private var setupOutcome: TestOutcome = .idle
+    /// What the last Connect or Disconnect did. Kept apart from `setupOutcome` so
+    /// neither answer is ever mistaken for the other's (see `OutcomeLine`).
+    @State private var configOutcome: TestOutcome = .idle
     /// The tool awaiting the user's yes, and the JSON they are being asked to
     /// approve. Held together so the sheet can never show a stale fragment.
     @State private var pendingConnect: PendingConnect?
@@ -502,6 +779,43 @@ struct AITab: View {
 
     var body: some View {
         Form {
+            // First, not last.
+            //
+            // This is the section that makes mull the thing it says it is: an agent
+            // pointed at mull's MCP server. It used to sit at the foot of the tab,
+            // underneath a provider picker and two API-key fields that are optional
+            // and default to Off — so the default reading order put the product's
+            // premise last, below settings most users never touch.
+            //
+            // The title says which way the arrow points. The Data tab has a section
+            // called "Servers mull pulls from (MCP)", which is the opposite
+            // direction, and both of them used to say only "connected".
+            Section("AI tools that read mull") {
+                ForEach(aiTools) { tool in
+                    toolRow(tool)
+                }
+
+                otherToolsRow
+
+                // Connect and Disconnect answer here, next to the rows that caused
+                // them, and stay until dismissed.
+                OutcomeLine(outcome: $configOutcome)
+
+                // Real handshake — spawns the bundled binary and runs MCP initialize.
+                // Same control as the provider test below, so both tests behave
+                // identically (spinner, result, retry, dismiss); only the label
+                // differs, because they test two different things.
+                //
+                // It proves the binary runs. It does not prove any client points at
+                // it — that is what each row's own state says now.
+                ConnectionTest(
+                    label: String(localized: "Test mull's MCP server"),
+                    systemImage: "bolt.horizontal.circle",
+                    outcome: $setupOutcome,
+                    run: testMCPServer
+                )
+            }
+
             Section("Provider") {
                 Picker("", selection: $provider) {
                     Text("Off — local rule-based only (no cloud)").tag("off")
@@ -521,7 +835,7 @@ struct AITab: View {
                         .foregroundStyle(DS.inkDim)
                 } else if LLMProvider(rawValue: provider)?.isCloud == true {
                     HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                        Image(systemName: "exclamationmark.triangle.fill")
+                        Image(systemName: DS.Glyph.problem)
                             .font(DS.miniFont)
                         Text("This provider sends your activity data off-device to process it.")
                             .font(DS.captionFont)
@@ -533,7 +847,7 @@ struct AITab: View {
             Section(providerDetailTitle) {
                 switch provider {
                 case "gemini":
-                    APIKeyField(placeholder: "API Key (AIza…)", keychainKey: "gemini_api_key",
+                    APIKeyField(placeholder: String(localized: "API Key (AIza…)"), keychainKey: "gemini_api_key",
                                 text: $geminiKey, onSaved: { testConnection() })
                     // Where a key is kept is a privacy fact, not a feature note, so
                     // every provider that takes one says it — Gemini's key was the
@@ -549,11 +863,11 @@ struct AITab: View {
                         keyNote
                     }
                 case "claude":
-                    APIKeyField(placeholder: "API Key (sk-ant-…)", keychainKey: "claude_api_key",
+                    APIKeyField(placeholder: String(localized: "API Key (sk-ant-…)"), keychainKey: "claude_api_key",
                                 text: $claudeKey, onSaved: { testConnection() })
                     keyNote
                 case "openai":
-                    APIKeyField(placeholder: "API Key (sk-…)", keychainKey: "openai_api_key",
+                    APIKeyField(placeholder: String(localized: "API Key (sk-…)"), keychainKey: "openai_api_key",
                                 text: $openaiKey, onSaved: { testConnection() })
                     keyNote
                 case "local":
@@ -577,7 +891,7 @@ struct AITab: View {
                 // distinct enough to tell the two failures apart.
                 if provider != "off" {
                     ConnectionTest(
-                        label: "Test connection",
+                        label: String(localized: "Test connection"),
                         outcome: $testOutcome,
                         run: testConnection
                     )
@@ -585,7 +899,7 @@ struct AITab: View {
 
                 if let keyReadProblem {
                     HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                        Image(systemName: "exclamationmark.triangle.fill")
+                        Image(systemName: DS.Glyph.problem)
                             .font(DS.miniFont)
                         Text(keyReadProblem)
                             .font(DS.captionFont)
@@ -595,78 +909,6 @@ struct AITab: View {
                 }
             }
 
-            Section("AI Tool Integrations") {
-                ForEach(aiTools) { tool in
-                    HStack {
-                        VStack(alignment: .leading, spacing: DS.hair) {
-                            Text(tool.name)
-                                .font(DS.bodyMedium)
-                            Text(tool.configPath)
-                                .font(DS.miniFont)
-                                .foregroundStyle(DS.inkGhost)
-                                .lineLimit(1)
-                                // A path's tail is the part that identifies it —
-                                // lose the middle, not the file name, and keep the
-                                // whole of it on hover.
-                                .truncationMode(.middle)
-                                .help(tool.configPath)
-                        }
-
-                        Spacer()
-
-                        if !tool.detected {
-                            // Detection is a guess from known install locations, so
-                            // it must not be the last word: "Not found" with a way
-                            // through, rather than "Not installed" and a dead row
-                            // for someone who has the app somewhere unusual.
-                            HStack(spacing: DS.sm) {
-                                Text("Not found")
-                                    .font(DS.captionFont)
-                                    .foregroundStyle(DS.inkFaint)
-                                Button("Connect anyway") { beginConnect(tool) }
-                                    .font(DS.captionFont)
-                                    .controlSize(.small)
-                                    .help("Writes mull into \(tool.configPath), creating it if needed")
-                            }
-                        } else if tool.configured {
-                            HStack(spacing: DS.sm) {
-                                HStack(spacing: DS.xs) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(DS.recording)
-                                    Text("Connected")
-                                        .font(DS.captionFont)
-                                        .foregroundStyle(DS.recording)
-                                }
-                                // mull can put itself into someone's AI tooling, so
-                                // it must be able to take itself back out — without
-                                // that, "Connect" is a one-way door out of the app.
-                                Button("Disconnect") { pendingDisconnect = tool }
-                                    .font(DS.captionFont)
-                                    .controlSize(.small)
-                            }
-                        } else {
-                            // Not a direct write any more: this edits a file mull did
-                            // not author (~/.claude.json holds every other MCP server
-                            // the user has), so it goes through a sheet that shows the
-                            // exact fragment and the exact path first.
-                            Button("Connect") { beginConnect(tool) }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                        }
-                    }
-                }
-
-                // Real handshake — spawns the bundled binary and runs MCP initialize.
-                // Same control as the provider test above, so both tests behave
-                // identically (spinner, result, retry, dismiss); only the label
-                // differs, because they test two different things.
-                ConnectionTest(
-                    label: "Test mull's MCP server",
-                    systemImage: "bolt.horizontal.circle",
-                    outcome: $setupOutcome,
-                    run: testMCPServer
-                )
-            }
         }
         .formStyle(.grouped)
         .padding()
@@ -700,8 +942,184 @@ struct AITab: View {
             openaiKey = readStoredKey("openai_api_key")
             aiTools = AIToolSetup.detectTools()
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Detection ran once, when the tab appeared. Everything it reads can
+            // change from outside: `claude mcp add` in a terminal, an app moved to
+            // /Applications, a hand-edited config. Coming back to this window is
+            // exactly the moment the badges have to be true, and re-reading three
+            // small files is cheap.
+            aiTools = AIToolSetup.detectTools()
+        }
         .onChange(of: provider) { _, v in
             appState.llmProvider = LLMProvider(rawValue: v) ?? .off
+        }
+    }
+
+    // MARK: - One AI tool's row
+
+    /// Name and config path, whatever state the file is in underneath, and the
+    /// controls that state allows.
+    private func toolRow(_ tool: AIToolSetup.AITool) -> some View {
+        VStack(alignment: .leading, spacing: DS.xs) {
+            HStack {
+                VStack(alignment: .leading, spacing: DS.hair) {
+                    Text(tool.name)
+                        .font(DS.bodyMedium)
+                    Text(tool.configPath)
+                        .font(DS.miniFont)
+                        .foregroundStyle(DS.inkGhost)
+                        .lineLimit(1)
+                        // A path's tail is the part that identifies it — lose the
+                        // middle, not the file name, and keep the whole of it on
+                        // hover.
+                        .truncationMode(.middle)
+                        .help(tool.configPath)
+                }
+
+                Spacer()
+
+                statusControls(tool)
+            }
+
+            // What the file says, when what it says is the problem. The command is
+            // shown for the same reason the Data tab shows the command of a server
+            // mull pulls from: a path is the only thing that makes "this is broken"
+            // checkable by the person reading it.
+            if let problem = tool.registration.problem {
+                HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                    Image(systemName: DS.Glyph.problem)
+                        .font(DS.miniFont)
+                    VStack(alignment: .leading, spacing: DS.hair) {
+                        Text(problem)
+                            .font(DS.captionFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let command = tool.registration.command {
+                            Text(command)
+                                .font(DS.microFont)
+                                .foregroundStyle(DS.inkGhost)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                                .help(command)
+                        }
+                    }
+                }
+                .foregroundStyle(DS.paused)
+            }
+        }
+    }
+
+    /// The buttons a registration allows. Registration decides first and detection
+    /// second: what the config file says is a fact, and where the app happens to be
+    /// installed is a guess.
+    @ViewBuilder
+    private func statusControls(_ tool: AIToolSetup.AITool) -> some View {
+        switch tool.registration {
+        case .current:
+            HStack(spacing: DS.sm) {
+                HStack(spacing: DS.xs) {
+                    Image(systemName: DS.Glyph.success)
+                        .foregroundStyle(DS.recording)
+                    Text("Connected")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.recording)
+                }
+                // mull can put itself into someone's AI tooling, so it must be able
+                // to take itself back out — without that, "Connect" is a one-way
+                // door out of the app.
+                Button("Disconnect") { pendingDisconnect = tool }
+                    .font(DS.captionFont)
+                    .controlSize(.small)
+            }
+
+        case .missingBinary, .otherBinary:
+            // Registered at a path that will not work. The repair is the same write
+            // Connect performs, so it goes through the same consent sheet.
+            HStack(spacing: DS.sm) {
+                Button("Reconnect") { beginConnect(tool) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help("Rewrites mull's entry in \(tool.configPath) to point at this app's copy of MullMCP")
+                Button("Disconnect") { pendingDisconnect = tool }
+                    .font(DS.captionFont)
+                    .controlSize(.small)
+            }
+
+        case .unreadable:
+            // No buttons: every write refuses on an unparseable config, so offering
+            // one here would only produce the same error twice.
+            Text("Can't read this file")
+                .font(DS.captionFont)
+                .foregroundStyle(DS.paused)
+
+        case .absent:
+            if tool.detected {
+                // Not a direct write: this edits a file mull did not author
+                // (~/.claude.json holds every other MCP server the user has), so it
+                // goes through a sheet that shows the exact fragment and the exact
+                // path first.
+                Button("Connect") { beginConnect(tool) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help("Shows the exact change first, then writes mull into \(tool.configPath)")
+            } else {
+                // Detection is a guess from known install locations, so it must not
+                // be the last word: "Not found" with a way through, rather than
+                // "Not installed" and a dead row for someone who has the app
+                // somewhere unusual.
+                HStack(spacing: DS.sm) {
+                    Text("Not found")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.inkFaint)
+                    Button("Connect anyway") { beginConnect(tool) }
+                        .font(DS.captionFont)
+                        .controlSize(.small)
+                        .help("Shows the exact change first, then writes mull into \(tool.configPath), creating it if needed")
+                }
+            }
+        }
+    }
+
+    /// Every MCP client mull has no row for.
+    ///
+    /// There are three rows above and a dozen clients in the world — Windsurf, Zed,
+    /// VS Code, Codex, Cline, Continue — and for all of them this app was a dead
+    /// end: the only copy of the path lived inside a consent sheet you could reach
+    /// only by pressing another tool's Connect button, in a 150-point box with no
+    /// copy button. The entry is identical for every client, so it is here to take.
+    @ViewBuilder
+    private var otherToolsRow: some View {
+        VStack(alignment: .leading, spacing: DS.xs) {
+            Text("Any other MCP client")
+                .font(DS.bodyMedium)
+
+            if let command = AIToolSetup.cliCommand() {
+                Text("Point it at mull's server yourself. This is the same entry the buttons above write, and the command Claude Code's own CLI takes.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(command)
+                    .font(DS.microFont)
+                    .foregroundStyle(DS.ink)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: DS.sm) {
+                    CopyButton(text: command, label: "Copy the command")
+                    if let binary = AIToolSetup.mullMCPPath() {
+                        CopyButton(text: binary, label: "Copy the path")
+                    }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                    Image(systemName: DS.Glyph.problem)
+                        .font(DS.miniFont)
+                    Text("MullMCP isn't built or installed yet, so there is no path to hand out. Build it, or install it to /usr/local/bin.")
+                        .font(DS.captionFont)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(DS.paused)
+            }
         }
     }
 
@@ -723,14 +1141,14 @@ struct AITab: View {
         case "claude": "Claude API"
         case "openai": "OpenAI API"
         case "local": "Ollama"
-        case "localopenai": "Local (OpenAI-compatible)"
+        case "localopenai": String(localized: "Local (OpenAI-compatible)")
         default: ""
         }
     }
 
     private var keyNote: some View {
         HStack(spacing: DS.xs) {
-            Image(systemName: "lock.fill")
+            Image(systemName: DS.Glyph.locked)
                 .font(DS.iconMini)
             Text("Stored in macOS Keychain")
                 .font(DS.captionFont)
@@ -748,7 +1166,7 @@ struct AITab: View {
         case .success(let fragment):
             pendingConnect = PendingConnect(tool: tool, fragment: fragment)
         case .failure(let error):
-            setupOutcome = .failed(error.localizedDescription)
+            configOutcome = .failed(error.localizedDescription)
         }
     }
 
@@ -759,12 +1177,15 @@ struct AITab: View {
 
     /// Both config edits report the same way and both re-detect afterwards, so the
     /// row's badge reflects the file rather than what the button assumed.
+    ///
+    /// `configOutcome`, never `setupOutcome`: a write's answer belongs beside the
+    /// rows, not beside a test button that was never pressed.
     private func apply(_ result: Result<String, Error>) {
         switch result {
         case .success(let message):
-            setupOutcome = .ok(message)
+            configOutcome = .ok(message)
         case .failure(let error):
-            setupOutcome = .failed(error.localizedDescription)
+            configOutcome = .failed(error.localizedDescription)
         }
         aiTools = AIToolSetup.detectTools()
     }
@@ -793,7 +1214,7 @@ struct AITab: View {
                         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                         let models = (json?["models"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
                         let hasFlash = models.contains { $0.contains("flash") }
-                        testOutcome = .ok(hasFlash ? "Gemini Flash available" : "Connected (\(models.count) models)")
+                        testOutcome = .ok(hasFlash ? String(localized: "Gemini Flash available") : String(localized: "Connected (\(models.count) models)"))
                     } else {
                         testOutcome = .failed(Self.httpFailureMessage(code))
                     }
@@ -855,7 +1276,7 @@ struct AITab: View {
                     if models.isEmpty {
                         testOutcome = .ok("Server up, but no model loaded — load one in LM Studio")
                     } else if localModel.isEmpty || models.contains(where: { $0.hasPrefix(localModel) }) {
-                        testOutcome = .ok("Ready (\(models.prefix(2).joined(separator: ", ")))")
+                        testOutcome = .ok(String(localized: "Ready (\(models.prefix(2).joined(separator: ", ")))"))
                     } else {
                         testOutcome = .failed("\(localModel) not loaded. Available: \(models.prefix(3).joined(separator: ", "))")
                     }
@@ -880,7 +1301,7 @@ struct AITab: View {
             } catch let error as URLError where error.code == .timedOut {
                 testOutcome = .failed("Timed out — server not responding")
             } catch let error as URLError where error.code == .cannotConnectToHost {
-                testOutcome = .failed("Cannot connect — is the server running?")
+                testOutcome = .failed(String(localized: "Cannot connect — is the server running?"))
             } catch let error as URLError where error.code == .notConnectedToInternet {
                 testOutcome = .failed("No internet connection")
             } catch {
@@ -908,10 +1329,10 @@ struct AITab: View {
     /// Status-code-specific guidance — "HTTP 401" tells the user nothing actionable.
     private static func httpFailureMessage(_ code: Int) -> String {
         switch code {
-        case 401: return "Key rejected (401) — check the key; it may be revoked or from the wrong account"
-        case 403: return "Access denied (403) — this key lacks permission for the API"
-        case 429: return "Quota or rate limit (429) — check billing / usage caps"
-        case 500...599: return "Provider error (\(code)) — their side; retry in a moment"
+        case 401: return String(localized: "Key rejected (401) — check the key; it may be revoked or from the wrong account")
+        case 403: return String(localized: "Access denied (403) — this key lacks permission for the API")
+        case 429: return String(localized: "Quota or rate limit (429) — check billing / usage caps")
+        case 500...599: return String(localized: "Provider error (\(code)) — their side; retry in a moment")
         default: return "HTTP \(code)"
         }
     }
@@ -952,6 +1373,7 @@ struct APIKeyField: View {
                 Button { revealed.toggle() } label: {
                     Image(systemName: revealed ? "eye.slash" : "eye")
                         .font(DS.captionFont)
+                        .iconHitTarget()
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DS.inkFaint)
@@ -962,7 +1384,7 @@ struct APIKeyField: View {
 
             if saveFailed {
                 HStack(spacing: DS.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill")
+                    Image(systemName: DS.Glyph.problem)
                         .font(DS.miniFont)
                         .foregroundStyle(DS.error)
                     Text("Could not save to Keychain — the key is not stored.")
@@ -972,7 +1394,7 @@ struct APIKeyField: View {
                 .transition(.opacity)
             } else if let tail = savedTail {
                 HStack(spacing: DS.xs) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: DS.Glyph.success)
                         .font(DS.miniFont)
                         .foregroundStyle(DS.recording)
                     Text("Saved to Keychain (…\(tail))")
@@ -1017,7 +1439,7 @@ struct APIKeyField: View {
     }
 }
 
-// MARK: - Data Tab (Permissions + Storage + Cleanup)
+// MARK: - Data Tab (Permissions + Storage + Notes + Cleanup)
 
 struct DataTab: View {
     @EnvironmentObject var appState: AppState
@@ -1076,10 +1498,17 @@ struct DataTab: View {
         Form {
             // Permissions
             Section("Permissions") {
-                permRow("Accessibility", granted: appState.permissions.accessibilityGranted, detail: "Window titles") {
+                // "Window titles" undersold this by the larger half. The same grant
+                // drives WindowTextCapture, which walks the focused window's
+                // accessibility tree and reads up to 40,000 characters of whatever
+                // text is on screen. This row is where a person decides whether to
+                // hand that over, so it has to name the bigger thing.
+                permRow("Accessibility",
+                        granted: appState.permissions.accessibilityGranted,
+                        detail: String(localized: "Window titles, and the text on screen in the window you're using")) {
                     appState.permissions.openAccessibilitySettings()
                 }
-                permRow("Input Monitoring", granted: appState.permissions.inputMonitoringGranted, detail: "Keystrokes") {
+                permRow("Input Monitoring", granted: appState.permissions.inputMonitoringGranted, detail: String(localized: "Keystrokes")) {
                     appState.permissions.openInputMonitoringSettings()
                 }
                 // Calendar was requested exactly once, from AppState.init, and never
@@ -1100,7 +1529,7 @@ struct DataTab: View {
                 if let problem = browserProblem {
                     VStack(alignment: .leading, spacing: DS.xs) {
                         HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                            Image(systemName: "exclamationmark.triangle.fill")
+                            Image(systemName: DS.Glyph.problem)
                                 .font(DS.miniFont)
                             Text(problem.message)
                                 .font(DS.captionFont)
@@ -1134,7 +1563,7 @@ struct DataTab: View {
                 if notificationsBlocked {
                     VStack(alignment: .leading, spacing: DS.xs) {
                         HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                            Image(systemName: "exclamationmark.triangle.fill")
+                            Image(systemName: DS.Glyph.problem)
                                 .font(DS.miniFont)
                             Text("Notifications are turned off for mull, so meeting reminders, recording alerts and summary banners won't reach you. mull still shows them inside its own window.")
                                 .font(DS.captionFont)
@@ -1159,8 +1588,16 @@ struct DataTab: View {
                 }
             }
 
-            // Data sources
-            Section("Data Sources") {
+            // Named for what it holds. "Data Sources" promised the list from
+            // CLAUDE.md §6 — eight of them — and contained one toggle, because
+            // Mail is the only source that is off until you ask for it. The
+            // always-on ones are the Permissions section above; a pointer there
+            // beats a second copy of the list that can drift away from it.
+            Section("Optional sources") {
+                Text("Everything else mull captures is always on, and listed under Permissions above.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+
                 // Bound through a proxy: switching this on used to fire AppleScript
                 // at Mail.app immediately, which raises a macOS Automation prompt
                 // the user never asked for and cannot interpret. An unexplained
@@ -1183,7 +1620,13 @@ struct DataTab: View {
                     Button("Continue") { enableEmailCapture() }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("macOS will ask whether mull may control Mail. mull reads the subject and sender of mail received in the last 24 hours — never the body — and keeps them on this Mac. If you decline, nothing is captured and you can turn this on again whenever you like.")
+                    // The old copy said "never the body" full stop, which is true of
+                    // this channel and false of the product: Mail is not on the
+                    // exclusion list, so the window-body capture reads a message you
+                    // are reading like it reads any other app. Promising more than
+                    // the implementation does, in the sentence a person consents to,
+                    // is the one place that costs the most (CLAUDE.md §7.4, §8.3).
+                    Text("macOS will ask whether mull may control Mail. This reads the subject and sender of mail received in the last 24 hours, not the body, and keeps them on this Mac. It does not change what mull reads from your screen: while you are reading mail, the text in the window is captured like any other app's. To stop that too, add Mail under \"Don't record in these apps\" below.")
                 }
 
                 if emailChecking {
@@ -1199,7 +1642,7 @@ struct DataTab: View {
                     // Say what went wrong, and offer the only action that can fix it.
                     VStack(alignment: .leading, spacing: DS.xs) {
                         HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                            Image(systemName: "exclamationmark.triangle.fill")
+                            Image(systemName: DS.Glyph.problem)
                                 .font(DS.miniFont)
                             Text(problem.message)
                                 .font(DS.captionFont)
@@ -1224,16 +1667,26 @@ struct DataTab: View {
                     }
                     .transition(.opacity)
                 } else {
-                    Text("Subject and sender only. Email body is never read.")
+                    Text("Subject and sender only; this channel never reads the body. The text on screen while you're reading mail is captured like any other app's, unless you add Mail below.")
                         .font(DS.captionFont)
                         .foregroundStyle(DS.inkFaint)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
             // Per-app exclusion — privacy control. Nothing is captured while an
-            // excluded app is frontmost (keystrokes, clipboard, and window titles).
+            // excluded app is frontmost. The gate is on all five channels:
+            // keystrokes, clipboard, window titles, window body text, browser URLs
+            // (`RecordingService.isExcludedApp`), plus the app-switch rows at both
+            // ends of a switch (`recordAppSession`).
+            //
+            // The old caption said "it covers everything" and then listed three of
+            // the five, so the two it left out — the 40,000-character window body
+            // and the browser URL — read as not covered. Naming them all is cheap;
+            // an enumeration that follows the word "everything" is read as the
+            // whole list whether or not it is one.
             Section("Don't record in these apps") {
-                Text("Only while one of them is frontmost, and it covers everything — keystrokes, clipboard, window titles.")
+                Text("Only while one of them is frontmost, and then nothing is recorded at all: keystrokes, clipboard, window titles, the text on screen, the browser address, and the switch itself.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
 
@@ -1247,7 +1700,9 @@ struct DataTab: View {
                             Button {
                                 appState.includeApp(app.id)
                             } label: {
-                                Image(systemName: "minus.circle.fill").foregroundStyle(DS.error)
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(DS.error)
+                                    .iconHitTarget()
                             }
                             .buttonStyle(.plain)
                             .help("Resume recording in \(app.name)")
@@ -1288,7 +1743,7 @@ struct DataTab: View {
                 // from /tmp and about to lose the lot on restart.
                 if let reason = appState.database.fallbackReason {
                     HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                        Image(systemName: "exclamationmark.triangle.fill")
+                        Image(systemName: DS.Glyph.problem)
                             .font(DS.miniFont)
                         Text(reason)
                             .font(DS.captionFont)
@@ -1302,7 +1757,7 @@ struct DataTab: View {
                 // and a folder it cannot write to was only ever mentioned on Home.
                 if let vaultIssue = MullDirectory.issueDescription {
                     HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                        Image(systemName: "exclamationmark.triangle.fill")
+                        Image(systemName: DS.Glyph.problem)
                             .font(DS.miniFont)
                         Text(vaultIssue)
                             .font(DS.captionFont)
@@ -1323,6 +1778,11 @@ struct DataTab: View {
                     .font(DS.captionFont)
                 }
             }
+
+            // Between the counts and the clears: the "Memories" figure above is
+            // the length of this list, and forgetting one is the finest-grained
+            // version of the deletions below.
+            NotesSection { Task { await refresh() } }
 
             // Retention
             Section("Auto-cleanup") {
@@ -1466,7 +1926,7 @@ struct DataTab: View {
                     .foregroundStyle(DS.inkDim)
 
                 HStack(alignment: .top, spacing: DS.sm) {
-                    Image(systemName: cloudProviderName == nil ? "lock.fill" : "arrow.up.forward.app")
+                    Image(systemName: cloudProviderName == nil ? DS.Glyph.locked : "arrow.up.forward.app")
                         .font(DS.captionFont)
                         .foregroundStyle(cloudProviderName == nil ? DS.recording : DS.paused)
                     if let provider = cloudProviderName {
@@ -1495,7 +1955,7 @@ struct DataTab: View {
                          actionLabel: String = "Grant",
                          action: @escaping () -> Void) -> some View {
         HStack {
-            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle")
+            Image(systemName: granted ? DS.Glyph.success : DS.Glyph.denied)
                 .foregroundStyle(granted ? DS.recording : DS.error)
                 .font(DS.bodyFont)
             VStack(alignment: .leading, spacing: 0) {
@@ -1521,17 +1981,17 @@ struct DataTab: View {
     private var calendarGranted: Bool { calendarStatus == .fullAccess }
 
     private var calendarDetail: String {
-        if calendarGranted { return "Your schedule, in now.md and the week view" }
+        if calendarGranted { return String(localized: "Your schedule, in now.md and the week view") }
         switch calendarStatus {
         case .notDetermined:
-            return "Not asked yet — your schedule is missing from now.md"
+            return String(localized: "Not asked yet — your schedule is missing from now.md")
         case .denied, .restricted:
-            return "Denied — grant it in System Settings, then reopen the week view"
+            return String(localized: "Denied — grant it in System Settings, then reopen the week view")
         default:
             // .writeOnly ("Add only"): looks granted, reads nothing. This is the
             // quiet cause of a week view that stays empty for someone certain
             // they said yes.
-            return "Add-only access — mull can't read events. Full access needed"
+            return String(localized: "Add-only access — mull can't read events. Full access needed")
         }
     }
 
@@ -1592,7 +2052,8 @@ struct DataTab: View {
     /// one of which materialised every summary row purely to take `.count` of it —
     /// and on a database holding months of keystroke-grade events, running them
     /// inline from `.onAppear` froze the Settings window for as long as they took.
-    /// This is the same freeze ProfileTab's own comment says was fixed there.
+    /// The retired Profile tab froze the same way, for the same reason; every read
+    /// this window makes on appearance goes off the main thread now.
     private func refresh() async {
         let database = appState.database
         let counts = await Task.detached(priority: .userInitiated) {
@@ -1640,7 +2101,7 @@ struct DataTab: View {
         case "30": "30 days"
         case "90": "90 days"
         case "365": "1 year"
-        default: "the selected period"
+        default: String(localized: "the selected period")
         }
     }
 
@@ -1651,7 +2112,7 @@ struct DataTab: View {
     /// one place — the forget dialog asks the same question and must not be able
     /// to answer it differently.
     private var cloudProviderName: String? {
-        AppState.cloudProviderName(for: llmProvider)   // "off"/"ollama"/"local" → nil
+        AppState.cloudProviderName(for: llmProvider)   // "off"/"local"/"localopenai" → nil
     }
 
     /// Zip ~/mull to a location the user picks, then reveal it in Finder.
@@ -1745,7 +2206,7 @@ struct DataTab: View {
             try appState.database.deleteEvents(since: .distantPast)
             appState.todayEventCount = 0
         } catch {
-            cleanupProblem = "The recordings could not be deleted: \(error.localizedDescription)"
+            cleanupProblem = String(localized: "The recordings could not be deleted: \(error.localizedDescription)")
         }
         appState.database.vacuum()
         Task { await refresh() }
@@ -1764,15 +2225,15 @@ struct DataTab: View {
             // The tables really were cleared here, so the generic sentence below
             // would be false — and false in the direction that matters, since what
             // is left is a readable copy of the whole history.
-            problems.append(remains.errorDescription ?? "Quarantined copies of your history could not be deleted.")
+            problems.append(remains.errorDescription ?? String(localized: "Quarantined copies of your history could not be deleted."))
         } catch {
-            problems.append("The recordings database could not be cleared: \(error.localizedDescription)")
+            problems.append(String(localized: "The recordings database could not be cleared: \(error.localizedDescription)"))
         }
         appState.database.vacuum()
         do {
             try MullDirectory.deleteEverything()
         } catch {
-            problems.append("The ~/mull folder could not be removed: \(error.localizedDescription)")
+            problems.append(String(localized: "The ~/mull folder could not be removed: \(error.localizedDescription)"))
         }
         appState.todayEventCount = appState.database.eventCountToday()
         appState.loadTodaySummary()

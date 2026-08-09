@@ -10,6 +10,22 @@ import XCTest
 /// between every write and the store, and this is what it promises.
 final class CalendarEventFieldsTests: XCTestCase {
 
+    // The default title is text the user reads, so it follows the reader's language
+    // (`VaultText`). Pin it, or this suite depends on the machine it runs on.
+    private var savedVaultLanguage: String?
+
+    override func setUp() {
+        super.setUp()
+        savedVaultLanguage = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        UserDefaults.standard.set(UserLanguage.Preference.english.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.set(savedVaultLanguage, forKey: UserLanguage.preferenceKey)
+        super.tearDown()
+    }
+
     private func fields(title: String = "Standup",
                         start: Date = Date(timeIntervalSinceReferenceDate: 0),
                         minutes: Double = 30,
@@ -75,6 +91,22 @@ final class CalendarEventFieldsTests: XCTestCase {
 /// them. `durationLabel` is what the menu button reads, so a 90-minute meeting
 /// saying "90m" instead of "1h 30m" is a real (if small) defect.
 final class DurationLabelTests: XCTestCase {
+
+    // Duration is written the way the reader's language writes it (`VaultText`),
+    // so a suite quoting "2h" has to say which language it means.
+    private var savedVaultLanguage: String?
+
+    override func setUp() {
+        super.setUp()
+        savedVaultLanguage = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        UserDefaults.standard.set(UserLanguage.Preference.english.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.set(savedVaultLanguage, forKey: UserLanguage.preferenceKey)
+        super.tearDown()
+    }
 
     func testUnderAnHourIsMinutes() {
         XCTAssertEqual(CalendarWeekView.durationLabel(15 * 60), "15m")

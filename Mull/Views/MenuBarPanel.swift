@@ -88,7 +88,7 @@ struct MenuBarPanel: View {
 
                 panelButton(
                     icon: "macwindow",
-                    label: "Open mull",
+                    label: String(localized: "Open mull"),
                     hint: "⇧⌘D",
                     accent: false
                 ) {
@@ -168,8 +168,8 @@ struct MenuBarPanel: View {
     }
 
     private var captureIcon: String {
-        if captureProblem != nil { return "exclamationmark.triangle" }
-        return captureSaved ? "checkmark.circle.fill" : "square.and.pencil"
+        if captureProblem != nil { return DS.Glyph.problem }
+        return captureSaved ? DS.Glyph.success : "square.and.pencil"
     }
 
     private var permissionsSettled: Bool {
@@ -188,7 +188,7 @@ struct MenuBarPanel: View {
         guard !captureText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard QuickCapture.append(captureText) else {
             captureProblem = MullDirectory.issueDescription
-                ?? "mull couldn't write to ~/mull, so this wasn't saved. It's still here."
+                ?? String(localized: "mull couldn't write to ~/mull, so this wasn't saved. It's still here.")
             return
         }
         captureProblem = nil
@@ -271,7 +271,7 @@ struct MenuBarPanel: View {
     // MARK: - Pause control (real — stops capture; timed or until-resume)
     //
     // The control names the state's *exit*, never an action the state cannot take.
-    // Offering "Pause Recording" while nothing is recording was the panel describing
+    // Offering String(localized: "Pause Recording") while nothing is recording was the panel describing
     // a world it wasn't in.
 
     @ViewBuilder
@@ -279,7 +279,7 @@ struct MenuBarPanel: View {
         if appState.isPaused {
             panelButton(
                 icon: "play.fill",
-                label: "Resume Recording",
+                label: String(localized: "Resume Recording"),
                 hint: resumeHint,
                 accent: false
             ) {
@@ -289,7 +289,7 @@ struct MenuBarPanel: View {
             // Stopped: the only move is to start again.
             panelButton(
                 icon: "record.circle",
-                label: "Start Recording",
+                label: String(localized: "Start Recording"),
                 hint: nil,
                 accent: false
             ) {
@@ -301,7 +301,7 @@ struct MenuBarPanel: View {
                 Button("Pause for 1 hour") { appState.pauseCapture(for: 60 * 60) }
                 Button("Pause until I resume") { appState.pauseCapture() }
             } label: {
-                menuRowLabel(icon: "pause.fill", label: "Pause Recording")
+                menuRowLabel(icon: "pause.fill", label: String(localized: "Pause Recording"))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -320,8 +320,8 @@ struct MenuBarPanel: View {
     @ViewBuilder
     private var forgetControl: some View {
         Menu {
-            Button("Forget the last 15 minutes") { planForget(minutes: 15, label: "the last 15 minutes") }
-            Button("Forget the last hour") { planForget(minutes: 60, label: "the last hour") }
+            Button("Forget the last 15 minutes") { planForget(minutes: 15, label: String(localized: "the last 15 minutes")) }
+            Button("Forget the last hour") { planForget(minutes: 60, label: String(localized: "the last hour")) }
             Button("Forget today so far") { planForgetToday() }
         } label: {
             menuRowLabel(icon: "eraser", label: "Forget…")
@@ -374,7 +374,7 @@ struct MenuBarPanel: View {
     private func planForgetToday() {
         let start = Calendar.current.startOfDay(for: Date())
         let interval = DateInterval(start: start, end: Date())
-        pending = PendingForget(label: "today so far",
+        pending = PendingForget(label: String(localized: "today so far"),
                                 plan: appState.forgetPlan(for: interval))
     }
 
@@ -391,7 +391,7 @@ struct MenuBarPanel: View {
     private var resumeHint: String? {
         guard let ends = appState.pauseEndsAt else { return nil }
         let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("jmm")
-        return "until \(f.string(from: ends))"
+        return String(localized: "until \(f.string(from: ends))")
     }
 
     /// The `panelButton` look, for a row that opens a menu instead of acting.
@@ -441,23 +441,27 @@ struct MenuBarPanel: View {
     private var permissionBanner: some View {
         VStack(alignment: .leading, spacing: DS.sm) {
             HStack(spacing: DS.xs) {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: DS.Glyph.problem)
                     .foregroundStyle(DS.paused)
                 Text("Permissions needed")
                     .font(DS.bodyMedium)
             }
 
             if !appState.permissions.accessibilityGranted {
+                // Same grant, same understatement as Settings › Data used to carry:
+                // Accessibility is what lets mull read the text inside the focused
+                // window, not just its title. This banner is narrow, so it says the
+                // short true thing; the full sentence is on the Settings row.
                 permissionRow(
                     name: "Accessibility",
-                    detail: "Window titles",
+                    detail: String(localized: "Window titles and on-screen text"),
                     action: { appState.permissions.openAccessibilitySettings() }
                 )
             }
             if !appState.permissions.inputMonitoringGranted {
                 permissionRow(
-                    name: "Input Monitoring",
-                    detail: "Keyboard recording",
+                    name: String(localized: "Input Monitoring"),
+                    detail: String(localized: "Keyboard recording"),
                     action: { appState.permissions.openInputMonitoringSettings() }
                 )
             }
@@ -468,7 +472,7 @@ struct MenuBarPanel: View {
 
     private func permissionRow(name: String, detail: String, action: @escaping () -> Void) -> some View {
         HStack(spacing: DS.sm) {
-            Image(systemName: "xmark.circle.fill")
+            Image(systemName: DS.Glyph.clearField)
                 .font(DS.smallFont)
                 .foregroundStyle(DS.error)
 

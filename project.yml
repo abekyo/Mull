@@ -4,6 +4,12 @@ options:
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
+  # mull ships in English and Japanese. Declaring both here is what puts mull in
+  # System Settings › General › Language & Region › Applications — macOS only
+  # offers that per-app picker to bundles that carry more than one localization.
+  # `UserLanguage.Preference.system` then means exactly what its label says.
+  developmentLanguage: en
+  knownRegions: [en, ja]
 
 packages:
   GRDB:
@@ -62,6 +68,10 @@ targets:
         # checks the code that already opted in — which is now the whole capture
         # path — without demanding a full Swift 6 migration of the frozen UI.
         SWIFT_STRICT_CONCURRENCY: targeted
+        # Extract every LocalizedStringKey the compiler sees, so a string added to
+        # a view without a translation shows up in the catalog instead of shipping
+        # silently in English.
+        SWIFT_EMIT_LOC_STRINGS: YES
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: true

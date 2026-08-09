@@ -137,7 +137,7 @@ struct EventEditor: View {
     /// reader has ever used would have asked which they meant.
     private var recurrenceRow: some View {
         HStack(spacing: DS.xs) {
-            Image(systemName: "arrow.triangle.2.circlepath")
+            Image(systemName: DS.Glyph.repeats)
             Text(CalendarWeekView.CalItem.recurrenceNote)
         }
         .font(DS.miniFont)
@@ -307,7 +307,7 @@ struct EventEditor: View {
             // it, which is the one question a confirmation exists to answer.
             Button(deleteLabel, role: .destructive, action: deleteTapped)
                 .controlSize(.small)
-                .help(confirmingDelete ? "Click again to delete it (⌘Z undoes this)"
+                .help(confirmingDelete ? String(localized: "Click again to delete it (⌘Z undoes this)")
                                        : deleteHelp)
 
             Spacer()
@@ -350,11 +350,13 @@ struct EventEditor: View {
                 .frame(width: Self.dateFieldWidth)
 
             Button { showingCalendar.wrappedValue = true } label: {
-                Image(systemName: "calendar")
+                Image(systemName: DS.Glyph.calendar)
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
+                    // 22 rather than the standard 30: it sits against a
+                    // `.datePickerStyle(.field)`, and a taller control here would set
+                    // the row's height and leave the field floating inside it.
+                    .iconHitTarget(22)
             }
             .buttonStyle(.plain)
             .pointingHandCursor()
@@ -388,15 +390,15 @@ struct EventEditor: View {
 
     private var deleteLabel: String {
         if event.isRecurring {
-            return confirmingDelete ? "Delete this one?" : "Delete occurrence"
+            return confirmingDelete ? String(localized: "Delete this one?") : String(localized: "Delete occurrence")
         }
         return confirmingDelete ? "Delete?" : "Delete"
     }
 
     private var deleteHelp: String {
         event.isRecurring
-            ? "Remove this occurrence from the series (⌘Z undoes this)"
-            : "Delete from your calendar"
+            ? String(localized: "Remove this occurrence from the series (⌘Z undoes this)")
+            : String(localized: "Delete from your calendar")
     }
 
     private var selectedCalendar: CalendarService.WritableCalendar? {

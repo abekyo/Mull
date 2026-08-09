@@ -86,6 +86,9 @@ struct OnboardingView: View {
     @State private var aiTools: [AIToolSetup.AITool] = []
     @State private var pendingConnect: PendingConnect?
     @State private var connectError: String?
+    /// The setup command has been copied. Latched rather than timed: this screen is
+    /// the last one, and someone who copied the command is on their way out of it.
+    @State private var showCommandCopied = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -170,7 +173,7 @@ struct OnboardingView: View {
                              dotR: 0.012, dotGap: 0.052, skip: 0.12)
                     .frame(width: 96, height: 96)
                     .opacity(0.45)
-                Image(systemName: "moon.stars")
+                Image(systemName: DS.Glyph.brand)
                     .font(DS.iconHero.weight(.light))
                     .foregroundStyle(DS.moon)
             }
@@ -193,9 +196,9 @@ struct OnboardingView: View {
             // what gets captured, and it belongs on the screen *before* the permission
             // dialog, not in a grey sub-caption underneath the button that triggers it.
             VStack(alignment: .leading, spacing: DS.md) {
-                valueProp(text: "Records what you type, copy, and have open")
-                valueProp(text: "Keeps the day in plain markdown files you own")
-                valueProp(text: "Hands that context to an AI when you ask")
+                valueProp(text: String(localized: "Records what you type, copy, and have open"))
+                valueProp(text: String(localized: "Keeps the day in plain markdown files you own"))
+                valueProp(text: String(localized: "Hands that context to an AI when you ask"))
             }
             .padding(.horizontal, 48)
 
@@ -260,8 +263,8 @@ struct OnboardingView: View {
             // permission the product cannot work without, or which to start with.
             VStack(alignment: .leading, spacing: DS.md) {
                 permissionRow(
-                    name: "Input Monitoring",
-                    detail: "Record what you type — without this, mull only keeps what you copy",
+                    name: String(localized: "Input Monitoring"),
+                    detail: String(localized: "Record what you type — without this, mull only keeps what you copy"),
                     granted: appState.permissions.inputMonitoringGranted,
                     asked: askedInputMonitoring,
                     action: {
@@ -294,7 +297,7 @@ struct OnboardingView: View {
                 )
                 permissionRow(
                     name: "Accessibility",
-                    detail: "Read window titles, so the record says where you were",
+                    detail: String(localized: "Read window titles, so the record says where you were"),
                     granted: appState.permissions.accessibilityGranted,
                     // The prompt and System Settings used to be fired back to back,
                     // so the modal grant dialog and a whole Settings window raced for
@@ -316,7 +319,7 @@ struct OnboardingView: View {
 
             if appState.permissions.accessibilityGranted && appState.permissions.inputMonitoringGranted {
                 HStack(spacing: DS.sm) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: DS.Glyph.success)
                         .foregroundStyle(DS.recording)
                     Text("mull is recording")
                         .font(DS.bodyMedium)
@@ -690,7 +693,7 @@ struct OnboardingView: View {
                 // untrue sentence was the same one that made it look broken. What
                 // replaces it is the part the screen can always keep.
                 Text(previewIsStarterOnly
-                     ? "Nothing has been recorded yet, so this is what mull can say today: what is open in front of you. It grows on its own from here."
+                     ? "Nothing has been recorded yet, so this is all mull can say today: what is open in front of you. It fills in on its own as you work."
                      : "Read it, then copy it if you're happy with it — it goes to your clipboard and nowhere else.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
@@ -706,7 +709,7 @@ struct OnboardingView: View {
                 copyPreviewedContext()
             } label: {
                 HStack(spacing: DS.sm) {
-                    Image(systemName: "doc.on.clipboard")
+                    Image(systemName: DS.Glyph.copy)
                     Text("Copy this")
                 }
                 .font(DS.titleMedium)
@@ -720,7 +723,7 @@ struct OnboardingView: View {
             if showCopiedConfirmation {
                 // A confirmation, not a celebration: state the fact and move on.
                 HStack(spacing: DS.sm) {
-                    Image(systemName: "checkmark")
+                    Image(systemName: DS.Glyph.confirm)
                         .font(DS.captionFont)
                     Text("Copied — paste it (⌘V) at the start of any AI conversation.")
                         .font(DS.captionFont)
@@ -857,27 +860,49 @@ struct OnboardingView: View {
     private var installedTools: [AIToolSetup.AITool] { aiTools.filter(\.detected) }
 
     private func connectRow(_ tool: AIToolSetup.AITool) -> some View {
-        HStack(spacing: DS.md) {
-            Image(systemName: tool.configured ? "checkmark.circle.fill" : "circle")
+        // `.current` is the only state that has actually connected. A registration
+        // that names a path which is not there reads as connected and is not, so it
+        // gets the unfinished glyph and the button that repairs it.
+        let connected = tool.registration == .current
+
+        return HStack(spacing: DS.md) {
+            Image(systemName: connected ? DS.Glyph.success : DS.Glyph.pending)
                 .font(DS.iconBody)
-                .foregroundStyle(tool.configured ? AnyShapeStyle(DS.recording) : AnyShapeStyle(DS.inkFaint))
+                .foregroundStyle(connected ? AnyShapeStyle(DS.recording) : AnyShapeStyle(DS.inkFaint))
 
             VStack(alignment: .leading, spacing: DS.hair) {
                 Text(tool.name).font(DS.bodyMedium)
-                Text(tool.configured
-                     ? "Connected — restart \(tool.name) to load mull."
-                     : "Not connected yet")
-                    .font(DS.captionFont)
-                    .foregroundStyle(DS.inkFaint)
+                if connected {
+                    Text("Connected — quit and reopen \(tool.name) to load mull.")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.inkFaint)
+                } else if let problem = tool.registration.problem {
+                    Text(problem)
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.paused)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Not connected yet")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.inkFaint)
+                }
             }
 
             Spacer()
 
-            if !tool.configured {
-                Button("Connect") { beginConnect(tool) }
-                    .font(DS.captionFont)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+            if !connected {
+                // Spelled as `LocalizedStringKey`, not left to a ternary of two bare
+                // literals: that can resolve to the `StringProtocol` overload, which
+                // is the one that never reaches the catalogue.
+                Button(tool.registration.isRegistered
+                       ? LocalizedStringKey("Reconnect")
+                       : LocalizedStringKey("Connect")) {
+                    beginConnect(tool)
+                }
+                .font(DS.captionFont)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(tool.registration == .unreadable)
             }
         }
     }
@@ -892,10 +917,57 @@ struct OnboardingView: View {
                 .opacity(0.5)
             Text("No AI tools found on this Mac")
                 .font(DS.bodyMedium)
-            Text("mull looks for Claude Code, Claude Desktop and Cursor. Until one of them is installed, the copy button on the last screen does the same job by hand.")
+            // What this used to say: "the copy button on the last screen does the
+            // same job by hand". This IS the last screen — the copy button is on the
+            // one before it, there is no way back from here, and copying your context
+            // to paste into a chat is a different job from registering an MCP server
+            // anyway. So the way through lives here instead of being pointed at.
+            Text("mull looks in the usual install locations. Either take the command below, or connect a tool that is installed somewhere else.")
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkDim)
                 .multilineTextAlignment(.center)
+
+            if let command = AIToolSetup.cliCommand() {
+                Text(command)
+                    .font(DS.microFont)
+                    .foregroundStyle(DS.inkDim)
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: DS.sm) {
+                if let command = AIToolSetup.cliCommand() {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(command, forType: .string)
+                        showCommandCopied = true
+                    } label: {
+                        HStack(spacing: DS.xs) {
+                            Image(systemName: showCommandCopied ? DS.Glyph.confirm : DS.Glyph.copy)
+                            Text(showCommandCopied
+                                 ? LocalizedStringKey("Copied")
+                                 : LocalizedStringKey("Copy the command"))
+                        }
+                    }
+                    .font(DS.captionFont)
+                    .controlSize(.small)
+                }
+
+                // Behind a menu, not as three rows. Detection is a guess and has to
+                // have an override — Settings has always had one — but a list of
+                // apps the user does not have is an advert for other companies'
+                // products on mull's setup screen.
+                Menu("Connect anyway…") {
+                    ForEach(aiTools) { tool in
+                        Button(tool.name) { beginConnect(tool) }
+                    }
+                }
+                .font(DS.captionFont)
+                .controlSize(.small)
+                .fixedSize()
+            }
+            .padding(.top, DS.xs)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, DS.md)
@@ -949,7 +1021,7 @@ struct OnboardingView: View {
                     // and came back empty. Honest — pretending otherwise would be the
                     // first thing mull made up, and claiming it while the read is
                     // still running would be the same lie told early.
-                    Text("There's nothing to hand over yet — mull has only just started. Come back after a stretch of work and this will have your day in it.")
+                    Text("There's nothing to hand over yet — mull has only just started. Come back after some work and your day will be in here.")
                         .font(DS.bodyFont)
                         .foregroundStyle(DS.inkDim)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1056,7 +1128,7 @@ struct OnboardingView: View {
     private func permissionRow(name: String, detail: String, granted: Bool,
                                asked: Bool, action: @escaping () -> Void) -> some View {
         HStack(spacing: DS.md) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "circle")
+            Image(systemName: granted ? DS.Glyph.success : DS.Glyph.pending)
                 .font(DS.iconBody)
                 .foregroundStyle(granted ? AnyShapeStyle(DS.recording) : AnyShapeStyle(DS.inkFaint))
 
@@ -1091,7 +1163,7 @@ struct OnboardingView: View {
             // Developer-only: a build launched by Xcode is granted under Xcode's
             // identity. Never shipped — it is meaningless to anyone who installed
             // mull normally, and reads as a leaked internal note.
-            Text("Debug build: when running from Xcode, add Xcode instead.")
+            Text(String(localized: "Debug build: when running from Xcode, add Xcode instead."))
                 .foregroundStyle(DS.inkFaint)
             #endif
         }

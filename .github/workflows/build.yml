@@ -1,0 +1,64 @@
+name: build
+
+# CONTRIBUTING.md names two things that have to pass. Only one of them ran here:
+# eval.yml swiftc-compiles fourteen files out of Mull/Core and never touches the
+# app target, MullMCP, or the test suite. A pull request that broke the build, or
+# every test in it, still got a green check — the contributing guide promised a
+# gate that did not exist.
+#
+# The two halves stay in separate workflows on purpose. eval.yml runs in seconds
+# without an Xcode project at all, and folding it into a full app build would cost
+# it exactly the property that makes it worth running on every push.
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    # macos-15, not the macos-14 eval.yml runs on: macos-14's default toolchain is
+    # Xcode 15.4, below the 16.0 project.yml declares. 16.1 and 16.2 are installed
+    # on that image but not selected, so the job would need an xcode-select dance
+    # to get a toolchain that macos-15 gives by default (16.4).
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner's default Xcode moves when the image is rebuilt. When it moves
+      # below what project.yml declares, the build fails as a wall of syntax
+      # errors in code that is fine — so say the actual reason here instead.
+      - name: Check the toolchain
+        run: |
+          xcodebuild -version
+          major=$(xcodebuild -version | sed -n '1s/Xcode \([0-9][0-9]*\).*/\1/p')
+          [ "${major:-0}" -ge 16 ] || {
+              echo "project.yml declares xcodeVersion 16.0; this runner defaults to Xcode $major."
+              echo "Pick a newer image, or select an installed Xcode 16+ from /Applications."
+              exit 1
+          }
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Mull.xcodeproj is generated and gitignored, so CI has to do what
+      # CONTRIBUTING.md tells a contributor to do after cloning. That it runs the
+      # same two commands is the point: the setup instructions are tested here.
+      - name: Generate the project
+        run: xcodegen generate
+
+      # No certificate on the runner and none required — with
+      # MULL_CODE_SIGN_IDENTITY unset, project.yml falls back to ad-hoc "-", which
+      # builds and runs. Distribution is the only thing that needs a real identity,
+      # and that is scripts/release.sh's job, not this one's.
+      #
+      # The command is copied verbatim from CONTRIBUTING.md. If one of them
+      # changes, the other is wrong.
+      - name: Test
+        run: xcodebuild -project Mull.xcodeproj -scheme Mull -destination 'platform=macOS' test
+
+      # MullMCP builds again by name, even though the app target already embeds it.
+      # It is the layering check: project.yml compiles Mull/Core here WITHOUT
+      # Mull/Views, so a core file that reaches for an app-layer type fails. Giving
+      # it its own step means that failure arrives labelled "Build MullMCP" rather
+      # than buried in a dependency phase of a test run that never got to the tests.
+      - name: Build MullMCP
+        run: xcodebuild -project Mull.xcodeproj -scheme MullMCP -destination 'platform=macOS' build

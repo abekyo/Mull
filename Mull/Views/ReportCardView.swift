@@ -119,7 +119,7 @@ struct ReportCardView: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: DS.sm) {
             HStack {
-                Text("TODAY, IN YOUR WORDS").sectionLabel()
+                Text("TODAY'S REPORT").sectionLabel()
                 Spacer()
                 if draft != nil && !editing && !loading {
                     // Re-drafting an *approved* report throws away the user's own
@@ -129,7 +129,9 @@ struct ReportCardView: View {
                     // vanished — two different texts swapping places with no way to
                     // tell which was yours. It asks first now.
                     Button { requestRedraft() } label: {
-                        Image(systemName: "arrow.clockwise").font(DS.captionFont)
+                        Image(systemName: DS.Glyph.refresh)
+                            .font(DS.captionFont)
+                            .iconHitTarget()
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(DS.inkFaint)
@@ -141,7 +143,7 @@ struct ReportCardView: View {
 
             if let err = error, !loading {
                 HStack(spacing: DS.sm) {
-                    Image(systemName: "exclamationmark.triangle")
+                    Image(systemName: DS.Glyph.problem)
                         .foregroundStyle(DS.paused)
                     Text(err)
                         .font(DS.captionFont)
@@ -182,7 +184,7 @@ struct ReportCardView: View {
                 VStack(alignment: .leading, spacing: DS.sm) {
                     HStack(spacing: DS.sm) {
                         ProgressView().controlSize(.small)
-                        Text("Your understudy is drafting…")
+                        Text("Drafting today's report…")
                             .font(DS.captionFont).foregroundStyle(DS.inkDim)
                     }
                     // The new draft streams into its own buffer, so what is on
@@ -202,7 +204,7 @@ struct ReportCardView: View {
                         .textSelection(.enabled)
                     // Dignity: the understudy says what it learned the voice from.
                     if !sources.isEmpty {
-                        Text("Voice learned from: " + sources.joined(separator: " · "))
+                        Text(String(localized: "Style copied from: ") + sources.joined(separator: " · "))
                             .font(DS.miniFont)
                             .foregroundStyle(DS.inkGhost)
                     }
@@ -227,19 +229,19 @@ struct ReportCardView: View {
                         // learned nothing. Approving unedited is a first-class act.
                         if !approved {
                             Button { approve(text) } label: {
-                                Label("Keep this", systemImage: "checkmark")
+                                Label("Keep this", systemImage: DS.Glyph.confirm)
                                     .font(DS.captionFont)
                             }
                             .buttonStyle(.plain).foregroundStyle(DS.moon)
-                            .help("Kept as written, it becomes tomorrow's voice sample")
+                            .help("Kept as written, tomorrow's draft copies its style from this text")
                         } else {
-                            Label("Kept", systemImage: "checkmark.circle")
+                            Label("Kept", systemImage: DS.Glyph.success)
                                 .font(DS.captionFont)
                                 .foregroundStyle(DS.inkFaint)
                         }
 
                         Button { beginEditing(text) } label: {
-                            Label("Edit", systemImage: "pencil").font(DS.captionFont)
+                            Label("Edit", systemImage: DS.Glyph.edit).font(DS.captionFont)
                         }
                         .buttonStyle(.plain).foregroundStyle(DS.moon)
 
@@ -259,7 +261,7 @@ struct ReportCardView: View {
                     }
                 } else if !isLLMOff {
                     VStack(alignment: .leading, spacing: DS.sm) {
-                        Text("Your understudy can draft it from what you did today.")
+                        Text("The AI can draft it from what you did today.")
                             .font(DS.bodyFont).foregroundStyle(DS.inkDim)
                         Button { generate() } label: {
                             Label("Write today's report", systemImage: "square.and.pencil")
@@ -287,7 +289,7 @@ struct ReportCardView: View {
             Button("Write a new draft", role: .destructive) { confirmRedraft() }
             Button("Keep mine", role: .cancel) {}
         } message: {
-            Text("Today's report in ~/mull is the version you kept. A new draft would be written by your understudy, not by you, and would take its place. Your kept copy is set aside rather than deleted.")
+            Text("Today's report in ~/mull is the version you kept. The AI will write a new draft and put it in that place. Your kept copy is saved beside it, not deleted.")
         }
     }
 
@@ -321,8 +323,8 @@ struct ReportCardView: View {
 
             HStack(spacing: DS.md) {
                 // Why the edit matters — said once, quietly, where it is true.
-                Text(isDirty ? "Your edit becomes tomorrow's voice sample."
-                             : "Edit freely — your words teach tomorrow's draft.")
+                Text(isDirty ? "Tomorrow's draft copies its style from your edit."
+                             : "Edit freely — tomorrow's draft copies its style from what you leave here.")
                     .font(DS.miniFont)
                     .foregroundStyle(DS.inkFaint)
 
@@ -357,7 +359,7 @@ struct ReportCardView: View {
             Button("Discard edit", role: .destructive) { discardEdit() }
             Button("Keep editing", role: .cancel) {}
         } message: {
-            Text("The words you have written since you opened the editor will be removed. This is the text tomorrow's draft would have learned your voice from, and it cannot be recovered.")
+            Text("The words you have written since you opened the editor will be removed. Tomorrow's draft would have copied its style from this text, and it cannot be recovered.")
         }
     }
 
@@ -392,8 +394,8 @@ struct ReportCardView: View {
 
     private var llmOffRow: some View {
         HStack(spacing: DS.sm) {
-            Image(systemName: "moon.zzz").foregroundStyle(DS.paused)
-            Text("Turn on a provider to let your understudy draft this.")
+            Image(systemName: DS.Glyph.asleep).foregroundStyle(DS.paused)
+            Text("Turn on a provider to let the AI draft this.")
                 .font(DS.captionFont).foregroundStyle(DS.inkDim)
             Spacer()
             // Lands on the AI tab: this message is about turning a provider on,
@@ -527,7 +529,7 @@ struct ReportCardView: View {
     /// the file is written rather than by this button remembering to behave.
     private func approve(_ text: String) {
         guard writer.save(text, for: Date()) else {
-            error = "Could not write today's report to ~/mull — it is still here on screen."
+            error = String(localized: "Could not write today's report to ~/mull — it is still here on screen.")
             return
         }
         approved = true
@@ -606,7 +608,7 @@ struct ReportCardView: View {
         // write with the backup already deleted is exactly how an edit disappears.
         let text = buffer
         guard writer.save(text, for: Date()) else {
-            error = "Could not write today's report to ~/mull — your edit is still here."
+            error = String(localized: "Could not write today's report to ~/mull — your edit is still here.")
             return
         }
         draft = text

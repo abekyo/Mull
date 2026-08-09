@@ -132,14 +132,14 @@ struct WeekSection: View {
             // Duration comparison
             HStack(spacing: DS.md) {
                 stat(
-                    label: "So far",
+                    label: String(localized: "So far"),
                     value: comp.thisWeekHours,
                     delta: comp.lastWeekDuration > 0 ? comp.deltaFormatted : nil,
                     deltaUp: comp.durationDelta >= 0
                 )
 
                 stat(
-                    label: "Last week (same point)",
+                    label: String(localized: "Last week (same point)"),
                     value: comp.lastWeekHours,
                     delta: nil,
                     deltaUp: true
@@ -150,7 +150,7 @@ struct WeekSection: View {
             HStack(spacing: DS.md) {
                 let deepDelta = comp.thisWeekDeepBlocks - comp.lastWeekDeepBlocks
                 stat(
-                    label: "Deep work (2h+)",
+                    label: String(localized: "Deep work (2h+)"),
                     value: pluralized(comp.thisWeekDeepBlocks, "block"),
                     delta: deepDelta != 0 ? (deepDelta > 0 ? "+\(deepDelta)" : "\(deepDelta)") : nil,
                     deltaUp: deepDelta >= 0
@@ -161,7 +161,7 @@ struct WeekSection: View {
                     ? Int(Double(switchDelta) / Double(comp.lastWeekContextSwitches) * 100)
                     : 0
                 stat(
-                    label: "Context switches",
+                    label: String(localized: "Context switches"),
                     value: "\(comp.thisWeekContextSwitches)",
                     delta: switchPct != 0 ? (switchPct > 0 ? "+\(switchPct)%" : "\(switchPct)%") : nil,
                     deltaUp: switchDelta <= 0 // fewer switches is better

@@ -12,9 +12,18 @@ import XCTest
 final class VaultStructureTests: XCTestCase {
 
     private var database: DatabaseService!
+    private var savedLanguage: String?
 
     override func setUpWithError() throws {
         try super.setUpWithError()
+        // These assert structure, but they locate that structure by quoting the
+        // headings — "### Right now", "# What I'm working on". Since `VaultText`
+        // those headings follow the reader's language, so an unpinned suite passes
+        // on an English Mac and fails on a Japanese one, and the failure reads as a
+        // structural break rather than as a translation.
+        savedLanguage = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        UserDefaults.standard.set(UserLanguage.Preference.english.rawValue,
+                                  forKey: UserLanguage.preferenceKey)
         _ = MullDirectory.setup()      // the throwaway XCTest vault, not ~/mull
         database = try DatabaseService.temporary()
     }
@@ -23,6 +32,7 @@ final class VaultStructureTests: XCTestCase {
         for name in ["me.md", "now.md", "full.md", "mull.md"] {
             _ = MullDirectory.delete(name)
         }
+        UserDefaults.standard.set(savedLanguage, forKey: UserLanguage.preferenceKey)
         database = nil
         super.tearDown()
     }
@@ -83,7 +93,7 @@ final class VaultStructureTests: XCTestCase {
                        "one front-matter block, not one per embedded file")
         XCTAssertFalse(renderedLines(full).contains { $0.hasPrefix("# What I'm working on") },
                        "now.md's own title must not appear inside full.md")
-        XCTAssertFalse(full.contains("your edits are kept"),
+        XCTAssertFalse(full.contains("survive the next update"),
                        "now.md's orientation note contradicts full.md's own")
         assertSingleSpine("full.md")
     }

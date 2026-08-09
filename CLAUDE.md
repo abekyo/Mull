@@ -10,6 +10,7 @@
 > | [MAP-ARCHITECTURE.md](MAP-ARCHITECTURE.md) | データ層の構造（領土/地図/モード） | DIRECTION の従属 |
 > | [HARNESS.md](HARNESS.md) | 訂正ループの実装仕様（§7.3 の実装） | DIRECTION の従属 |
 > | CLAUDE.md（本書） | 製品仕様 | 上記に従属 |
+> | [WRITING.md](WRITING.md) | UI文言と vault 文言の書き方 | 本書の従属 |
 >
 > 衝突したら **§0 > DIRECTION > CLAUDE.md の残り**。
 > §0 が上にあるのは、他の文書が「どう作るか」を決めているのに対し、
@@ -171,7 +172,12 @@ claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
 | ブラウザURL | AppleScript | Safari/Chrome/Arc/Brave/Edge |
 | アプリ切り替え | NSWorkspace 通知 | アプリ名と滞在時間 |
 | カレンダー | EventKit | 今日のスケジュール |
-| メール | AppleScript（オプトイン） | 件名と送信者のみ。本文は読まない |
+| メール | AppleScript（オプトイン） | この経路は件名と送信者のみ（下記） |
+
+> **メールの行について。** 「本文は読まない」はこの経路については正しく、製品については誤りです。
+> Mail.app は除外リストに載っていないので、メールを読んでいる間の画面の文字は
+> 「ウィンドウ本文」の行が拾います。この表の行は互いに独立ではありません。
+> 正確な約束と、止め方は [SECURITY.md](SECURITY.md) にあります（そちらが正本）。
 
 ### 6.1 捕捉時の軽い索引（要約ではない）
 
@@ -303,15 +309,19 @@ Screenpipe も ManicTime も Timing も、この信号を持っていません�
 
 - 全データはユーザーの Mac 内。mull 社のサーバーは存在しない
 - LLM は既定で Off。クラウドを明示的に選んだ時だけ外部送信し、送信前に機密は除外する
+- Ollama か OpenAI互換ローカルサーバーを選べば、LLM 機能を含めてネットワークを切ったまま動く。
+  MCP の13ツールはどの設定でも LLM を呼ばない（境界の全件と、ソースのどこで確かめるかは [SECURITY.md](SECURITY.md)）
 - クラウド利用時はユーザー自身の API キーで直接通信する。中間サーバーは無い
 - 使用統計の収集も送信も一切しない（トグルも持たない）
 
 ### 8.2 データ保護
 
 - パスワードフィールドは自動でスキップ（`IsSecureEventInputEnabled`）
-- アプリ除外リスト（1Password, Keychain などはデフォルト除外）
+- アプリ除外リスト（1Password, Keychain などはデフォルト除外）。除外中は5経路すべてと、
+  切り替えの記録そのものが止まる（`RecordingService.isExcludedApp` と `recordAppSession`）
 - mull 自身のイベントは記録しない
-- メールは件名と送信者のみ。パスワードリセットや銀行通知は自動除外
+- メール取り込みの経路は件名と送信者のみ。パスワードリセットや銀行通知は自動除外。
+  ただし画面に出ているメール本文は別経路が拾う（§6 の注記と [SECURITY.md](SECURITY.md)）
 - API キーは macOS Keychain に置く
 
 ### 8.3 なぜ「読めること」が privacy の要件なのか
@@ -360,7 +370,7 @@ Bartender の事例（所有者交代、解析を無断追加、HN 252pt 炎上�
 | Calendar | EventKit |
 | Browser / Email | AppleScript |
 | API Keys | macOS Keychain Services |
-| LLM | Off（既定） / Ollama / Gemini / Anthropic / OpenAI |
+| LLM | Off（既定） / Ollama / OpenAI互換ローカルサーバー / Gemini / Anthropic / OpenAI |
 | AI Protocol | MCP (Model Context Protocol) via stdio。`MullMCP` 単体バイナリ |
 | Project generation | XcodeGen (`project.yml`) |
 

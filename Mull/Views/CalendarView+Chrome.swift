@@ -31,7 +31,7 @@ extension CalendarWeekView {
             newEventControl
 
             HStack(spacing: DS.xs) {
-                navArrow("chevron.left", hint: "Go back", action: { step(-1) })
+                navArrow("chevron.left", hint: String(localized: "Go back"), action: { step(-1) })
                 // Always live, as Apple's is. It used to vanish when you were already
                 // on today, which is a control that moves under the pointer.
                 Button("Today") { goToToday() }
@@ -39,7 +39,7 @@ extension CalendarWeekView {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .help("Today (⌘T)")
-                navArrow("chevron.right", hint: "Go forward", action: { step(1) })
+                navArrow("chevron.right", hint: String(localized: "Go forward"), action: { step(1) })
             }
 
             jumpButton
@@ -124,7 +124,7 @@ extension CalendarWeekView {
                     }
                 }
             } label: {
-                Image(systemName: "plus")
+                Image(systemName: DS.Glyph.add)
                     .font(DS.bodyFont)
                     .foregroundStyle(DS.inkDim)
             } primaryAction: {
@@ -137,7 +137,7 @@ extension CalendarWeekView {
             .accessibilityLabel("New event")
         } else {
             Button { newEvent() } label: {
-                Image(systemName: "plus")
+                Image(systemName: DS.Glyph.add)
                     .font(DS.bodyFont)
                     .foregroundStyle(calendars.isEmpty ? DS.inkFaint : DS.inkDim)
                     .frame(width: 22, height: 22)
@@ -156,9 +156,9 @@ extension CalendarWeekView {
     /// go?" being the next question.
     var newEventHelp: String {
         guard let calendar = appState.calendar.defaultCalendarTitle else {
-            return "No calendar on this Mac accepts new events"
+            return String(localized: "No calendar on this Mac accepts new events")
         }
-        return "New event in \(calendar) (⌘N) · or double-click the grid"
+        return String(localized: "New event in \(calendar) (⌘N) · or double-click the grid")
     }
 
     /// What the toolbar is titled with, in whatever unit is on screen.
@@ -175,7 +175,7 @@ extension CalendarWeekView {
     /// clicks of the back chevron before this existed.
     var jumpButton: some View {
         Button { pickerDate = anchorDate; showingDatePicker = true } label: {
-            Image(systemName: "calendar")
+            Image(systemName: DS.Glyph.calendar)
                 .font(DS.bodyFont)
                 .foregroundStyle(DS.inkDim)
                 .frame(width: 22, height: 22)
@@ -310,7 +310,7 @@ extension CalendarWeekView {
                         .foregroundStyle(DS.ink)
                     // Both halves of the grid are empty here, and only one of them
                     // has a cause worth acting on — so say which is which.
-                    Text("Nothing observed either — mull fills this in as you work.")
+                    Text("Nothing recorded either — mull fills this in as you work.")
                         .font(DS.captionFont)
                         .foregroundStyle(DS.inkDim)
                     Button(calendarAccess == .notDetermined ? "Allow calendar access"

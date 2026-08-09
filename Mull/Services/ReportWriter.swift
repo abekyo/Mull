@@ -261,8 +261,10 @@ struct ReportWriter {
 
         var errorDescription: String? {
             switch self {
-            case .llmOff: return "LLM is off — turn on a provider in Settings."
-            case .noActivity: return "No recorded activity for this day yet."
+            case .llmOff: return VaultText.t("LLM is off — turn on a provider in Settings.",
+                                         "LLM が無効です。設定でプロバイダを有効にしてください。")
+            case .noActivity: return VaultText.t("No recorded activity for this day yet.",
+                                             "この日の記録はまだありません。")
             case .llm(let message): return message
             }
         }
@@ -384,50 +386,27 @@ struct ReportWriter {
         return (out.trimmingCharacters(in: .whitespacesAndNewlines), sources)
     }
 
-    /// Crude but honest: if the user's own writing is mostly CJK, the report is Japanese.
-    /// Internal for the same reason as voiceSamples() — MullEngine writes in the same
-    /// language the user actually writes in, rather than defaulting to English.
+    /// Which language mull writes the day up in.
     ///
-    /// Remembers its last answer, because the decision has to be *sticky*. This used to
-    /// be `cjk * 4 > samples.count`: a hard flip at 25%, which is exactly where a
-    /// bilingual user sits — Japanese prose carrying English identifiers, English notes
-    /// quoting Japanese. A week's samples drifting between 23% and 27% handed them a
-    /// report in a different language every day, and a report you have to re-read in
-    /// translation is not written in your voice by any definition.
+    /// The reader's setting, and nothing else. This used to sample the user's own
+    /// prose and count CJK scalars against a threshold, with a persisted previous
+    /// answer and a 15–35% deadband to stop a bilingual user getting a report in a
+    /// different language every day. All of that was scaffolding around one
+    /// decision — *guess the language from the writing* — and the guess is exactly
+    /// what `UserLanguage` was changed to stop making: a setting the reader chose
+    /// needs no deadband, cannot drift, and is the same answer the vault files and
+    /// the app's own windows are already using.
     ///
-    /// The deadband (stay put between 15% and 35%) is the same one `SectionLabels.matching`
-    /// uses for the summary's headings, and the two must agree: headings in one language
-    /// over prose in the other read as a translation layer over someone else's report.
-    static let languageKey = "reportVoiceLanguage"
-
+    /// The `samples` argument is kept so the call sites read the same and so the
+    /// pairing with `voiceSamples()` stays visible — the samples still decide the
+    /// *voice*, they just no longer decide the language.
+    ///
+    /// `SectionLabels.matching` keeps its own content-based test, and should: it
+    /// labels summaries that are already written, including ones written months ago
+    /// under a different setting. Deciding what to write and reading what was
+    /// written are not the same question.
     func dominantLanguage(of samples: String) -> String {
-        let previous = defaults.string(forKey: Self.languageKey)
-        let chosen = Self.language(of: samples, previous: previous)
-        // Only a real decision is remembered. Recording the day-one placeholder would
-        // pin the deadband to a language nobody has chosen yet.
-        if chosen == "Japanese" || chosen == "English" {
-            defaults.set(chosen, forKey: Self.languageKey)
-        }
-        return chosen
-    }
-
-    /// The pure decision, so a sequence of borderline days can be tested without a
-    /// clock or a defaults domain. Counts CJK scalars against the *scalar* total: the
-    /// old version divided a scalar count by a Character count, so one emoji in the
-    /// samples silently moved the threshold.
-    static func language(of samples: String, previous: String?) -> String {
-        let scalars = samples.unicodeScalars
-        guard !scalars.isEmpty else { return previous ?? "the user's language" }
-        let cjk = scalars.filter {
-            (0x3040...0x30FF).contains($0.value) || (0x4E00...0x9FFF).contains($0.value)
-        }.count
-        let ratio = Double(cjk) / Double(scalars.count)
-
-        switch previous {
-        case "Japanese": return ratio >= 0.15 ? "Japanese" : "English"   // stay Japanese unless clearly not
-        case "English":  return ratio >= 0.35 ? "Japanese" : "English"   // stay English unless clearly not
-        default:         return ratio >= 0.25 ? "Japanese" : "English"   // first look: the plain threshold
-        }
+        UserLanguage.isJapanese ? "Japanese" : "English"
     }
 
     /// The most recent reports that are actually the user's own writing.

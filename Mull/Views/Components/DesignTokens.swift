@@ -122,6 +122,81 @@ enum DS {
     static let iconAction = scaled(26, .title)      // the primary action (send / stop)
     static let iconHero = scaled(32, .largeTitle)   // empty-state and welcome emblems
 
+    // MARK: Which glyph — the symbol台帳
+    //
+    // The size tiers above fixed *how big* an icon is drawn and left *which icon*
+    // to the call site, so the same meaning acquired several glyphs: two spellings
+    // of "there is a problem" (`exclamationmark.triangle` and `exclamationmark.circle`
+    // alongside the filled triangle), `lock` and `lock.fill` for the same padlock,
+    // `folder` and `folder.fill` in one sidebar, and three different moons standing
+    // in for mull itself. A reader has to learn each spelling separately before
+    // discovering they meant one thing.
+    //
+    // **One meaning, one symbol.** Reach for a bare `Image(systemName:)` only for a
+    // glyph that appears once in the whole app; anything a second screen could
+    // plausibly want belongs here, where the second screen will find it.
+    //
+    // **Fill is a state, not a decoration.** Filled = a condition the reader has to
+    // notice right now (it failed / it succeeded / it was refused). Outline = a
+    // label or an affordance — a thing to read or press. That rule is why `locked`
+    // and `folder` are outline: neither is an alarm, they are nouns.
+    enum Glyph {
+        // States worth interrupting for — filled, by the rule above.
+        static let problem = "exclamationmark.triangle.fill"
+        static let success = "checkmark.circle.fill"
+        static let denied = "xmark.circle.fill"
+        /// The empty half of a checklist pair whose filled half is `success`.
+        static let pending = "circle"
+
+        // Nouns and affordances — outline.
+        static let locked = "lock"
+        static let folder = "folder"
+        static let file = "doc.text"
+        static let settings = "gearshape"
+        static let search = "magnifyingglass"
+        static let clearField = "xmark.circle.fill"   // a filled glyph by SF convention
+        static let copy = "doc.on.clipboard"
+        static let trash = "trash"
+
+        static let add = "plus"
+        static let edit = "pencil"
+        /// A bare tick on a button that accepts something. Not `success` — that one
+        /// reports a state that has already landed.
+        static let confirm = "checkmark"
+        /// An excerpt quoted back from the record.
+        static let quote = "text.quote"
+        /// A clock face is a point in time; an hourglass is a length of one. Two
+        /// meanings, two glyphs, and neither borrows the other's.
+        static let timeOfDay = "clock"
+        static let duration = "hourglass"
+
+        /// Reload from disk. Distinct from `repeats` on purpose: that one means a
+        /// calendar series, and the two were never the same idea.
+        static let refresh = "arrow.clockwise"
+        static let repeats = "arrow.triangle.2.circlepath"
+
+        // mull's own face.
+        /// The brand mark — used wherever mull identifies itself as the speaker.
+        static let brand = "moon.stars"
+        /// Actively working (menu bar only, where the icon is the whole status).
+        static let brandWorking = "moon.stars.fill"
+        /// Capture is paused. A state of mull, not the brand.
+        static let asleep = "moon.zzz"
+
+        // Primary surfaces. `chat` is one bubble rather than the two-bubble
+        // compound it used to be: a `Label` list sizes its icon column to the
+        // widest glyph in it, so a 2-unit-wide symbol beside `house`, `calendar`
+        // and `waveform` indented all four titles to make room for one of them.
+        static let home = "house"
+        static let calendar = "calendar"
+        static let live = "waveform"
+        static let chat = "bubble.left"
+
+        /// Show/hide the sidebar. mull draws this itself — see
+        /// `AppDelegate.installSidebarToggle`.
+        static let sidebar = "sidebar.leading"
+    }
+
     static let labelFont = scaled(11, .subheadline, .medium)
     static let labelTracking: CGFloat = 0.5
 
@@ -244,7 +319,7 @@ enum DS {
 
     // MARK: - Event Type Colors
     //
-    // Used in LiveTab, HomeTab, ProfileTab for event type indicators.
+    // Used in LiveTab and HomeTab for event type indicators.
     // Never use raw .blue/.orange/.green — always go through these.
 
     // Keystrokes are by far the most-rendered event in a keystroke logger, so this
@@ -375,6 +450,57 @@ enum DS {
 }
 
 // MARK: - View Extensions
+
+extension View {
+    /// Give a glyph-sized control a pointer-sized target.
+    ///
+    /// A `Button` whose whole label is an `Image(systemName:)` is hit-testable over
+    /// the glyph and nothing else, so its target is whatever `.font()` happened to be
+    /// set on it. That was 9pt for the notice bar's dismiss and 11pt for the buttons
+    /// that reveal an API key, re-draft a report, and delete an MCP source — the last
+    /// of which is not asked about first, so a target you can slip off is attached to
+    /// an action you cannot take back.
+    ///
+    /// 30pt because that is the size `FullWindowView.sidebarButton` had already
+    /// settled on for the same job; this is that decision, made once, where the rest
+    /// of the app can reach it. Nothing about the drawing changes — the glyph keeps
+    /// its font and its position — only the area that answers the pointer.
+    ///
+    /// Pass a smaller `side` where the row's own height is the constraint, and say
+    /// which constraint at the call site.
+    func iconHitTarget(_ side: CGFloat = 30) -> some View {
+        frame(width: side, height: side).contentShape(Rectangle())
+    }
+}
+
+/// A `DisclosureGroup` label that opens the group when it is clicked.
+///
+/// On macOS a `DisclosureGroup`'s label is not a toggle: only the chevron is, and it
+/// is a 10pt glyph. So the obvious target — the folder's name, the words "Advanced —
+/// add a source by command" — does nothing at all, and the real one is smaller than
+/// the pointer that has to find it. (`OutlineGroup` gives this for free and is not
+/// always an option: its selection model does not honour a per-row `.tag`.)
+///
+/// A `Button` rather than `.onTapGesture`, because the row is a control and should
+/// answer to VoiceOver and the keyboard as one thing; a bare tap gesture is invisible
+/// to both. `.contentShape` after the frame is what makes the empty space beside a
+/// short label clickable rather than just the text.
+struct DisclosureLabel<Content: View>: View {
+    @Binding var isExpanded: Bool
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        Button { isExpanded.toggle() } label: {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // No `accessibilityLabel`: the content carries its own text, and replacing it
+        // here would silence whatever the caller wrote. Only the state is added.
+        .accessibilityHint(isExpanded ? "Collapse" : "Expand")
+    }
+}
 
 extension View {
     /// Every window root wears this and nothing else does.

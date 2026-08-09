@@ -222,61 +222,68 @@ final class ReportWriterTests: XCTestCase {
         XCTAssertTrue(note.contains("0%"), "Kept verbatim means nothing was changed")
     }
 
-    // MARK: - Language stability
+    // MARK: - Which language the report is written in
+
+    // What used to be here: seven tests over a CJK-ratio sampler with a persisted
+    // previous answer and a 15–35% deadband — first-look threshold, borderline
+    // stability, a clear move, stickiness across calls, empty samples, emoji
+    // scalar counting. Every one of them was pinning the *stability* of a guess
+    // ("how much Japanese is in this person's writing?"). The guess is gone: the
+    // reader states their language in Settings › General and `UserLanguage`
+    // answers. A stated setting has no threshold to sit on and no previous value
+    // to drift from, so there is nothing left for a deadband to hold — which is
+    // why the tests below are about *obeying* rather than about *not wobbling*.
+
+    private func withVaultLanguage(_ p: UserLanguage.Preference, _ body: () -> Void) {
+        let saved = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
+        defer { UserDefaults.standard.set(saved, forKey: UserLanguage.preferenceKey) }
+        UserDefaults.standard.set(p.rawValue, forKey: UserLanguage.preferenceKey)
+        body()
+    }
 
     private func text(cjkRatio: Double, length: Int = 400) -> String {
         let cjk = Int(Double(length) * cjkRatio)
         return String(repeating: "あ", count: cjk) + String(repeating: "a", count: length - cjk)
     }
 
-    func testFirstLookUsesThePlainThreshold() {
-        XCTAssertEqual(ReportWriter.language(of: text(cjkRatio: 0.30), previous: nil), "Japanese")
-        XCTAssertEqual(ReportWriter.language(of: text(cjkRatio: 0.20), previous: nil), "English")
+    func testTheSettingDecidesTheLanguage() {
+        withVaultLanguage(.japanese) {
+            XCTAssertEqual(writer.dominantLanguage(of: ""), "Japanese")
+        }
+        withVaultLanguage(.english) {
+            XCTAssertEqual(writer.dominantLanguage(of: ""), "English")
+        }
     }
 
-    /// The defect: `cjk * 4 > count` flipped hard at 25%, which is exactly where a
-    /// bilingual user sits. A week hovering there used to hand them a report in a
-    /// different language every day.
-    func testBorderlineDaysDoNotFlipTheLanguage() {
-        let borderline = [0.24, 0.26, 0.23, 0.27, 0.25, 0.22, 0.28]
+    /// The whole point of the change: writing that reads the other way must not
+    /// move the report. Someone whose notes are full of English identifiers still
+    /// gets a Japanese report if that is what they asked for.
+    func testTheSamplesCannotOverrideTheSetting() {
+        withVaultLanguage(.japanese) {
+            XCTAssertEqual(writer.dominantLanguage(of: text(cjkRatio: 0.0)), "Japanese",
+                           "All-ASCII samples must not unseat a stated Japanese")
+        }
+        withVaultLanguage(.english) {
+            XCTAssertEqual(writer.dominantLanguage(of: text(cjkRatio: 1.0)), "English",
+                           "All-CJK samples must not unseat a stated English")
+        }
+    }
 
-        for start in ["Japanese", "English"] {
-            var current = start
-            for ratio in borderline {
-                current = ReportWriter.language(of: text(cjkRatio: ratio), previous: current)
-                XCTAssertEqual(current, start,
-                               "A \(ratio) day unseated \(start) — the deadband is not holding")
+    /// No wobble is possible, because nothing is being measured. This is the
+    /// property the deadband existed to approximate.
+    func testTheAnswerIsStableAcrossBorderlineSamples() {
+        withVaultLanguage(.japanese) {
+            for ratio in [0.24, 0.26, 0.23, 0.27, 0.25, 0.22, 0.28] {
+                XCTAssertEqual(writer.dominantLanguage(of: text(cjkRatio: ratio)), "Japanese")
             }
         }
     }
 
-    func testAClearMoveStillChangesTheLanguage() {
-        XCTAssertEqual(ReportWriter.language(of: text(cjkRatio: 0.80), previous: "English"), "Japanese")
-        XCTAssertEqual(ReportWriter.language(of: text(cjkRatio: 0.02), previous: "Japanese"), "English")
-    }
-
-    func testTheDecisionIsRememberedAcrossCalls() {
-        _ = writer.dominantLanguage(of: text(cjkRatio: 0.80))     // clearly Japanese
-        // Now a borderline day. Statelessly this is 26% → Japanese either way, so use
-        // a value under the plain threshold that only stickiness can hold.
-        XCTAssertEqual(writer.dominantLanguage(of: text(cjkRatio: 0.20)), "Japanese",
-                       "A remembered decision must survive a borderline day")
-    }
-
-    func testNoSamplesDoesNotOverwriteARememberedDecision() {
-        _ = writer.dominantLanguage(of: text(cjkRatio: 0.80))
-        XCTAssertEqual(writer.dominantLanguage(of: ""), "Japanese")
-    }
-
-    func testDayOneWithNoHistoryAsksForTheUsersLanguage() {
-        XCTAssertEqual(writer.dominantLanguage(of: ""), "the user's language")
-    }
-
-    /// An emoji is a single Character but several unicode scalars. The old test divided
-    /// a scalar count by a Character count, so decoration moved the threshold.
-    func testEmojiDoNotMoveTheThreshold() {
-        let plain = String(repeating: "あ", count: 30) + String(repeating: "a", count: 70)
-        XCTAssertEqual(ReportWriter.language(of: plain, previous: nil), "Japanese")
-        XCTAssertEqual(ReportWriter.language(of: plain + "👨‍👩‍👧‍👦", previous: nil), "Japanese")
+    /// `.system` follows macOS, exactly as `UserLanguage` resolves it everywhere else.
+    func testSystemFollowsTheMachine() {
+        withVaultLanguage(.system) {
+            XCTAssertEqual(writer.dominantLanguage(of: text(cjkRatio: 0.9)),
+                           UserLanguage.systemIsJapanese ? "Japanese" : "English")
+        }
     }
 }

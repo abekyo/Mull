@@ -237,7 +237,7 @@ struct HomeDossierView: View {
                 if let onAmend {
                     Button(action: onAmend) {
                         HStack(spacing: DS.xs) {
-                            Image(systemName: "pencil").font(DS.captionFont)
+                            Image(systemName: DS.Glyph.edit).font(DS.captionFont)
                             Text("Amend").font(DS.smallMedium)
                         }
                         .foregroundStyle(DS.tobacco)
@@ -247,11 +247,9 @@ struct HomeDossierView: View {
                 }
             }
             .padding(.top, DS.xs)
-            Text("A custodian keeps; it does not own. This record is kept for the person you are becoming.")
-                .font(DS.captionFont)
-                .foregroundStyle(DS.umberFaint)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, DS.xs)
+            // One line, not two. The second one here said the same thing the first
+            // one says ("kept on this Mac, never sent"), a caption below an italic
+            // line already carrying it.
         }
         .padding(.top, DS.lg)
     }

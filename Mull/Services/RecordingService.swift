@@ -58,6 +58,9 @@ final class RecordingService {
 
     // State
     private var currentAppName: String?
+    /// Bundle ID of `currentAppName`, so the exclusion list can be consulted about
+    /// the app mull is leaving rather than the one it just arrived at.
+    private var currentAppBundleID: String?
     private var currentWindowTitle: String?
     private var currentAppStartTime: Date = Date()
     private var lastClipboardCount: Int = 0
@@ -309,21 +312,38 @@ final class RecordingService {
             self.recordAppSession()
             let prevApp = self.currentAppName
             self.updateCurrentApp()
+            // Same gap as `recordAppSession`, at the other end of the switch: this
+            // row is the window title of the app just arrived at, and switching
+            // *into* an excluded app wrote it.
+            guard !self.isExcludedApp() else { return }
             if self.currentAppName != prevApp, let title = self.currentWindowTitle ?? self.currentAppName {
                 self.recordEvent(type: .appSwitch, text: title)
             }
         }
     }
 
-    private func updateCurrentApp() {
+    /// Internal, like the two pollers, so the app-switch pair can be driven in
+    /// tests: the notification handler calls `recordAppSession()` *before* this,
+    /// and that ordering is the whole reason the exclusion gate below is subtle.
+    func updateCurrentApp() {
         guard let name = environment.frontmostAppName else { return }
         currentAppName = name
+        // Kept alongside the name because the exclusion list is keyed by bundle ID
+        // and `recordAppSession` has to ask about the app being *left*, which is no
+        // longer the frontmost one by the time it runs.
+        currentAppBundleID = environment.frontmostBundleID
         currentWindowTitle = getActiveWindowTitle()
         currentAppStartTime = environment.now
     }
 
-    private func recordAppSession() {
+    func recordAppSession() {
         guard let app = currentAppName else { return }
+        // The exclusion list said it covers window titles, and this line wrote one:
+        // leaving an excluded app recorded "1Password: <title> (2m10s)" because the
+        // gate on every other channel asks about the *frontmost* app, and by now the
+        // frontmost app is the one being switched to. Ask about the app this row is
+        // actually about.
+        guard !isExcluded(bundleID: currentAppBundleID, name: app) else { return }
         let duration = environment.now.timeIntervalSince(currentAppStartTime)
         guard duration >= 5 else { return }
 
@@ -743,10 +763,18 @@ final class RecordingService {
     // MARK: - Helpers
 
     private func isExcludedApp() -> Bool {
-        guard environment.frontmostAppName != nil || environment.frontmostBundleID != nil else { return false }
+        isExcluded(bundleID: environment.frontmostBundleID, name: environment.frontmostAppName)
+    }
+
+    /// The exclusion question, asked about a named app rather than about whichever
+    /// app happens to be frontmost right now. Every live-capture channel wants the
+    /// frontmost form above; `recordAppSession` is the one caller describing an app
+    /// mull has already left.
+    private func isExcluded(bundleID: String?, name: String?) -> Bool {
+        guard name != nil || bundleID != nil else { return false }
 
         // Check bundle ID
-        if let bundleID = environment.frontmostBundleID, excludedBundleIDs.contains(bundleID) {
+        if let bundleID, excludedBundleIDs.contains(bundleID) {
             return true
         }
 
@@ -763,7 +791,7 @@ final class RecordingService {
             "securityagent", "loginwindow",
             "universalaccessauthwarn",
         ]
-        if let name = environment.frontmostAppName, excludedNames.contains(name.lowercased()) {
+        if let name, excludedNames.contains(name.lowercased()) {
             return true
         }
 

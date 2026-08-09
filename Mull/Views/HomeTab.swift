@@ -224,7 +224,7 @@ struct HomeTab: View {
         VStack(spacing: DS.lg) {
             if let reason = appState.database.fallbackReason {
                 recordNotice(
-                    title: "Some of the record may be missing",
+                    title: String(localized: "Some of the record may be missing"),
                     message: appState.database.isFallback
                         // The temporary-location case is not "some may be missing",
                         // it is "everything from this session goes on restart", and
@@ -241,8 +241,8 @@ struct HomeTab: View {
 
             if let dirIssue = directoryIssue {
                 recordNotice(
-                    title: "The files for your AI are not being written",
-                    message: "mull cannot write to the ~/mull folder, so me.md, now.md and full.md have stopped being refreshed. Recording itself is unaffected.",
+                    title: String(localized: "The files for your AI are not being written"),
+                    message: String(localized: "mull cannot write to the ~/mull folder, so me.md, now.md and full.md have stopped being refreshed. Recording itself is unaffected."),
                     diagnostic: dirIssue,
                     retry: {
                         _ = MullDirectory.setup()
@@ -305,14 +305,14 @@ struct HomeTab: View {
         HStack(spacing: DS.md) {
             Spacer()
 
-            Text(lastRefreshed.map { "As of \(Self.clockFormatter.string(from: $0))" } ?? "Not yet read")
+            Text(lastRefreshed.map { String(localized: "As of \(Self.clockFormatter.string(from: $0))") } ?? "Not yet read")
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkFaint)
 
             Button {
                 refresh()
             } label: {
-                Label("Read again", systemImage: "arrow.clockwise")
+                Label("Read again", systemImage: DS.Glyph.refresh)
                     .font(DS.captionFont)
                     .padding(.vertical, DS.xs)
                     .padding(.horizontal, DS.xs)
@@ -501,21 +501,21 @@ struct HomeTab: View {
         let todayDuration = todaySnapshot?.totalDuration ?? 0
 
         if todayDuration >= Self.todayClaimThreshold, let main = todaySnapshot?.mainProject {
-            return "Mostly \(main)."
+            return String(localized: "Mostly \(main).")
         }
 
         if todayDuration > 0 {
             // Something today, but too little to name. Say the true small thing.
-            return "Only just begun — not enough today to call it anything yet."
+            return String(localized: "Only just begun — not enough recorded today to summarize.")
         }
 
         // Nothing today at all. The fortnight is still knowable; it is simply a
         // different claim, and it gets said as one.
         if let recent = projects.first?.name {
-            return "Nothing recorded today yet. Recently, mostly \(recent)."
+            return String(localized: "Nothing recorded today yet. Recently, mostly \(recent).")
         }
 
-        return "Nothing recorded today yet."
+        return String(localized: "Nothing recorded today yet.")
     }
 
     /// The date the page opens with, written the way the reader's Mac writes dates.
@@ -567,9 +567,9 @@ struct HomeTab: View {
             return "No calendar access, so no schedule here"
         }
         if !todayEvents.isEmpty {
-            return "Today's last meeting has ended"
+            return String(localized: "Today's last meeting has ended")
         }
-        return "Nothing on the calendar today"
+        return String(localized: "Nothing on the calendar today")
     }
 
     // MARK: - Behavior Patterns Section
@@ -624,9 +624,9 @@ struct HomeTab: View {
     @ViewBuilder
     private func disclosureRow(hidden: Int, expanded: Binding<Bool>) -> some View {
         if hidden > 0 {
-            moreButton("Show \(hidden) more") { expanded.wrappedValue = true }
+            moreButton(String(localized: "Show \(hidden) more")) { expanded.wrappedValue = true }
         } else if expanded.wrappedValue {
-            moreButton("Show fewer") { expanded.wrappedValue = false }
+            moreButton(String(localized: "Show fewer")) { expanded.wrappedValue = false }
         }
     }
 
@@ -699,11 +699,11 @@ struct HomeTab: View {
     /// list; it no longer colours it, and no label calls the reader avoidant.
     private func patternTypeLabel(_ type: BehaviorPattern.PatternType) -> String {
         switch type {
-        case .abandonment: "untouched since"
-        case .peakWaste: "peak hours"
-        case .focusDecline: "fewer long blocks"
-        case .avoidance: "short sessions only"
-        case .correlation: "recurring together"
+        case .abandonment: String(localized: "untouched since")
+        case .peakWaste: String(localized: "peak hours")
+        case .focusDecline: String(localized: "fewer long blocks")
+        case .avoidance: String(localized: "short sessions only")
+        case .correlation: String(localized: "recurring together")
         }
     }
 
@@ -802,7 +802,7 @@ struct HomeTab: View {
 
                     if let file = project.lastFile {
                         HStack(spacing: DS.xs) {
-                            Image(systemName: "doc.text")
+                            Image(systemName: DS.Glyph.file)
                                 .font(DS.miniFont)
                                 .foregroundStyle(DS.inkFaint)
                             Text(file)
@@ -816,7 +816,7 @@ struct HomeTab: View {
 
                     if let clip = project.lastClipboard {
                         HStack(spacing: DS.xs) {
-                            Image(systemName: "text.quote")
+                            Image(systemName: DS.Glyph.quote)
                                 .font(DS.miniFont)
                                 .foregroundStyle(DS.inkFaint)
                             Text("\"\(clip)\"")
@@ -1055,13 +1055,13 @@ struct HomeTab: View {
                 .opacity(0.55)
 
             VStack(spacing: DS.sm) {
-                Text(recordingOff ? "Nothing is being kept" : "Still a quiet page")
+                Text(recordingOff ? "Nothing is being kept" : "Nothing recorded yet")
                     .font(DS.titleFont)
                     .foregroundStyle(DS.ink)
 
                 Text(recordingOff
                      ? "Recording is off. Turning it back on, and the permissions it needs, both live in Settings."
-                     : "A day's work makes the first page, and there hasn't been one yet.")
+                     : "This page is written after a full day of work. That day hasn't happened yet.")
                     .font(DS.bodyFont)
                     .foregroundStyle(DS.inkDim)
                     .multilineTextAlignment(.center)
@@ -1099,12 +1099,12 @@ struct HomeTab: View {
     private var whatIsBeingWaitedFor: some View {
         VStack(spacing: DS.xs) {
             Text(appState.todayEventCount == 1
-                 ? "1 moment kept today."
-                 : "\(appState.todayEventCount) moments kept today.")
+                 ? "1 record kept today."
+                 : "\(appState.todayEventCount) records kept today.")
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkDim)
 
-            Text("The written summary comes overnight, once there is a day between them and about \(ConsolidationScheduler.minEventsRequired) moments to read.")
+            Text("The written summary is generated overnight, once a full day has passed and about \(ConsolidationScheduler.minEventsRequired) records have been kept.")
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkFaint)
                 .multilineTextAlignment(.center)
@@ -1325,7 +1325,7 @@ struct HomeTab: View {
 
         return VStack(alignment: .leading, spacing: DS.sm) {
             HStack(alignment: .top, spacing: DS.sm) {
-                Image(systemName: "exclamationmark.circle")
+                Image(systemName: DS.Glyph.problem)
                     .foregroundStyle(DS.paused)
 
                 VStack(alignment: .leading, spacing: DS.xs) {

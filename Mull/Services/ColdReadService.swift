@@ -164,21 +164,25 @@ struct ColdReadService {
             var facts: [String] = []
 
             if dev.count >= 2 {
-                facts.append("Open right now: \(dev.sorted().joined(separator: ", ")).")
+                facts.append(VaultText.t("Open right now: \(dev.sorted().joined(separator: ", ")).",
+                                     "いま開いている: \(dev.sorted().joined(separator: "、"))。"))
             } else if let app = dev.first {
-                facts.append("\(app) is open right now.")
+                facts.append(VaultText.t("\(app) is open right now.", "いま \(app) が開いています。"))
             }
 
             if !design.isEmpty && !dev.isEmpty {
-                facts.append("Also open: \(design.sorted().joined(separator: ", ")), alongside the editors.")
+                facts.append(VaultText.t("Also open: \(design.sorted().joined(separator: ", ")), alongside the editors.",
+                                     "エディタと並んで \(design.sorted().joined(separator: "、")) も開いています。"))
             }
 
             // The absence of the comm apps is a real observation. What it *means* —
             // focus, avoidance, a quiet morning — is not mull's to say.
             if comm.isEmpty && dev.count >= 1 {
-                facts.append("No chat or meeting apps are running.")
+                facts.append(VaultText.t("No chat or meeting apps are running.",
+                                     "チャットや会議のアプリは動いていません。"))
             } else if comm.count >= 2 {
-                facts.append("Running now: \(comm.sorted().joined(separator: ", ")).")
+                facts.append(VaultText.t("Running now: \(comm.sorted().joined(separator: ", ")).",
+                                     "いま動いている: \(comm.sorted().joined(separator: "、"))。"))
             }
 
             return facts
@@ -194,10 +198,11 @@ struct ColdReadService {
         private static func clipboardFact() -> String? {
             guard let clip = NSPasteboard.general.string(forType: .string), !clip.isEmpty else { return nil }
             if SensitiveText.isSensitive(clip) {
-                return "There is something on your clipboard. mull won't repeat it."
+                return VaultText.t("There is something on your clipboard. mull won't repeat it.",
+                               "クリップボードに何か入っています。mull はその中身を繰り返しません。")
             }
             if clip.contains("func ") || clip.contains("class ") || clip.contains("import ") {
-                return "There is code on your clipboard."
+                return VaultText.t("There is code on your clipboard.", "クリップボードにコードが入っています。")
             }
             let words = clip.split(whereSeparator: \.isWhitespace).count
             return "There is text on your clipboard — about \(words) \(words == 1 ? "word" : "words")."
@@ -239,7 +244,8 @@ struct ColdReadService {
     private static func frontWindowFact(title: String, appName: String) -> String {
         if title.contains(".swift") || title.contains(".ts") || title.contains(".py") {
             let fileName = title.components(separatedBy: " ").first(where: { $0.contains(".") }) ?? title
-            return "\(fileName) is the open file in \(appName)."
+            return VaultText.t("\(fileName) is the open file in \(appName).",
+                           "\(appName) で開いているファイルは \(fileName) です。")
         }
         return "The front window is \"\(String(title.prefix(60)))\" in \(appName)."
     }
@@ -302,7 +308,8 @@ struct ColdReadService {
 
         // The count, without a verdict on what kind of day that makes.
         if events.count >= 4 {
-            facts.append("Your calendar has \(events.count) events today.")
+            facts.append(VaultText.t("Your calendar has \(events.count) events today.",
+                                     "今日のカレンダーには \(events.count)件の予定があります。"))
         }
 
         let schedule = events.prefix(3).map { "\(TimeFormat.person($0.startDate)) \($0.title ?? "Meeting")" }

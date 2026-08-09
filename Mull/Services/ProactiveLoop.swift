@@ -363,13 +363,10 @@ final class ProactiveLoop {
     nonisolated static var fileHeader: String {
         MarkdownDoc.header(
             title: isJapanese ? "再開のてがかり" : "Proactive briefs",
-            meta: [("scope", isJapanese
-                    ? "プロジェクトに戻ったときに mull が書き出した再開の手がかり"
-                    : "what mull surfaced when you returned to each project"),
-                   ("refresh", isJapanese ? "プロジェクトに戻るたび" : "on each return to a project")],
+            meta: [],
             note: isJapanese
-                ? "自由に編集してください — 編集は保持されます。"
-                : "Edit freely — your edits are kept.")
+                ? "編集しても、次の更新で消えません。"
+                : "Your edits survive the next update.")
     }
 
     /// `###`, because it sits inside a brief's `## <entity>` block. It was

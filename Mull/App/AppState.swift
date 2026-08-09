@@ -42,6 +42,26 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Main window sidebar
+    //
+    // Whether the main window shows its sidebar. This is held here, rather than as
+    // `@State` inside `FullWindowView`, because the button that flips it does not
+    // live in the SwiftUI tree: it is an `NSTitlebarAccessoryViewController` on the
+    // window (see `AppDelegate.installSidebarToggle`).
+    //
+    // It moved out there to stop it moving on screen. `NavigationSplitView` supplies
+    // a toggle of its own, and AppKit lays that one out against the *split divider*
+    // — so collapsing the sidebar took the divider to x=0 and the button jumped
+    // roughly 190pt left, to sit beside the traffic lights, then jumped back on the
+    // next click. The control you press to hide the sidebar was the control that
+    // moved out from under the pointer when you pressed it. A title-bar accessory is
+    // laid out against the traffic lights instead, which do not move, so the button
+    // is in the same place in both states.
+    //
+    // This is the same rule `FullWindowView.searchField` states for the search box:
+    // a control you have to catch is worse than one that is simply always there.
+    @Published var sidebarVisible = true
+
     // MARK: - In-app notices
     //
     // Several actions (copy context, import, export, conflict resolution) used to
@@ -98,6 +118,9 @@ final class AppState: ObservableObject {
     let mullEngine: MullEngine
     let analytics: AnalyticsEngine
     let calendar: CalendarService
+    /// Copies settled activity blocks into a calendar the user picked. Inert unless
+    /// enabled in Settings — see `CalendarMirror` for what it will and will not write.
+    let calendarMirror: CalendarMirrorRunner
     let email: EmailService
     let proactive: ProactiveEngine
     let proactiveLoop: ProactiveLoop
@@ -175,6 +198,9 @@ final class AppState: ObservableObject {
         self.calendar = CalendarService()
         self.email = EmailService(database: database)
         self.proactive = ProactiveEngine(database: database, calendar: calendar, analytics: analytics)
+        // Off until the user turns it on and names a calendar; `reschedule()` starts
+        // no timer in that state, so an install that never enables it costs nothing.
+        self.calendarMirror = CalendarMirrorRunner(database: database, calendar: calendar)
         // The self-driving proactive loop: anchor → select → judge
         // → write-back → notify, fired on project switches.
         self.proactiveLoop = ProactiveLoop(database: database)
@@ -296,6 +322,11 @@ final class AppState: ObservableObject {
         let db = database
         Task.detached {
             VaultLayout.migrate()
+            // Memory files named before `MemoryFiles.fileName(for:)` existed carry a
+            // POSIX colon, which Finder renders as a slash — mull and Finder calling
+            // one file two names. Idempotent, so it costs a query on every launch and
+            // does nothing once the vault is clean.
+            MemoryFiles.repairLegacyNames(database: self.database)
             Self.pruneToRetention(database: db)
             let today = db.fetchSummary(for: Date())
             let recent = db.fetchRecentSummaries(limit: 30)
@@ -327,6 +358,12 @@ final class AppState: ObservableObject {
         let hour = UserDefaults.standard.object(forKey: "summaryTime") as? Int ?? 23
         let minute = UserDefaults.standard.object(forKey: "summaryTimeMinute") as? Int ?? 0
         mullEngine.scheduleSummary(at: hour, minute: minute)
+
+        // No catch-up pass at launch, deliberately. Everything the mirror would have
+        // written while mull was closed is still settled and still in range, so the
+        // first scheduled tick covers it — and a write into somebody's calendar in the
+        // first second of launch is not a thing to do before the window is even up.
+        calendarMirror.reschedule()
 
         // 先回り: by the time the user opens mull in the evening, today's report draft
         // is already waiting (the understudy works ahead). Daily at 17:30, plus a
@@ -511,7 +548,7 @@ final class AppState: ObservableObject {
     // MARK: - Forget (privacy — "that never happened")
 
     /// The cloud provider currently switched on, in the name a person would
-    /// recognise, or `nil` when nothing leaves this Mac ("off", "ollama", "local").
+    /// recognise, or `nil` when nothing leaves this Mac ("off", "local", "localopenai").
     ///
     /// One definition, used by both the Data tab's privacy notice and the forget
     /// dialog. Two spellings of "is this provider a cloud?" is how one surface

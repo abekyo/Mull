@@ -10,7 +10,21 @@ final class VaultLocalizationTests: XCTestCase {
 
     // MARK: - UserLanguage
 
-    func testStatedWorkingLanguageBeatsSystemLocale() {
+    /// The default is the machine's own language setting — not a guess made by
+    /// substring-matching the free-prose setup answer.
+    ///
+    /// That guess is what these tests used to pin ("stated Japanese wins whatever
+    /// the OS locale is"). It had no symptom when it missed: phrasing the matcher
+    /// did not recognise — "にほんご", "JP", "日本" — silently fell through to the
+    /// locale, and the picker existed to undo it. The answer is still prose and
+    /// still goes to the AI verbatim; it just decides nothing here.
+    func testSystemChoiceFollowsTheMacsLanguageSetting() {
+        XCTAssertTrue(UserLanguage.resolve(preference: .system, systemIsJapanese: true))
+        XCTAssertFalse(UserLanguage.resolve(preference: .system, systemIsJapanese: false))
+    }
+
+    /// The stated answer no longer reaches this decision from any direction.
+    func testTheStatedAnswerCannotChangeTheLanguage() {
         let key = UserLanguage.onboardingAnswersKey
         let saved = UserDefaults.standard.dictionary(forKey: key)
         let savedPreference = UserDefaults.standard.string(forKey: UserLanguage.preferenceKey)
@@ -18,44 +32,22 @@ final class VaultLocalizationTests: XCTestCase {
             UserDefaults.standard.set(saved, forKey: key)
             UserDefaults.standard.set(savedPreference, forKey: UserLanguage.preferenceKey)
         }
-        // This is the no-explicit-choice path; a leftover preference would decide
-        // the answer before the stated one was consulted.
         UserDefaults.standard.removeObject(forKey: UserLanguage.preferenceKey)
 
-        UserDefaults.standard.set(["language": "Japanese (日本語)"], forKey: key)
-        XCTAssertTrue(UserLanguage.isJapanese, "stated Japanese wins whatever the OS locale is")
-
-        UserDefaults.standard.set(["language": "English"], forKey: key)
-        XCTAssertFalse(UserLanguage.isJapanese, "stated English wins too — no locale fallback once stated")
-
-        UserDefaults.standard.set(["language": "日本語で"], forKey: key)
-        XCTAssertTrue(UserLanguage.isJapanese)
-    }
-
-    /// The reason the picker was added: an explicit choice has to win over prose
-    /// that a substring match reads the other way, in both directions.
-    func testExplicitChoiceOverridesTheStatedAnswer() {
-        XCTAssertTrue(UserLanguage.resolve(preference: .japanese, stated: "English only please"))
-        XCTAssertFalse(UserLanguage.resolve(preference: .english, stated: "Japanese (日本語)"))
-        XCTAssertTrue(UserLanguage.resolve(preference: .japanese, stated: nil))
-        XCTAssertFalse(UserLanguage.resolve(preference: .english, stated: nil))
-    }
-
-    /// …and that `.system` is not a third behaviour but the old one, unchanged —
-    /// so upgrading does not move anybody's vault to another language.
-    func testSystemChoiceKeepsThePreviousPrecedence() {
-        XCTAssertTrue(UserLanguage.resolve(preference: .system, stated: "Japanese (日本語)"))
-        XCTAssertTrue(UserLanguage.resolve(preference: .system, stated: "ja-JP"))
-        XCTAssertFalse(UserLanguage.resolve(preference: .system, stated: "English"))
-
-        // The silent failure the picker exists for: prose a reader would call
-        // Japanese that the match does not see, so it falls through to the locale.
-        let localeIsJapanese = Locale.preferredLanguages.first?.hasPrefix("ja") == true
-        for missed in ["にほんご", "JP", "日本"] {
-            XCTAssertEqual(UserLanguage.resolve(preference: .system, stated: missed), localeIsJapanese,
-                           "\"\(missed)\" is unmatched prose — only the explicit choice can fix it")
-            XCTAssertTrue(UserLanguage.resolve(preference: .japanese, stated: missed))
+        for stated in ["Japanese (日本語)", "English", "日本語で", "にほんご", "JP"] {
+            UserDefaults.standard.set(["language": stated], forKey: key)
+            XCTAssertEqual(UserLanguage.isJapanese, UserLanguage.systemIsJapanese,
+                           "\"\(stated)\" must not move the language — macOS decides")
         }
+    }
+
+    /// An explicit choice wins over the machine, in both directions. This is the
+    /// case the picker exists for: macOS in English, work in Japanese.
+    func testExplicitChoiceOverridesTheSystem() {
+        XCTAssertTrue(UserLanguage.resolve(preference: .japanese, systemIsJapanese: false))
+        XCTAssertFalse(UserLanguage.resolve(preference: .english, systemIsJapanese: true))
+        XCTAssertTrue(UserLanguage.resolve(preference: .japanese, systemIsJapanese: true))
+        XCTAssertFalse(UserLanguage.resolve(preference: .english, systemIsJapanese: false))
     }
 
     func testStoredPreferenceIsWhatIsJapaneseReads() {
@@ -171,7 +163,7 @@ final class VaultLocalizationTests: XCTestCase {
     ///
     /// `writeSection` puts a blank line in front of the start marker on every save;
     /// removal took the marker lines and left that blank behind, so each save added
-    /// one. Onboarding's Save & Continue and Settings › Profile both write through
+    /// one. Onboarding's Save & Continue and Settings › General both write through
     /// here, which made merely revisiting the form grow the gap in a file mull has
     /// promised never to damage. Written against the removal half because that is
     /// where the collapse lives — the projection itself touches the real vault.

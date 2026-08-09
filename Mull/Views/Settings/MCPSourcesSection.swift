@@ -39,7 +39,13 @@ struct MCPSourcesSection: View {
     var body: some View {
         // Not "Sources": it sat directly under Data Sources, and two adjacent
         // sections carrying the same noun made neither title say which was which.
-        Section("Connected servers (MCP)") {
+        //
+        // And not "Connected servers" either. MCP runs in both directions here: the
+        // AI tab registers mull as a server that agents read, this section registers
+        // servers mull reads. Both titles used to say only "connected", so the two
+        // halves of the product's most confusable word were indistinguishable —
+        // each title now names the direction instead.
+        Section("Servers mull pulls from (MCP)") {
             if sources.isEmpty {
                 Text("No servers yet. Add one below to pull email, calendar, GitHub, and so on.")
                     .font(DS.captionFont)
@@ -121,7 +127,9 @@ struct MCPSourcesSection: View {
                 sources.removeAll { $0.rowKey == key }
                 persist()
             } label: {
-                Image(systemName: "trash").font(DS.captionFont)
+                Image(systemName: DS.Glyph.trash)
+                    .font(DS.captionFont)
+                    .iconHitTarget()
             }
             .buttonStyle(.plain)
             .help("Remove \(src.connectorID)")
@@ -170,7 +178,7 @@ struct MCPSourcesSection: View {
         DisclosureGroup(isExpanded: $showAdvanced) {
             VStack(alignment: .leading, spacing: DS.sm) {
                 HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill").font(DS.miniFont)
+                    Image(systemName: DS.Glyph.problem).font(DS.miniFont)
                     Text("mull will launch this command on your Mac, with your account's access, every time it pulls from this source. Add only servers you installed yourself and trust. Nothing runs until you press Add and leave the source enabled.")
                         .font(DS.captionFont)
                         .fixedSize(horizontal: false, vertical: true)
@@ -190,7 +198,7 @@ struct MCPSourcesSection: View {
                 if !parsedArgs.isEmpty {
                     // Show the split as mull will actually perform it: quoting is
                     // exactly the part that silently went wrong before.
-                    Text("Runs as: " + ([trimmedCommand] + parsedArgs).map { "[\($0)]" }.joined(separator: " "))
+                    Text("Runs as: \(([trimmedCommand] + parsedArgs).map { "[\($0)]" }.joined(separator: " "))")
                         .font(DS.microFont)
                         .foregroundStyle(DS.inkDim)
                         .fixedSize(horizontal: false, vertical: true)
@@ -205,9 +213,14 @@ struct MCPSourcesSection: View {
             .textFieldStyle(.roundedBorder)
             .padding(.vertical, DS.xs)
         } label: {
-            Text("Advanced — add a source by command")
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkDim)
+            // The words are the target, not just the chevron — see `DisclosureLabel`.
+            // This one hides the form itself, so a label that does not answer is a
+            // feature with no way in.
+            DisclosureLabel(isExpanded: $showAdvanced) {
+                Text("Advanced — add a source by command")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkDim)
+            }
         }
     }
 
@@ -229,7 +242,7 @@ struct MCPSourcesSection: View {
         guard cmd.contains("/") else { return nil }
         let expanded = (cmd as NSString).expandingTildeInPath
         return FileManager.default.isExecutableFile(atPath: expanded)
-            ? nil : "No executable at that path."
+            ? nil : String(localized: "No executable at that path.")
     }
 
     /// Split a command line on whitespace while honouring single and double
@@ -293,7 +306,7 @@ struct MCPSourcesSection: View {
                 // button's own disabled state already rules out, so it named a
                 // cause that could not be the cause.
                 pullNote = outcomes.isEmpty
-                    ? "A scheduled pull is already running — nothing new was started."
+                    ? String(localized: "A scheduled pull is already running — nothing new was started.")
                     : nil
                 isPulling = false
             }

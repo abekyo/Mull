@@ -31,7 +31,7 @@ enum OnboardingProfile {
               hint: "Your role — the core of who mull says you are.",
               placeholder: "e.g. Solo founder & Swift developer", label: "Role"),
         .init(id: "language", prompt: "What language should AI reply in?",
-              hint: "What the AI answers you in. Which language mull writes its own files in is set in Settings › Profile.",
+              hint: "What the AI answers you in. Which language mull writes its own files in is set in Settings › General.",
               placeholder: "e.g. Japanese (日本語)", label: "Primary working language"),
         .init(id: "building", prompt: "What are you working on right now?",
               hint: "Seeds your current projects.",
@@ -138,7 +138,7 @@ enum OnboardingProfile {
                 // Collapse the blank line `writeSection` puts in front of the
                 // marker — the separator is re-created on every save, so leaving
                 // the old one behind meant every save added another. Onboarding's
-                // Save & Continue and Settings › Profile both land here, so the
+                // Save & Continue and Settings › General both land here, so the
                 // gap in a file mull has promised to preserve grew by a line each
                 // time the user so much as revisited the form. Removing the whole
                 // run rather than a single line also heals the files that already

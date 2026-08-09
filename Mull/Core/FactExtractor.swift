@@ -5,7 +5,7 @@ import Foundation
 /// **What this may and may not say.** Everything here is an *observation* that
 /// can be pointed at the rows it came from:
 ///
-///   "Primary language: Japanese"          — measured over 200+ characters of prose
+///   VaultText.t("Primary language: Japanese", "主な言語: 日本語")          — measured over 200+ characters of prose
 ///   "Primary tools: Xcode + Terminal"     — measured share of tracked activity
 ///   "Working on: PantryApp"             — a name seen 5+ times in window titles
 ///
@@ -78,16 +78,18 @@ struct FactExtractor {
             let enShare = mix.englishPercent / proseTotal * 100
 
             if jpShare >= 25 && enShare >= 25 {
-                facts.append(Fact(.identity, "Bilingual: Japanese (\(pct(jpShare))%) and English (\(pct(enShare))%)"))
+                facts.append(Fact(.identity, VaultText.t("Bilingual: Japanese (\(pct(jpShare))%) and English (\(pct(enShare))%)",
+                                                  "二言語: 日本語 \(pct(jpShare))% / 英語 \(pct(enShare))%")))
             } else if jpShare > 65 {
                 facts.append(Fact(.identity, "Primary language: Japanese"))
             } else if enShare > 65 {
-                facts.append(Fact(.identity, "Primary language: English"))
+                facts.append(Fact(.identity, VaultText.t("Primary language: English", "主な言語: 英語")))
             }
         }
 
         if mix.codePercent > 15 {
-            facts.append(Fact(.identity, "Writes significant amount of code (\(pct(mix.codePercent))% of input)"))
+            facts.append(Fact(.identity, VaultText.t("Writes significant amount of code (\(pct(mix.codePercent))% of input)",
+                                              "入力のうち \(pct(mix.codePercent))% がコード")))
         }
 
         return facts
@@ -110,7 +112,8 @@ struct FactExtractor {
                                   "Apple Notes", "Notes", "Craft", "Evernote"])
         let knowledgeOverlap = topAppNames.intersection(knowledgeApps)
         if !knowledgeOverlap.isEmpty {
-            facts.append(Fact(.skills, "Uses \(knowledgeOverlap.sorted().joined(separator: ", ")) for notes/knowledge"))
+            facts.append(Fact(.skills, VaultText.t("Uses \(knowledgeOverlap.sorted().joined(separator: ", ")) for notes/knowledge",
+                                            "メモ・知識に \(knowledgeOverlap.sorted().joined(separator: "、")) を使う")))
         }
 
         // Communication
@@ -118,7 +121,8 @@ struct FactExtractor {
                              "LINE", "WhatsApp", "Telegram", "WeChat"])
         let commOverlap = topAppNames.intersection(commApps)
         if commOverlap.count >= 2 {
-            facts.append(Fact(.skills, "Active communicator (\(commOverlap.sorted().joined(separator: ", ")))"))
+            facts.append(Fact(.skills, VaultText.t("Active communicator (\(commOverlap.sorted().joined(separator: ", ")))",
+                                            "やりとりが多い（\(commOverlap.sorted().joined(separator: "、"))）")))
         }
 
         return facts
@@ -144,7 +148,7 @@ struct FactExtractor {
             }
 
         for candidate in ProjectNames.rank(observations, minMentions: 5).prefix(3) {
-            facts.append(Fact(.projects, "Working on: \(candidate.name)"))
+            facts.append(Fact(.projects, VaultText.t("Working on: ", "取り組み中: ") + candidate.name))
         }
 
         return facts
@@ -186,7 +190,7 @@ struct FactExtractor {
             .prefix(3)
         if workApps.count >= 2 {
             let names = workApps.map(\.appName).joined(separator: " + ")
-            facts.append(Fact(.skills, "Primary tools: \(names)"))
+            facts.append(Fact(.skills, VaultText.t("Primary tools: ", "主な道具: ") + names))
         }
 
         return facts

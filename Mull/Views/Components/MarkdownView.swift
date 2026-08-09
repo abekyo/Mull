@@ -100,6 +100,7 @@ struct MarkdownView: View {
             // Small, dim, above the title — present for the reader who wants to
             // know how fresh the file is, and out of the way of the one who doesn't.
             // These lines used to be the document's opening paragraph.
+            // `generator` never reaches here; it is dropped at the parse site.
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
                     (Text(pair.key.uppercased() + "  ").font(DS.labelFont)
@@ -343,7 +344,14 @@ struct MarkdownBlock: Identifiable {
         // did to every generated file the moment the metadata moved up here.
         // The title offer survives: the H1 is still the first *content* line.
         if let matter = frontMatter(lines) {
-            emit(.frontMatter(pairs: matter.pairs))
+            // `generator` is dropped here rather than in the view, so a file whose
+            // front matter is *only* the stamp emits no block at all instead of an
+            // empty one that still pays for its padding. It exists so
+            // `MarkdownDoc.isGeneratedByMull` can tell mull's own writing from the
+            // user's when it comes back around through the clipboard, which is a
+            // fact about the file and not about the work.
+            let shown = matter.pairs.filter { $0.key != "generator" }
+            if !shown.isEmpty { emit(.frontMatter(pairs: shown)) }
             i = matter.end
         }
 

@@ -2,7 +2,13 @@ import Foundation
 import AppKit
 
 /// Captures email metadata from Mail.app via AppleScript.
-/// Phase 1: Subject + sender only. Body is never read.
+/// Subject + sender only; this class never asks Mail for a message body.
+///
+/// That is a fact about *this channel*, not about mull. Mail.app is not on
+/// `RecordingService.defaultExcluded`, so while the user is reading a message the
+/// 30-second window-body capture reads what is on screen exactly as it does for a
+/// browser or an editor. Anywhere that promise is shown to a person it has to be
+/// said in that scoped form — see SECURITY.md, which is the source of truth for it.
 ///
 /// Privacy: OFF by default. User must opt-in in Settings → Data.
 /// **Main-actor isolated**, for the same reason as `RecordingService`: this is a

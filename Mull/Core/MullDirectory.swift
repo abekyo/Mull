@@ -207,6 +207,41 @@ enum MullDirectory {
             .map { "\(relativeDir)/\($0)" }
     }
 
+    /// Make a name safe to put on disk without rewriting what the user meant.
+    ///
+    /// Path separators become hyphens (a "/" sails through and quietly targets a
+    /// folder that does not exist, so creation just fails), runs of whitespace become
+    /// single hyphens, and leading dots are dropped (they would hide the file).
+    /// Capitalisation is left alone: lowercasing turns "iOS-notes" into something
+    /// nobody typed.
+    ///
+    /// The colon is the one that bites hardest on macOS, and it is why this lives in
+    /// Core rather than in the Files tab where it started. `MullEngine` named memory
+    /// files with `name.lowercased()` and a space→underscore swap and nothing else, so
+    /// a memory called "Work rhythm: afternoons for editing" became
+    /// `work_rhythm:_afternoons_for_editing.md` — and Finder shows a POSIX `:` as `/`,
+    /// so mull and Finder displayed the same file under two different names. In a
+    /// product whose promise is "it is just a folder of markdown you can open in
+    /// anything", the name has to survive being looked at from outside.
+    /// The separators become SPACES, not hyphens, and the existing whitespace pass
+    /// then folds them away. Substituting a hyphen directly put two of them wherever a
+    /// separator was followed by a space — "Work rhythm: afternoons" came out as
+    /// `Work-rhythm--afternoons`, and a name of nothing but separators ("///") came out
+    /// as `---`, which is not empty, so the caller's fallback never fired. Going
+    /// through whitespace also leaves a hyphen the user typed themselves alone: only
+    /// the ones this function introduces are collapsed.
+    static func safeFileName(_ name: String) -> String {
+        var value = name
+            .replacingOccurrences(of: "/", with: " ")
+            .replacingOccurrences(of: ":", with: " ")
+            .replacingOccurrences(of: "：", with: " ")   // the full-width colon, same trap
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        while value.hasPrefix(".") { value.removeFirst() }
+        return value
+    }
+
     /// Delete one file inside ~/mull. Returns `true` if the file is gone
     /// afterwards (including when it was already absent).
     ///
