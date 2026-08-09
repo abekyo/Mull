@@ -5,7 +5,7 @@
 mull is a solo project with a strong opinion about what it is
 ([CLAUDE.md](CLAUDE.md) §3 lists what it deliberately will not do). Small fixes are welcome
 without discussion. For anything that adds a feature, changes the capture surface, or touches
-the selection layer, **open an issue first** — it is cheaper than finding out at review that
+the selection layer, **open an issue first.** It is cheaper than finding out at review that
 the change is out of scope.
 
 The design documents are written in Japanese. The code, the README and this file are in
@@ -27,7 +27,7 @@ xcodegen generate
 open Mull.xcodeproj
 ```
 
-Requires macOS 14+, Apple Silicon and Xcode 16+. `Mull.xcodeproj` is generated and gitignored —
+Requires macOS 14+, Apple Silicon and Xcode 16+. `Mull.xcodeproj` is generated and gitignored, so
 edit [`project.yml`](project.yml) instead, never the project file. Sources are globbed by
 directory, so a new file in `Mull/Core/` needs no project edit, just a regenerate.
 
@@ -41,10 +41,10 @@ xcodebuild -project Mull.xcodeproj -scheme Mull -destination 'platform=macOS' te
 ```
 
 The test suite is expected to be fully green. A count is deliberately not written down
-here — it was wrong in two files at once the last time it was, and no document is the right
+here. It was wrong in two files at once the last time it was, and no document is the right
 place to hold a number the test runner already prints.
 
-`eval/run.sh` is the selection-layer harness — it scores `Selection.rank` against labeled
+`eval/run.sh` is the selection-layer harness. It scores `Selection.rank` against labeled
 `(need → ideal slice)` cases. CI runs it on every push
 ([`.github/workflows/eval.yml`](.github/workflows/eval.yml)) for a specific reason: it compiles
 a hand-maintained file list **without GRDB**, and it has silently broken twice when something
@@ -54,8 +54,8 @@ check that `./eval/run.sh` still builds before you push.
 > Current scores and the four known-failing gaps are in the README's status block, and
 > [SELECTION-LAYER.md](SELECTION-LAYER.md) §6 is the specification behind them. The harness
 > beats its three baselines on the synthetic set and scores far lower on real harvested logs;
-> that gap is the interesting part. **New cases that the current ranker fails — especially
-> ones harvested from a real log — are one of the most useful contributions available.**
+> that gap is the interesting part. **New cases that the current ranker fails, especially
+> ones harvested from a real log, are one of the most useful contributions available.**
 
 ## Changing the capture surface
 
@@ -74,12 +74,12 @@ line there untrue, that line has to change in the same pull request.
 ## Style
 
 Match the file you are editing. The codebase has a specific comment habit worth keeping:
-comments explain *why* a thing is the way it is — usually a constraint, a platform quirk, or an
-incident that produced the code — and do not restate what the next line does. Several of the
+comments explain why a thing is the way it is (usually a constraint, a platform quirk, or an
+incident that produced the code) and do not restate what the next line does. Several of the
 most useful comments in this repository are records of something that went wrong. Keep writing
 those.
 
 Those comments are the record. [PITFALLS.md](PITFALLS.md) is the index of the ones that turned
-out to be a pattern — six shapes of mistake this codebase has made more than once, and what is
+out to be a pattern: the shapes of mistake this codebase has made more than once, and what is
 holding each invariant today. It is short, and it is worth reading before you touch capture, the
 vault writers, or anything wrapping AppKit in SwiftUI.

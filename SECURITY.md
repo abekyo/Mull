@@ -11,7 +11,7 @@ this repository. Please do not open a public issue for anything that could expos
 recorded data before there is a fix.
 
 Include what you did, what happened, and which version or commit you were on. A proof of
-concept is welcome but not required — a clear description of the path is enough to start.
+concept is welcome but not required. A clear description of the path is enough to start.
 
 This is a solo project, so there is no paid bounty and no guaranteed response time. What there
 is: an acknowledgement when the report is read, and a note in the advisory when it is fixed or
@@ -24,17 +24,17 @@ assumption is that your Mac is yours and the software on it is not automatically
 
 | Boundary | The guarantee |
 |---|---|
-| Network | No mull server exists. With the default configuration nothing leaves the machine — there is no telemetry, no analytics, no crash reporting, and no toggle for them because there is nothing to toggle. |
+| Network | No mull server exists. With the default configuration nothing leaves the machine. There is no telemetry, no analytics, no crash reporting, and no toggle for them because there is nothing to toggle. |
 | Cloud LLMs | Off by default. Turning one on sends data directly from your machine to the provider you chose, with your own API key. There is no intermediary. |
-| Secrets | Content classified as sensitive — API keys, card numbers, private keys, credentials — is filtered before it can reach a provider. See `Mull/Core/SensitiveText.swift` and `Mull/Core/Redactor.swift`. |
+| Secrets | Content classified as sensitive (API keys, card numbers, private keys, credentials) is filtered before it can reach a provider. See `Mull/Core/SensitiveText.swift` and `Mull/Core/Redactor.swift`. |
 | Password fields | Skipped at capture via `IsSecureEventInputEnabled`, so they are never written in the first place. |
 | Excluded apps | Password managers and keychain apps are excluded by default. mull never records itself. |
-| Clipboard secrets | A copy marked `org.nspasteboard.ConcealedType` — what password managers stamp on a copied credential — is dropped before its contents are read. The marker travels with the copy, so it still holds after you switch apps, which the excluded-app list alone cannot do. |
+| Clipboard secrets | A copy marked `org.nspasteboard.ConcealedType`, which is what password managers stamp on a copied credential, is dropped before its contents are read. The marker travels with the copy, so it still holds after you switch apps, which the excluded-app list alone cannot do. |
 | Storage | SQLite at `~/Library/Application Support/mull/mull.sqlite`, plus plain markdown in `~/mull/`. Both are ordinary files under your user account, `0600`, in `0700` directories. |
 | API keys | macOS Keychain. Never written in plaintext. |
-| Deletion | "Delete everything" and a time-scoped Forget both reach the quarantined copies of the database (`mull.sqlite.corrupt-*`, `.reattached-*`) that the recovery path leaves beside the live file — not just the live tables. |
+| Deletion | "Delete everything" and a time-scoped Forget both reach the quarantined copies of the database (`mull.sqlite.corrupt-*`, `.reattached-*`) that the recovery path leaves beside the live file, not just the live tables. |
 | `me.pinned.md` | Yours alone. No MCP tool will write it, by any path. Content there is served to assistants as something *you* asserted, so an agent being able to add a line to it would be an agent putting words in your mouth. |
-| Your calendar | mull can create, move and delete events, and four lines bound that. It keeps **no copy** — it writes to EventKit and reads back from EventKit, and nothing about your calendar enters mull's database. It writes only to a calendar **you already chose**; it never creates one. It writes **nothing** without an explicit gesture from you — double-click, type a title, press Return. And every write is registered with `UndoManager`, so ⌘Z reverses it. Recurring events are touched as `.thisEvent` only, and subscribed calendars stay read-only. The MCP `calendar` tool is **read-only**: an agent can see your schedule and cannot change it. |
+| Your calendar | mull can create, move and delete events, and four lines bound that. It keeps no copy: it writes to EventKit and reads back from EventKit, and nothing about your calendar enters mull's database. It writes only to a calendar you already chose, and never creates one. It writes nothing without an explicit gesture from you: double-click, type a title, press Return. And every write is registered with `UndoManager`, so ⌘Z reverses it. Recurring events are touched as `.thisEvent` only, and subscribed calendars stay read-only. The MCP `calendar` tool is read-only, so an agent can see your schedule but cannot change it. |
 
 ## What mull will not do to you
 
@@ -65,8 +65,8 @@ Stating these explicitly is part of the point:
   trust them with everything.
 - **mull can carry someone else's instructions to your agent.** This one is structural, and
   it is worth understanding before you connect the MCP server to a coding agent that can run
-  commands. mull records your clipboard and the text of your windows — much of which other
-  people wrote — and then hands it to that agent as context. So a web page you merely had
+  commands. mull records your clipboard and the text of your windows, much of which other
+  people wrote, and then hands it to that agent as context. So a web page you merely had
   open, or a README you copied from, can plant a sentence that reaches your agent later,
   labelled as your activity. This is *indirect prompt injection*, and no product that
   captures untrusted text can claim immunity from it.
@@ -74,7 +74,7 @@ Stating these explicitly is part of the point:
   What mull does about it: everything it returns is framed to the agent as quotation rather
   than instruction (`MCPServer.serverInstructions`), and lines it can tell are phrased as
   directives are individually marked (`Mull/Core/InstructionText.swift`). Both are road
-  signs, not walls — the marking is keyword matching and a determined phrasing walks past
+  signs, not walls. The marking is keyword matching, and a determined phrasing walks past
   it. **The real mitigation is on your side: give an agent reading mull the same trust you
   would give the web pages you had open, and keep destructive tools behind confirmation.**
 - **Anything you send to a cloud LLM has left your machine.** After that, the provider's
@@ -88,7 +88,7 @@ The claims above are checkable, and checking them is the intended use of this re
 |---|---|
 | What is captured, and when is capture skipped? | `Mull/Services/RecordingService.swift` |
 | What counts as sensitive, and what is filtered? | `Mull/Core/SensitiveText.swift`, `Mull/Core/Redactor.swift` |
-| Does anything make a network call? | `Mull/Services/LLMClient.swift` — the only outbound path |
+| Does anything make a network call? | `Mull/Services/LLMClient.swift`, the only outbound path |
 | What does the MCP server expose to an agent? | `Mull/Core/MCPServer.swift` |
 | How is captured text framed for an agent? | `Mull/Core/InstructionText.swift` |
 | What is written to disk, and where? | `Mull/Core/DatabaseService.swift`, `Mull/Core/MullDirectory.swift` |
