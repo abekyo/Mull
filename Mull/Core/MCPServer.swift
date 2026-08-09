@@ -285,7 +285,7 @@ final class MCPServer {
             ],
             [
                 "name": "get_corrections",
-                "description": "Corrections the user made to mull's output that nobody has drawn a rule from yet. Each one is a diff — what mull wrote, what the user kept — plus what they were doing at the time. Read them, work out WHY the edit was made, and write the rule back with `curate` (path: the card's path, block_id: 'rule'). That rule then lands in ~/mull/rules.md and is handed to every later session. This is the only place a rule can come from: mull observes facts, and no amount of observation yields 'stop giving me option lists' — that appears only when a human corrects something. Do not invent a rule you cannot point at in the diff; leaving a card unfilled is correct when the reason is not visible.",
+                "description": "Corrections the user made to mull's output that nobody has drawn a rule from yet. Each one is a diff: what mull wrote, what the user kept, and what they were doing at the time. Read them, work out WHY the edit was made, and write the rule back with `curate` (path: the card's path, block_id: 'rule'). That rule then lands in ~/mull/rules.md and is handed to every later session. This is the only place a rule can come from: mull observes facts, and no amount of observation yields 'stop giving me option lists'. That appears only when a human corrects something. Do not invent a rule you cannot point at in the diff; leaving a card unfilled is correct when the reason is not visible.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -393,7 +393,7 @@ final class MCPServer {
             [
                 "uri": "mull://rules",
                 "name": "Rules (rules.md)",
-                "description": "How this user wants you to work — drawn from corrections they made to mull's own output, not from anything they were asked to declare. Read alongside mull://me and follow it.",
+                "description": "How this user wants you to work, drawn from corrections they made to mull's own output rather than from anything they were asked to declare. Read alongside mull://me and follow it.",
                 "mimeType": "text/markdown"
             ],
             [
@@ -880,7 +880,7 @@ final class MCPServer {
         guard !pending.isEmpty else {
             let done = cards.count - pending.count
             return done == 0
-                ? "No corrections recorded yet. mull writes one when the user edits a block mull wrote — there is nothing here until that happens, and inventing rules without one is not a substitute."
+                ? "No corrections recorded yet. mull writes one when the user edits a block mull wrote, so there is nothing here until that happens. Inventing rules without one is not a substitute."
                 : "No unfilled corrections. All \(done) recorded correction(s) already have a rule; they are in ~/mull/\(RuleBook.path)."
         }
 

@@ -450,8 +450,12 @@ scripts/            release.sh — build, sign, notarize, staple, verify
 
 Design docs: [CLAUDE.md](CLAUDE.md) (spec) · [DIRECTION.md](DIRECTION.md) (how it is built and
 why) · [SELECTION-LAYER.md](SELECTION-LAYER.md) (the core IP) ·
-[MAP-ARCHITECTURE.md](MAP-ARCHITECTURE.md) (data model). Those are written in Japanese. The
-code and this README are the English surface.
+[MAP-ARCHITECTURE.md](MAP-ARCHITECTURE.md) (data model). Those are written in Japanese, and they
+hold the reasoning rather than the rules.
+
+**The rules are in English, in [ARCHITECTURE.md](ARCHITECTURE.md):** the invariants a change must
+not break, each with the test that enforces it, the layer boundaries, and which document decides
+what. Read that before proposing a design change. You do not need Japanese to write the issue.
 
 ### The GUI
 
