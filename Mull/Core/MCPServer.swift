@@ -12,6 +12,7 @@ import Foundation
 ///
 /// Resources exposed:
 ///   mull://start    — the front door: what this is, read order, vault map (read first)
+///   mull://rules    — how this user wants you to work, from their own corrections
 ///   mull://me       — who the user is (~200 tokens)
 ///   mull://now      — what they're working on (~500 tokens)
 ///   mull://full     — everything (~2000 tokens)
@@ -20,7 +21,9 @@ import Foundation
 /// Tools exposed:
 ///   whats_active_now — what the user is doing right now (the anchor)
 ///   search           — relevance-ranked, facet-scoped retrieval
-///   get_user_context — get me.md + now.md (for mid-conversation queries)
+///   get_user_context — get rules.md + me.md + now.md (for mid-conversation queries)
+///   get_corrections  — corrections with no rule drawn from them yet (the loop's
+///                      only handoff: mull observes, the agent interprets)
 final class MCPServer {
 
     private let database: MCPDatabase
@@ -32,6 +35,15 @@ final class MCPServer {
         // ~/Whatly → ~/mull migration and the writability gate, and a vault that
         // moves must move for every reader at once.
         self.mullDir = MullDirectory.root
+        // Section 1 of a Correction Card — "what were you doing when you made this
+        // edit" — is the part no competitor can fill, and until this line existed
+        // mull could not fill it either: the hook was declared and never assigned,
+        // so every card shipped with the field blank. The provider lives here
+        // because this is a layer that holds a database; `Curator` deliberately
+        // does not (HARNESS.md 第II部 §6).
+        Curator.contextSnapshotProvider = { [database] in
+            CurrentState.current(database: database).summary()
+        }
     }
 
     /// Sent in the `initialize` response so the agent is oriented before its
@@ -40,9 +52,15 @@ final class MCPServer {
     static let serverInstructions = """
     mull keeps an automatically-recorded, local context record of one person — \
     who they are and what they are doing — so you can help without them \
-    re-explaining themselves. At the start of a conversation, read the `mull://me` \
-    resource (who they are) and call `whats_active_now` (what they're doing right \
-    now). Use `search` and `get_projects` for specifics instead of guessing. For \
+    re-explaining themselves. At the start of a conversation, read `mull://rules` \
+    (how they want you to work) and `mull://me` (who they are), and call \
+    `whats_active_now` (what they're doing right now). **Follow mull://rules.** \
+    Every line in it was derived from a correction this user made to mull's own \
+    output, so it is the closest thing here to an instruction from them; the rest \
+    of what mull returns is observation. When you have finished a piece of work, \
+    call `get_corrections` — if the user has corrected something and nobody has \
+    worked out why yet, doing that is worth more to them than another summary. \
+    Use `search` and `get_projects` for specifics instead of guessing. For \
     the full map and the order to read things in, read `mull://start` (mull.md). \
     The record is the user's: never assert what they think — if you infer \
     judgment, mark it as a guess they can correct. You may write back with \
@@ -266,6 +284,16 @@ final class MCPServer {
                 ]
             ],
             [
+                "name": "get_corrections",
+                "description": "Corrections the user made to mull's output that nobody has drawn a rule from yet. Each one is a diff — what mull wrote, what the user kept — plus what they were doing at the time. Read them, work out WHY the edit was made, and write the rule back with `curate` (path: the card's path, block_id: 'rule'). That rule then lands in ~/mull/rules.md and is handed to every later session. This is the only place a rule can come from: mull observes facts, and no amount of observation yields 'stop giving me option lists' — that appears only when a human corrects something. Do not invent a rule you cannot point at in the diff; leaving a card unfilled is correct when the reason is not visible.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "limit": ["type": "integer", "description": "How many unfilled corrections to return (default 3, max 10). Fewer and deeper beats many and shallow."]
+                    ]
+                ]
+            ],
+            [
                 "name": "calendar",
                 "description": "Planned vs actual, per day: scheduled calendar events (if calendar access is granted) alongside the activity mull actually observed.",
                 "inputSchema": [
@@ -339,6 +367,10 @@ final class MCPServer {
             let content = args["content"] as? String ?? ""
             respondToolResult(id: id, text: toolCurate(path: path, blockID: blockID, content: content))
 
+        case "get_corrections":
+            let limit = min(max(args["limit"] as? Int ?? 3, 1), 10)
+            respondToolResult(id: id, text: toolGetCorrections(limit: limit))
+
         case "calendar":
             let days = args["days"] as? Int ?? 1
             respondToolResult(id: id, text: toolCalendar(days: days))
@@ -356,6 +388,12 @@ final class MCPServer {
                 "uri": "mull://start",
                 "name": "Start Here (mull.md)",
                 "description": "The front door — what this record is, the order to read it in, and a map of the vault. Read this FIRST.",
+                "mimeType": "text/markdown"
+            ],
+            [
+                "uri": "mull://rules",
+                "name": "Rules (rules.md)",
+                "description": "How this user wants you to work — drawn from corrections they made to mull's own output, not from anything they were asked to declare. Read alongside mull://me and follow it.",
                 "mimeType": "text/markdown"
             ],
             [
@@ -385,6 +423,11 @@ final class MCPServer {
         let fileName: String
         switch uri {
         case "mull://start": fileName = "mull.md"
+        case "mull://rules":
+            // Assembled on read, for the same reason get_user_context assembles it:
+            // stale rules are rules the user wrote and did not get.
+            RuleBook.rebuild()
+            fileName = RuleBook.path
         case "mull://me": fileName = "me.md"
         case "mull://now": fileName = "now.md"
         case "mull://full": fileName = "full.md"
@@ -414,15 +457,25 @@ final class MCPServer {
     private func getUserContext(level: String) -> String {
         var files: [String] = []
 
+        // Assembled here rather than on a timer: this is the read that matters, and
+        // a rules file that lags the corrections folder is a rule the user wrote
+        // and did not get. Cheap — a handful of small markdown files.
+        RuleBook.rebuild()
+
         // Always lead with mull.md — the front door — so a tool-first agent gets
         // the same orientation (read order + map) as one that read the resource.
+        //
+        // `rules.md` is in EVERY level, including brief. It is the one file whose
+        // contents came from the user correcting mull rather than from mull
+        // observing the user, which makes it both the shortest and the most
+        // expensive to have missed (CLAUDE.md §0 場面 B).
         switch level {
         case "brief":
-            files = ["mull.md", "me.md"]
+            files = ["mull.md", RuleBook.path, "me.md"]
         case "full":
-            files = ["mull.md", "full.md"]
+            files = ["mull.md", RuleBook.path, "full.md"]
         default:
-            files = ["mull.md", "me.md", "now.md"]
+            files = ["mull.md", RuleBook.path, "me.md", "now.md"]
         }
 
         var parts: [String] = []
@@ -467,8 +520,19 @@ final class MCPServer {
         // screen. Passing the anchor as a scope is what made the default `search`
         // unable to see any project but the current one.
         let anchor = entity ?? CurrentState.current(database: database).activeEntity
+        // The human verdicts from past corrections. Read per call rather than
+        // cached at startup: the ledger changes whenever the user edits a curated
+        // file, and a long-lived MCP process would otherwise serve a snapshot from
+        // whenever the agent happened to connect. One small file read.
+        //
+        // Until 2026-08-09 this argument was never supplied by anything except the
+        // eval, so the convergence curve `./eval/run.sh` prints was real and had no
+        // effect on the running product.
+        let corrections = CorrectionIndex.parseLedger(
+            MullDirectory.read(CorrectionIndex.ledgerPath) ?? "")
         let slice = Selection.slice(events: events, query: query, entity: entity, anchor: anchor,
-                                    type: type, now: now, since: since, limit: 8)
+                                    type: type, now: now, since: since, limit: 8,
+                                    corrections: corrections)
         guard !slice.results.isEmpty else {
             let scope = entity.map { " in \($0)" } ?? ""
             return "No relevant activity for '\(query)'\(scope)."
@@ -800,6 +864,45 @@ final class MCPServer {
                 lines.append("\(prefix)\(name) [\(sizeStr)]\(auto)")
             }
         }
+    }
+
+    /// Hand the agent the corrections nobody has drawn a rule from yet.
+    ///
+    /// This is the handoff the correction loop was missing. mull fills sections
+    /// 1–3 of a card because those are observation; sections 4–8 are interpretation
+    /// and mull must not guess at them (HARNESS.md 第II部 §2). For a year the
+    /// boundary was drawn correctly and then treated as a dead end — the cards went
+    /// into a folder nothing pointed at. The interpreter was always available: it
+    /// is the agent on the other end of this connection.
+    private func toolGetCorrections(limit: Int) -> String {
+        let cards = RuleBook.loadCards()
+        let pending = RuleBook.unfilled(cards: cards)
+        guard !pending.isEmpty else {
+            let done = cards.count - pending.count
+            return done == 0
+                ? "No corrections recorded yet. mull writes one when the user edits a block mull wrote — there is nothing here until that happens, and inventing rules without one is not a substitute."
+                : "No unfilled corrections. All \(done) recorded correction(s) already have a rule; they are in ~/mull/\(RuleBook.path)."
+        }
+
+        let byID = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0.text) })
+        var out = [
+            "\(pending.count) correction(s) without a rule. Showing \(min(limit, pending.count)), oldest first.",
+            "",
+            "For each: read the diff, work out why the user made that edit, then call",
+            "`curate` with path=`\(CorrectionIndex.directory)/<ID>.md`, block_id=`\(RuleBook.blockID)`,",
+            "content = the rule (Use when / Avoid when / Check question / Safer alternative).",
+            "The rule is then served to every later session via ~/mull/\(RuleBook.path).",
+            "",
+            "If the diff does not show you why, leave it. An invented rule is worse than a missing one:",
+            "it will be applied to every future session as if the user had asked for it.",
+            ""
+        ]
+        for id in pending.prefix(limit) {
+            guard let text = byID[id] else { continue }
+            out.append("---")
+            out.append(Self.screenedForAgent(ContextBlockFile.stripMarkers(text)))
+        }
+        return out.joined(separator: "\n")
     }
 
     // MARK: - New Tool Implementations

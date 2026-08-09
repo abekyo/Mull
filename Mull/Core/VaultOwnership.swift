@@ -62,6 +62,15 @@ enum VaultOwnership {
     /// `MullMCP`; `VaultLayoutTests` pins the two together.
     private static let curatedFolders: Set<String> = ["projects", "corrections"]
 
+    /// Root-level files mull assembles but does not own.
+    ///
+    /// `rules.md` is the rules drawn from the user's own corrections (`RuleBook`).
+    /// mull collects them and keeps the file current; every rule in it originated
+    /// with a human, and rewriting one promotes that block to `.human` for good.
+    /// So: the user may type into it, an agent may only `curate` — which is
+    /// exactly `.shared`, and the reason this set exists alongside the `.mull` one.
+    private static let curatedRootFiles: Set<String> = ["rules.md"]
+
     /// Accepts a vault-relative path *or* an absolute one — the Files tab has URLs and
     /// the MCP server has relative paths, and the answer must not depend on which.
     static func of(path: String) -> VaultOwnership {
@@ -79,6 +88,7 @@ enum VaultOwnership {
         // description offers as the example, and the Files tab showed the briefing
         // read-only. A note the user happens to call `now.md` was locked the same way.
         if parents.isEmpty, mullWrittenRootFiles.contains(name) { return .mull }
+        if parents.isEmpty, curatedRootFiles.contains(name) { return .shared }
         return .user
     }
 

@@ -176,9 +176,9 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual(names, [
             "get_user_context", "whats_active_now", "search", "get_projects",
             "get_knowledge", "get_relevant", "search_history", "write_note",
-            "list_files", "read_file", "curate", "calendar"
+            "list_files", "read_file", "curate", "calendar", "get_corrections"
         ])
-        XCTAssertEqual(tools.count, 12, "no duplicate entries")
+        XCTAssertEqual(tools.count, 13, "no duplicate entries")
     }
 
     func testEveryToolDefinitionIsWellFormed() {
@@ -237,14 +237,18 @@ final class MCPServerTests: XCTestCase {
 
     // MARK: - resources
 
-    func testResourcesListExposesTheFourContextFiles() {
+    func testResourcesListExposesTheContextFiles() {
         let result = server.handleForTesting([
             "jsonrpc": "2.0", "id": 1, "method": "resources/list"
         ])?["result"] as? [String: Any]
         let resources = result?["resources"] as? [[String: Any]] ?? []
 
+        // `mull://rules` joined these on 2026-08-09. It is the only one of the five
+        // whose content came from the user correcting mull rather than mull
+        // observing the user, which is why it is offered second, right after the
+        // orientation file (CLAUDE.md §0 場面 B).
         XCTAssertEqual(Set(resources.compactMap { $0["uri"] as? String }),
-                       ["mull://start", "mull://me", "mull://now", "mull://full"])
+                       ["mull://start", "mull://rules", "mull://me", "mull://now", "mull://full"])
         for resource in resources {
             XCTAssertEqual(resource["mimeType"] as? String, "text/markdown")
             XCTAssertFalse((resource["name"] as? String ?? "").isEmpty)

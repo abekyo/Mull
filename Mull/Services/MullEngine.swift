@@ -67,6 +67,14 @@ final class MullEngine {
         // Weak: the scheduler is owned by this engine, so a strong capture here
         // would be a retain cycle that outlives AppState.
         scheduler.runHandler = { [weak self] in try await self?.runSummary() }
+        // "What were you doing when you made this edit" — section 1 of a Correction
+        // Card. Set here as well as in `MCPServer.init` because both processes call
+        // `Curator.curate`, and a correction made while the GUI is the writer is
+        // worth exactly as much as one made through MCP. `Curator` cannot do this
+        // itself: it is deliberately database-free.
+        Curator.contextSnapshotProvider = { [database] in
+            CurrentState.current(database: database).summary()
+        }
     }
 
     // MARK: - Scheduling & Gating (forwarded to ConsolidationScheduler)
