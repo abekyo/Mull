@@ -135,6 +135,59 @@ final class ContextComposerTests: XCTestCase {
         XCTAssertTrue(leaked.isEmpty, "leaked into the paste: \(leaked)")
     }
 
+    // MARK: - One utterance, caught mid-flush
+
+    /// Dictation emits the sentence repeatedly as it grows. The exact-prefix key
+    /// cannot see it, because the versions differ at character one.
+    func testFragmentsOfOneUtteranceAreFoldedIntoTheLongest() async {
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            event(2, .clipboard, "今のところ4年フィリピンにいてそろそろ国変えてもいいかなって思ってる"),
+            event(3, .clipboard, "うーん、今のところ4年フィリピンにいて")
+        ])
+        XCTAssertTrue(text.contains("そろそろ国変えても"), "the complete version survives")
+        XCTAssertFalse(text.contains("うーん、"), "the earlier fragment of the same sentence does not")
+    }
+
+    /// The same, with the fragments arriving in the other order. The rule keys on
+    /// length rather than on arrival, so neither order can decide the answer.
+    func testFoldingDoesNotDependOnArrivalOrder() async {
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            event(2, .clipboard, "うーん、今のところ4年フィリピンにいて"),
+            event(3, .clipboard, "今のところ4年フィリピンにいてそろそろ国変えてもいいかなって思ってる")
+        ])
+        XCTAssertTrue(text.contains("そろそろ国変えても"))
+        XCTAssertFalse(text.contains("うーん、"))
+    }
+
+    /// Two different notes can open with the same stock phrase. Folding on a shared
+    /// run alone would lose one of them, which is why the run is sized against the
+    /// shorter string rather than fixed.
+    func testTwoDifferentNotesThatShareAPhraseBothSurvive() async {
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            event(2, .clipboard, "TODO: wire the ledger into Selection before the release"),
+            event(3, .clipboard, "TODO: wire the rules file into get_user_context as well")
+        ])
+        XCTAssertTrue(text.contains("ledger into Selection"))
+        XCTAssertTrue(text.contains("rules file into get_user_context"))
+    }
+
+    // MARK: - A watched video is not a thing the user made
+
+    /// The media marker was read from `windowTitle` only, so an event whose text
+    /// carried the URL was labelled `produce` and skipped the anchor rule. `produce`
+    /// means the user authored it, and the whole paste trusts that word.
+    func testAYouTubeURLInTheTextIsNotReportedAsProduce() async {
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            event(2, .clipboard, "動画の要点 | https://www.youtube.com/watch?v=NoMl3bbUR_o",
+                  title: "メモ — Mull")
+        ])
+        XCTAssertFalse(text.contains("[produce] 動画の要点"))
+    }
+
     /// A sentence is not a project. It may still be reported as something the user
     /// was doing, which it was; what it must never become is a `Working on:` line
     /// or an entry in "Active work", because those are claims about what the user

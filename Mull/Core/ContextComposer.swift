@@ -93,8 +93,33 @@ struct ContextComposer {
             if let app = state.activeApp { nowLines.append("App: \(app)") }
 
             var doing: [String] = []        // produce / decide / think / communicate
-            var researching: [String] = []  // consume / research — kept, compacted
+            var researching: [String] = []  // consume / research, kept when anchored
             var seen = Set<String>()
+            var doingText: [String] = []    // the raw snippets behind `doing`
+
+            /// Are these two snippets the same utterance, caught mid-flush?
+            ///
+            /// Dictation and a typing buffer both emit the sentence several times
+            /// as it grows, and the exact-prefix key below cannot see it: a real
+            /// paste carried "うーん、今のところ4年フィリピンにいて" beside
+            /// "今のところ4年フィリピンにいてそろそろ国変えてもいいかなって思ってる",
+            /// which differ at character one and say the same thing.
+            ///
+            /// The test is a shared contiguous run, sized against the SHORTER
+            /// string rather than fixed. Two different notes can share a stock
+            /// phrase (`database: database`); what they do not share is most of one
+            /// of them. Requiring 60% coverage is what keeps this from folding two
+            /// genuinely different lines that happen to start alike.
+            func sameUtterance(_ a: String, _ b: String) -> Bool {
+                let (short, long) = a.count <= b.count ? (a, b) : (b, a)
+                let need = max(12, Int(Double(short.count) * 0.6))
+                guard short.count >= need else { return false }
+                let chars = Array(short)
+                for start in 0...(chars.count - need) {
+                    if long.contains(String(chars[start..<(start + need)])) { return true }
+                }
+                return false
+            }
             for e in database.fetchEvents(from: Date().addingTimeInterval(-1800), to: Date()).reversed() {
                 guard e.eventType == .clipboard || e.eventType == .screenText,
                       let raw = e.textContent?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -105,7 +130,23 @@ struct ContextComposer {
                 let snippet = String(raw.prefix(90))
                 switch e.resolvedMode {
                 case .produce, .decide, .think, .communicate:
-                    if doing.count < 6 { doing.append("- [\(e.resolvedMode.rawValue)] \(snippet)") }
+                    // Keep the longest version, not the newest one. A growing
+                    // dictation buffer usually emits the complete sentence last,
+                    // so newest-wins is right most of the time and silently wrong
+                    // the rest — an edit that shortens a line, a flush that lands
+                    // out of order. Length is what "complete" actually means here,
+                    // and it does not depend on the order events arrive in.
+                    if let i = doingText.firstIndex(where: { sameUtterance($0, snippet) }) {
+                        if snippet.count > doingText[i].count {
+                            doing[i] = "- [\(e.resolvedMode.rawValue)] \(snippet)"
+                            doingText[i] = snippet
+                        }
+                        continue
+                    }
+                    if doing.count < 6 {
+                        doing.append("- [\(e.resolvedMode.rawValue)] \(snippet)")
+                        doingText.append(snippet)
+                    }
                 case .consume, .research:
                     // Only what was consumed *about the thing being worked on*.
                     //

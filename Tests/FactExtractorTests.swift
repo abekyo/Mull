@@ -70,6 +70,23 @@ final class FactExtractorTests: XCTestCase {
         XCTAssertFalse(skills.contains { $0.contains("mull") })
     }
 
+    func testPlatformAppsDoNotOccupyAPrimaryToolSlot() {
+        // "Primary tools: Code + Claude + Finder" reads as three choices and is
+        // two. Every Mac has Finder open; saying so spends a line of the pasted
+        // block on nothing. Same test as the browsers above.
+        insertAppSwitches(app: "Code", count: 10)
+        insertAppSwitches(app: "Finder", count: 30)
+        insertAppSwitches(app: "Terminal", count: 8)
+
+        let skills = texts(extractor.extractFacts(days: 1), in: .skills)
+        let primary = skills.first { $0.hasPrefix("Primary tools:") }
+
+        XCTAssertNotNil(primary, "Expected a primary-tools fact, got: \(skills)")
+        XCTAssertTrue(primary!.contains("Code"))
+        XCTAssertTrue(primary!.contains("Terminal"))
+        XCTAssertFalse(primary!.contains("Finder"), "Finder is the platform, not a choice")
+    }
+
     // MARK: - Project inference
 
     func testInfersProjectFromRepeatedWindowTitles() {

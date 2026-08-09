@@ -162,14 +162,26 @@ struct FactExtractor {
         let apps = analytics.appUsage(days: days)
         var facts: [Fact] = []
 
-        // Browser preference removed — which browser someone uses doesn't change
-        // an AI's answer to a task. (Kept the browser list to exclude browsers
-        // from the "primary tools" signal below.)
+        // Browser preference removed: which browser someone uses doesn't change
+        // an AI's answer to a task. (The list stays, to exclude browsers from the
+        // "primary tools" signal below.)
         let browsers = ["Safari", "Firefox", "Chrome", "Google Chrome", "Arc", "Brave Browser", "Edge"]
 
-        // Primary work tools — not just "code editors" but whatever they use most
+        // Apps that come with the machine rather than with the person.
+        //
+        // "Primary tools: Code + Claude + Finder" reads as three choices and is
+        // two: every Mac user has Finder open, so listing it says nothing about
+        // how this person works and spends a line of the paste saying it. Same
+        // test as the browsers above, and the same reason.
+        //
+        // Deliberately short and deliberately about the platform, not about taste.
+        // A longer list would be someone's opinion of which tools are boring.
+        let platformApps = ["Finder", "System Settings", "System Preferences", "loginwindow"]
+
+        // Primary work tools: not just code editors, but whatever they use most.
         let workApps = apps
             .filter { !browsers.contains($0.appName) }
+            .filter { !platformApps.contains($0.appName) }
             .filter { !AnalyticsEngine.isNoiseApp($0.appName) }
             .prefix(3)
         if workApps.count >= 2 {

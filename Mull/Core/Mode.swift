@@ -53,11 +53,21 @@ enum Mode: String, Codable, CaseIterable {
 
         if isCommsApp(app) { return .communicate }
 
-        let consuming = isBrowser(app) || title.contains("youtube")
-            || title.contains("audio playing") || app.contains("music")
+        // Read the media markers from the text as well as the title.
+        //
+        // Looking only at `windowTitle` meant an event whose text was
+        // `… — Mull | https://www.youtube.com/watch?v=…` was labelled `produce`,
+        // because the URL sits in the content and the title said nothing. The
+        // label matters: `produce` means the user authored it, and everything
+        // downstream (the pasted block, `Mode.weight`) trusts that. A video the
+        // user watched was being reported as a thing the user made.
+        let body = t.lowercased()
+        let mediaMarker = ["youtube", "audio playing", "vimeo", "netflix", "spotify"]
+        let consuming = isBrowser(app) || app.contains("music")
             || app.contains("podcast") || app.contains("tv")
+            || mediaMarker.contains { title.contains($0) || body.contains($0) }
         if consuming {
-            return looksLikeResearch(title: title, text: t.lowercased()) ? .research : .consume
+            return looksLikeResearch(title: title, text: body) ? .research : .consume
         }
 
         // Vocabulary lives in `Signal` — the content axis and this axis must agree
