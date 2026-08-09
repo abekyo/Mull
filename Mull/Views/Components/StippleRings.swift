@@ -42,39 +42,55 @@ struct StippleRings: View {
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
-            let rnd = Mulberry32(seed)
-            let S = Double(max(size.width, size.height))
-            let harmonics: [Double] = [2, 3, 5, 8]
-            let amps = harmonics.map { k in amp * (0.7 + rnd.next() * 0.6) / k.squareRoot() }
-            let phases = harmonics.map { _ in rnd.next() * .pi * 2 }
-
-            let cx = Double(size.width) * center.x
-            let cy = Double(size.height) * center.y
-            var R = startR * S
-            var ring = 0
-            while ring < 64 && R < S * maxR {
-                let n = max(6, Int((2 * .pi * R / (S * dotGap)).rounded()))
-                for s in 0..<n {
-                    if rnd.next() < skip { continue }
-                    let th = Double(s) / Double(n) * 2 * .pi
-                    var w = 1.0
-                    for k in harmonics.indices {
-                        w += amps[k] * sin(harmonics[k] * th + phases[k] + Double(ring) * 0.25)
-                    }
-                    let r = R * w
-                    let color = rnd.next() < 0.3 ? secondary : primary
-                    let alpha = 0.7 + rnd.next() * 0.3
-                    let rad = S * dotR * (0.75 + rnd.next() * 0.5)
-                    let rect = CGRect(x: cx + cos(th) * r - rad, y: cy + sin(th) * r - rad,
-                                      width: rad * 2, height: rad * 2)
-                    context.fill(Path(ellipseIn: rect), with: .color(color.opacity(alpha)))
-                }
-                R += S * gap * (0.8 + rnd.next() * 0.4)
-                ring += 1
-            }
+            draw(&context, size)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    /// Split out of `body`, with a type written on every local, because inline it
+    /// compiled here and failed on CI with "the compiler is unable to type-check
+    /// this expression in reasonable time". The cost is not the length: it is that
+    /// `Double` and `CGFloat` interconvert implicitly, so each unannotated `let`
+    /// multiplies the overloads the checker carries through the whole closure.
+    ///
+    /// The order of `rnd.next()` calls is the figure. It is unchanged here, and has
+    /// to stay unchanged — the same stream draws the app icon, and reordering a
+    /// single draw would leave the two no longer the same image.
+    private func draw(_ context: inout GraphicsContext, _ size: CGSize) {
+        let rnd = Mulberry32(seed)
+        let S: Double = Double(max(size.width, size.height))
+        let harmonics: [Double] = [2, 3, 5, 8]
+        let amps: [Double] = harmonics.map { (k: Double) -> Double in
+            amp * (0.7 + rnd.next() * 0.6) / k.squareRoot()
+        }
+        let phases: [Double] = harmonics.map { _ -> Double in rnd.next() * Double.pi * 2 }
+
+        let cx: Double = Double(size.width) * Double(center.x)
+        let cy: Double = Double(size.height) * Double(center.y)
+        var R: Double = startR * S
+        var ring: Int = 0
+        while ring < 64 && R < S * maxR {
+            let n: Int = max(6, Int((2 * Double.pi * R / (S * dotGap)).rounded()))
+            for s in 0..<n {
+                if rnd.next() < skip { continue }
+                let th: Double = Double(s) / Double(n) * 2 * Double.pi
+                var w: Double = 1
+                for k in harmonics.indices {
+                    w += amps[k] * sin(harmonics[k] * th + phases[k] + Double(ring) * 0.25)
+                }
+                let r: Double = R * w
+                let color: Color = rnd.next() < 0.3 ? secondary : primary
+                let alpha: Double = 0.7 + rnd.next() * 0.3
+                let rad: Double = S * dotR * (0.75 + rnd.next() * 0.5)
+                let rect = CGRect(x: CGFloat(cx + cos(th) * r - rad),
+                                  y: CGFloat(cy + sin(th) * r - rad),
+                                  width: CGFloat(rad * 2), height: CGFloat(rad * 2))
+                context.fill(Path(ellipseIn: rect), with: .color(color.opacity(alpha)))
+            }
+            R += S * gap * (0.8 + rnd.next() * 0.4)
+            ring += 1
+        }
     }
 }
 

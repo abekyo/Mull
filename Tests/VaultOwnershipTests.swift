@@ -121,10 +121,17 @@ final class VaultOwnershipTests: XCTestCase {
         MullDirectory.root.appendingPathComponent(relative).path
     }
 
-    /// A folder the user happens to name "daily" under their own notes is caught by the
-    /// component match. That is the same behaviour the old `path.contains("/daily/")`
-    /// check had; it is recorded here so a change to it is a decision, not a surprise.
-    func testAFolderNamedDailyAnywhereIsTreatedAsGenerated() {
-        XCTAssertEqual(VaultOwnership.of(path: "notes/daily/monday.md"), .mull)
+    /// A folder the user names "daily" under their own notes stays theirs.
+    ///
+    /// This assertion used to run the other way, recording the old
+    /// `path.contains("/daily/")` behaviour "so a change to it is a decision, not a
+    /// surprise". The change was then made, deliberately, and the reason is written
+    /// on `VaultOwnership.mullWrittenFolders`: matching at any depth locked a user's
+    /// own `notes/daily/` read-only and closed it to agents. mull creates `daily/`
+    /// and `memory/` at the top of the vault and nowhere else, so the top is the only
+    /// place the name means anything. This is that decision arriving in the test.
+    func testAFolderNamedDailyOnlyCountsAtTheRoot() {
+        XCTAssertEqual(VaultOwnership.of(path: "notes/daily/monday.md"), .user)
+        XCTAssertEqual(VaultOwnership.of(path: "daily/monday.md"), .mull)
     }
 }
