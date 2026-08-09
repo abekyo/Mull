@@ -405,8 +405,9 @@ toggle, because there is nothing to toggle.
 ### Why this is open source
 
 Every tool that sits near your keystrokes and earned trust did it by not keeping the content.
-TextExpander holds at most 30 keystrokes in volatile memory. Espanso holds 5 characters.
-ActivityWatch counts keystrokes and says plainly that it is not a keylogger.
+TextExpander holds 30 keystrokes in volatile memory, 300 with Snippet Suggestions turned on, and
+what it holds is a hash rather than the characters you typed. Espanso holds the last 3 characters
+by default. ActivityWatch counts keystrokes and says plainly that it is not a keylogger.
 
 mull keeps the content. The two products that made the same choice and shipped it closed source,
 Rewind and Microsoft Recall, were both rejected by their users.

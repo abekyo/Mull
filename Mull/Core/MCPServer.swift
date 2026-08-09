@@ -16,7 +16,12 @@ import Foundation
 ///   mull://me       — who the user is (~200 tokens)
 ///   mull://now      — what they're working on (~500 tokens)
 ///   mull://full     — everything (~2000 tokens)
-///   mull://today    — raw today's events
+///
+/// Five, and this list used to say six. `mull://today` was advertised here long
+/// after `resources/read` stopped answering it, so the one place a reader checks
+/// what the server offers named a URI that returns -32602. Today's events are the
+/// `search_history` tool's job; a resource that has to be re-read to stay current
+/// is the wrong shape for them.
 ///
 /// Tools exposed:
 ///   whats_active_now — what the user is doing right now (the anchor)
