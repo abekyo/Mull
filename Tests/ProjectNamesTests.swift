@@ -73,6 +73,33 @@ final class ProjectNamesTests: XCTestCase {
         }
     }
 
+    /// The prose hiragana density cannot see.
+    ///
+    /// `プロダクトの事業価値と社会的インパクトを検討` is 3/22 hiragana, which reads
+    /// as a name by density, and it shipped as a project: it appeared under
+    /// "Working on:" in the block the user pastes into an AI (2026-08-09).
+    func testNounHeavyClausesAreRejectedEvenAtLowHiraganaDensity() {
+        XCTAssertFalse(ProjectNames.isPlausible("プロダクトの事業価値と社会的インパクトを検討"))
+        XCTAssertFalse(ProjectNames.isPlausible("基本は日本円だけど米ドルとかペソで貰うこともある"))
+    }
+
+    /// The rule keys on distinct case particles, so it must not take real names
+    /// with one. `の` is excluded entirely: it is the possessive and shows up in
+    /// ordinary names.
+    func testNamesWithAParticleSurvive() {
+        XCTAssertTrue(ProjectNames.isPlausible("認証を実装"))
+        XCTAssertTrue(ProjectNames.isPlausible("元のプロファイル"))
+        XCTAssertTrue(ProjectNames.isPlausible("確定申告アプリ"))
+        XCTAssertTrue(ProjectNames.isPlausible("見積書テンプレートの改訂版"))
+    }
+
+    /// One particle is a name; two relate several things and make a clause. A long
+    /// noun phrase with a single particle is an ordinary project name and must
+    /// survive, or the rule would take more than the prose it was written for.
+    func testALongNameWithOneParticleSurvives() {
+        XCTAssertTrue(ProjectNames.isPlausible("認証機能をリファクタリング"))
+    }
+
     func testJapaneseSentencesAreRejected() {
         // Chat clients put the user's prompt in the window title. These are
         // mostly hiragana — the grammar that binds a sentence, not a name.

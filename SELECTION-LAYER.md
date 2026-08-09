@@ -176,6 +176,12 @@ struct CurrentState {
 
 ハーネスは2本あります。**合成が門番、実ログが答え合わせ**です。
 
+> **どちらも `Selection.rank` だけを測っています。** ユーザーが Copy context で貼り付ける
+> ブロックは `ContextComposer` が作り、`Selection` を一度も呼びません（`grep -c "Selection\."` が 0）。
+> あちらは `ContextComposerTests` のラベル付きケースで測っています。この harness は
+> GRDB-free かつファイルシステム非依存に保つ設計なので、`FactExtractor` と vault に触る
+> 経路をここに入れることはできません。**数字を引用するときはどちらの経路の数字か明示すること。**
+
 ### 6.1 合成ケース: [`eval/selection_eval.swift`](eval/selection_eval.swift)
 
 `./eval/run.sh` で回ります。GRDB-free の `RecordingEvent` shim を持ち Xcode ターゲット外に

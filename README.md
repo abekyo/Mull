@@ -32,9 +32,14 @@ claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
 | Situation | Without mull | With mull | Works today |
 |---|---|---|---|
 | It is Monday and you forget where Friday ended | You dig through `git log` and old tabs | The agent reads Friday's actual work | yes |
-| You retype the same setup every session | "Swift", "GRDB", "macOS 14", again | The agent already has it | yes |
+| You retype the same setup every session | "Swift", "GRDB", "macOS 14", again | The agent already has it | partly |
 | The agent repeats a mistake you fixed last week | You fix it again, and again | Your fix became a rule the agent reads | yes |
 | The project has scattered in your head | You work on whatever is nearest | You can pull up what you decided and why | partly |
+
+`partly` on the second one is measured, not modest. A real copied block was about one tenth
+useful: the rest was unrelated video titles, sentence fragments listed as projects, and entries
+worth a minute. Three filters now cut that, and one labeled fixture holds them in place, which is
+not the same as a scored corpus.
 
 The first two are things ActivityWatch, Screenpipe and Mem0 also do. The third is specific to
 mull and is described under [Corrections](#corrections). The fourth is only half a tool problem:

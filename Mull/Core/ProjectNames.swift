@@ -150,8 +150,31 @@ enum ProjectNames {
         }
 
         let hiragana = s.unicodeScalars.filter { (0x3040...0x309F).contains($0.value) }.count
-        guard hiragana > 0 else { return false }
-        return Double(hiragana) / Double(s.count) > 0.4
+        if hiragana > 0, Double(hiragana) / Double(s.count) > 0.4 { return true }
+
+        return isCaseMarkedClause(s)
+    }
+
+    /// The prose that hiragana density cannot see.
+    ///
+    /// Density works on sentences made of grammar (`修正してください` is 6/8). It
+    /// misses the other shape Japanese prose takes: a long noun-heavy clause where
+    /// the kanji and katakana carry the meaning and the grammar is two or three
+    /// characters. `プロダクトの事業価値と社会的インパクトを検討` is 3/22 hiragana,
+    /// which reads as a name by density, and it was shipped as a project — it
+    /// appeared under "Working on:" in the block the user pastes into an AI.
+    ///
+    /// The discriminator is *distinct case particles*. A name takes at most one
+    /// (`認証を実装`, `元のプロファイル`); a clause relates several things and needs
+    /// two or more (`…の…と…を検討`). `の` is excluded because it is the possessive
+    /// and appears in ordinary names.
+    ///
+    /// The length floor matters: at two or three characters, two of these are
+    /// coincidence rather than grammar.
+    private static func isCaseMarkedClause(_ s: String) -> Bool {
+        guard s.count >= 12 else { return false }
+        let caseParticles: Set<Character> = ["は", "が", "を", "に", "へ", "と", "で", "も"]
+        return Set(s.filter { caseParticles.contains($0) }).count >= 2
     }
 
     // MARK: - Evidence

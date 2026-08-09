@@ -32,13 +32,20 @@ struct ContextComposer {
     static let preamble = "Here is my current context from mull (a tool that records what I work on). "
         + "Use it to help me without making me re-explain myself.\n"
 
-    /// Build the "Copy context" text — a SELECTED, current, self-contained snapshot,
-    /// not a raw full.md dump. It composes the same use-time signals the MCP tools
-    /// serve (identity + what you're doing now + where you left off), so a paste
-    /// into ChatGPT/Claude is immediately useful with no tools to call. Passively
-    /// consumed media (YouTube titles you watched, background audio) is excluded by
-    /// construction: these engines key on projects/apps/files, not raw window
-    /// titles, so the noise that pollutes full.md never reaches the clipboard.
+    /// Build the "Copy context" text: a selected, current, self-contained snapshot
+    /// rather than a raw full.md dump. It composes the same use-time signals the MCP
+    /// tools serve (identity, what you're doing now, where you left off), so a paste
+    /// into ChatGPT or Claude is useful with no tools to call.
+    ///
+    /// This comment used to claim that passively consumed media "is excluded by
+    /// construction". **It was not.** The `.consume` / `.research` branch below kept
+    /// window titles verbatim, and a real paste carried four YouTube titles about
+    /// tattoos into a block about building this app. Nothing about the construction
+    /// excluded them; the sentence was aspiration written as fact.
+    ///
+    /// What excludes them now is the anchor: consumption is included only when it
+    /// belongs to the entity the user is actually working in, because "what I read
+    /// about this project" is context and "what played in another tab" is not.
     func compose() async -> String {
         await Task.detached { [database] in
             var sections: [String] = []
@@ -75,8 +82,14 @@ struct ContextComposer {
             //    compacts it as research/consume — nothing is silently dropped.
             let state = CurrentState.current(database: database)
             var nowLines: [String] = []
+            // The raw window title used to be the fallback here, which meant that
+            // whatever page happened to be frontmost was pasted verbatim under
+            // "Active:". `activeEntity` is nil exactly when the title names no
+            // project — a browser tab, a video — so the fallback fired precisely in
+            // the cases where the title was somebody else's words. The app name
+            // alone is the honest answer: mull knows which app, and does not know
+            // what it was for.
             if let entity = state.activeEntity { nowLines.append("Active: \(entity)") }
-            else if let title = state.activeTitle { nowLines.append("Active: \(title)") }
             if let app = state.activeApp { nowLines.append("App: \(app)") }
 
             var doing: [String] = []        // produce / decide / think / communicate
@@ -94,6 +107,18 @@ struct ContextComposer {
                 case .produce, .decide, .think, .communicate:
                     if doing.count < 6 { doing.append("- [\(e.resolvedMode.rawValue)] \(snippet)") }
                 case .consume, .research:
+                    // Only what was consumed *about the thing being worked on*.
+                    //
+                    // Without this, every paste carried whatever had been playing in
+                    // another tab. The failure is not that the titles are
+                    // embarrassing (though they were); it is that consumption is the
+                    // one mode where the user is not the author, so an unanchored
+                    // entry is a claim about their work made out of someone else's
+                    // words. With no anchor there is nothing to test that against,
+                    // so nothing is included.
+                    guard let anchor = state.activeEntity,
+                          let entity = e.entity ?? Entity.from(e.windowTitle ?? raw),
+                          entity.caseInsensitiveCompare(anchor) == .orderedSame else { continue }
                     if researching.count < 4 { researching.append(String(snippet.prefix(50))) }
                 }
                 if doing.count >= 6 && researching.count >= 4 { break }
@@ -115,10 +140,24 @@ struct ContextComposer {
                 if name.contains("/") { return true }
                 if name.contains("…") || name.hasSuffix("...") { return true }
                 if name.range(of: #"\d+\s*notes"#, options: .regularExpression) != nil { return true }
-                return false
+                // The shared shape gate, so a name this section rejects and one
+                // `Working on:` accepts cannot disagree (PITFALLS.md §7).
+                return !ProjectNames.isPlausible(name)
             }
+
+            // A project you touched for a minute is not where you left off.
+            //
+            // Without a floor, a stray window title that happened to survive the
+            // shape gate arrives beside five hours of real work carrying the same
+            // "**bold** — duration" formatting, and an agent has no way to tell that
+            // one of them is a rounding error. `1m` and `2m` entries were doing
+            // exactly that in a real paste.
+            let minimumWorth: TimeInterval = 300
+
             let snaps = TimeBlockEngine(database: database).projectSnapshots(days: 14)
-            let active = snaps.filter { $0.daysSinceActive < 3 && !isJunkProject($0.name) }.prefix(5)
+            let active = snaps
+                .filter { $0.daysSinceActive < 3 && $0.totalDuration >= minimumWorth && !isJunkProject($0.name) }
+                .prefix(5)
             if !active.isEmpty {
                 var lines = ["# Active work — where I left off"]
                 for p in active {

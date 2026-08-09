@@ -56,10 +56,11 @@ issue naming the invariant rather than sending a diff.
 | 11 | `rules.md` is `.shared`, not mull-owned: the user may type into it, an agent may only `curate`, and a rewritten rule is `human` forever. | `RuleBookTests.testRulesFileIsSharedNotMullOwned` |
 | 12 | `eval/` compiles without GRDB and runs in seconds. | CI ([`.github/workflows/eval.yml`](.github/workflows/eval.yml)) |
 | 13 | `Selection.rank` beats dump-everything, recency-only and entity-only on the labeled set, or the harness exits `GATE: fail`. | `./eval/run.sh` |
-| 14 | The territory (`_raw`, the event table) is never replaced by a summary. Map nodes point into it. | prose. Not enforced. |
-| 15 | `Mull/Core` contains no SwiftUI and no AppKit. | prose, recorded as unenforced in `project.yml`. Not enforced by the compiler. |
+| 14 | The pasted context block carries the user's own material and not unrelated consumption. | [`ContextComposerTests`](Tests/ContextComposerTests.swift), one labeled fixture |
+| 15 | The territory (`_raw`, the event table) is never replaced by a summary. Map nodes point into it. | prose. Not enforced. |
+| 16 | `Mull/Core` contains no SwiftUI and no AppKit. | prose, recorded as unenforced in `project.yml`. Not enforced by the compiler. |
 
-Rows 14 and 15 say "prose" on purpose. An invariant enforced by a test is a fact; an invariant
+Rows 15 and 16 say "prose" on purpose. An invariant enforced by a test is a fact; an invariant
 enforced by a document is a hope. Converting one of those two into a test is a welcome change.
 
 ---
