@@ -158,7 +158,7 @@ final class SelectionTests: XCTestCase {
         // 2026-08-09.
         let consumed = event("caching strategy", eventType: .clipboard,
                              app: "Safari", entity: "Mull")
-        let authored = event("caching strategy", eventType: .clipboard,
+        let authored = event("caching approach", eventType: .clipboard,
                              app: "Xcode", entity: "Mull")
 
         let results = rank([consumed, authored], query: "caching", anchor: "Mull")
@@ -170,10 +170,15 @@ final class SelectionTests: XCTestCase {
 
     // MARK: - Ranking components
 
-    func testMoreRecentEventOutranksOlderIdenticalOne() {
-        // Identical in every scoring dimension except age, so recency alone decides.
+    func testMoreRecentEventOutranksAnEquivalentOlderOne() {
+        // Equivalent in every scoring dimension except age, so recency alone
+        // decides. The two texts used to be byte-identical, which is the cheapest
+        // way to tie every other term; `Selection` now collapses a repeated
+        // result before taking the top N (one screen polled every 5 seconds used
+        // to fill all eight slots), so the tie is built from two different
+        // sentences that score the same instead.
         let older = event("reviewing the payment reconciliation report", ago: 3600, title: "PantryApp")
-        let newer = event("reviewing the payment reconciliation report", ago: 60, title: "PantryApp")
+        let newer = event("reviewing the payment reconciliation ledger", ago: 60, title: "PantryApp")
 
         let results = rank([older, newer])
 
@@ -277,9 +282,10 @@ final class SelectionTests: XCTestCase {
         // the anchor to be nil. Splitting anchor-match from attributability made
         // that description wrong; without the tiebreak these two events tie on
         // every component and this test would pass on input order alone.)
-        let text = "reviewing the payment reconciliation report today"
-        let anchored = event(text, title: "PantryApp")
-        let floating = event(text, title: nil)
+        // Two different sentences that tie on lexical, recency and salience.
+        // They were one string until `Selection` began collapsing repeats.
+        let anchored = event("reviewing the payment reconciliation report today", title: "PantryApp")
+        let floating = event("reviewing the payment reconciliation ledger today", title: nil)
 
         // Floating first on purpose. These two tie on lexical, recency and
         // salience, so with the entity-less event already in front, only a real
@@ -396,6 +402,50 @@ final class SelectionTests: XCTestCase {
 
         XCTAssertEqual(results.first?.text.count, 200)
         XCTAssertEqual(results.first?.eventID, 7)
+    }
+
+    // MARK: - Repeats
+
+    /// One screen, polled every five seconds, used to fill every slot.
+    ///
+    /// A real `search` for `訂正ループ` came back with eight results that were all
+    /// the same window title. Every copy scored the same, so the ranker had no
+    /// reason to prefer one, and the answer was one fact repeated eight times.
+    func testARepeatedWindowTitleDoesNotFillTheSlots() {
+        var events = (0..<6).map { i in
+            event("open source feasibility check", ago: TimeInterval(i) * 5, title: "Mull")
+        }
+        events.append(event("open source licence blockers", ago: 40, title: "Mull"))
+
+        let results = rank(events, query: "open source", limit: 8)
+
+        XCTAssertEqual(results.count, 2, "six copies are one result:\n\(results.map(\.text))")
+        XCTAssertTrue(results.contains { $0.text.contains("licence blockers") },
+                      "collapsing the flood must let the other match through")
+    }
+
+    /// Deduplicating after the cut would return fewer than `limit` results while
+    /// better ones sat just below it. It happens before.
+    func testCollapsingRepeatsDoesNotShrinkTheAnswer() {
+        var events = (0..<5).map { i in
+            event("payment reconciliation report", ago: TimeInterval(i) * 5, title: "PantryApp")
+        }
+        events += (1...3).map { i in
+            event("payment reconciliation blocker \(i)", ago: TimeInterval(100 + i), title: "PantryApp")
+        }
+
+        let results = rank(events, query: "payment", limit: 3)
+        XCTAssertEqual(results.count, 3)
+    }
+
+    /// Two things that overlap by almost everything are still two things. This is
+    /// why `Selection` asks for full containment rather than the partial overlap
+    /// the composer uses on a dictation buffer.
+    func testNearlyIdenticalButDistinctResultsBothSurvive() {
+        let a = event("payment reconciliation step 1", ago: 60, title: "PantryApp")
+        let b = event("payment reconciliation step 2", ago: 120, title: "PantryApp")
+
+        XCTAssertEqual(rank([a, b], query: "payment").count, 2)
     }
 
     // MARK: - limit and ordering

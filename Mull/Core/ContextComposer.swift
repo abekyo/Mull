@@ -83,28 +83,11 @@ struct ContextComposer {
             var seen = Set<String>()
             var doingText: [String] = []    // the raw snippets behind `doing`
 
-            /// Are these two snippets the same utterance, caught mid-flush?
-            ///
-            /// Dictation and a typing buffer both emit the sentence several times
-            /// as it grows, and the exact-prefix key below cannot see it: a real
-            /// paste carried "うーん、今のところ4年フィリピンにいて" beside
-            /// "今のところ4年フィリピンにいてそろそろ国変えてもいいかなって思ってる",
-            /// which differ at character one and say the same thing.
-            ///
-            /// The test is a shared contiguous run, sized against the SHORTER
-            /// string rather than fixed. Two different notes can share a stock
-            /// phrase (`database: database`); what they do not share is most of one
-            /// of them. Requiring 60% coverage is what keeps this from folding two
-            /// genuinely different lines that happen to start alike.
+            // `NearDuplicate` answers this for the selection layer too. It grew
+            // here first and was copied there, which is the shape PITFALLS.md §7
+            // warns about, so it lives in one place now.
             func sameUtterance(_ a: String, _ b: String) -> Bool {
-                let (short, long) = a.count <= b.count ? (a, b) : (b, a)
-                let need = max(12, Int(Double(short.count) * 0.6))
-                guard short.count >= need else { return false }
-                let chars = Array(short)
-                for start in 0...(chars.count - need) {
-                    if long.contains(String(chars[start..<(start + need)])) { return true }
-                }
-                return false
+                NearDuplicate.sameContent(a, b)
             }
             for e in database.fetchEvents(from: Date().addingTimeInterval(-1800), to: Date()).reversed() {
                 guard e.eventType == .clipboard || e.eventType == .screenText,
@@ -150,30 +133,11 @@ struct ContextComposer {
                 }
                 if doing.count >= 6 && researching.count >= 4 { break }
             }
-            // Drop window-title / file-path junk masquerading as a project (full
-            // paths, "NNN notes" counters, truncated titles): better to say nothing
-            // than to name a "project" the AI would wrongly trust.
-            func isJunkProject(_ name: String) -> Bool {
-                if name.contains("/") { return true }
-                if name.contains("…") || name.hasSuffix("...") { return true }
-                if name.range(of: #"\d+\s*notes"#, options: .regularExpression) != nil { return true }
-                // The shared shape gate, so a name this section rejects and one
-                // `Working on:` accepts cannot disagree (PITFALLS.md §7).
-                return !ProjectNames.isPlausible(name)
-            }
-
-            // A project you touched for a minute is not where you left off.
-            //
-            // Without a floor, a stray window title that happened to survive the
-            // shape gate arrives beside five hours of real work carrying the same
-            // "**bold** — duration" formatting, and an agent has no way to tell that
-            // one of them is a rounding error. `1m` and `2m` entries were doing
-            // exactly that in a real paste.
-            let minimumWorth: TimeInterval = 300
-
-            let active = snaps
-                .filter { $0.daysSinceActive < 3 && $0.totalDuration >= minimumWorth && !isJunkProject($0.name) }
-                .prefix(5)
+            // `isWorthReporting` is the shared gate: shape plus a five-minute
+            // floor, asked in one place so this surface and `get_projects` cannot
+            // answer differently (PITFALLS.md §7). Recency stays here, because how
+            // stale is too stale is this surface's own question.
+            let active = snaps.filter { $0.daysSinceActive < 3 && $0.isWorthReporting }.prefix(5)
 
             // MARK: - Assemble
 

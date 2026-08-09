@@ -20,6 +20,7 @@ swiftc -o "$BIN" \
   Mull/Core/ContextBlock.swift \
   Mull/Core/CorrectionCard.swift \
   Mull/Core/CorrectionIndex.swift \
+  Mull/Core/NearDuplicate.swift \
   Mull/Core/Selection.swift \
   Mull/Core/TextScript.swift \
   Mull/Core/Redactor.swift \

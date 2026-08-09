@@ -135,6 +135,34 @@ final class ContextComposerTests: XCTestCase {
         XCTAssertTrue(leaked.isEmpty, "leaked into the paste: \(leaked)")
     }
 
+    // MARK: - The MCP surface answers the same way
+
+    /// `get_projects` and the pasted block are two readers of one question, and
+    /// for a day they disagreed: the block stopped naming a one-minute stray and
+    /// the MCP tool kept serving it, on the surface CLAUDE.md §5 calls the
+    /// product. Both ask `isWorthReporting` now.
+    func testAOneMinuteStrayIsNotAProjectOnEitherSurface() {
+        let stray = ProjectSnapshot(name: "Obsidian Vault", lastActiveDate: Date(),
+                                    lastFile: nil, lastClipboard: nil,
+                                    totalDuration: 120, primaryApp: "Code",
+                                    eventCount: 3, daysSinceActive: 0, sessions: [])
+        let real = ProjectSnapshot(name: "Mull", lastActiveDate: Date(),
+                                   lastFile: nil, lastClipboard: nil,
+                                   totalDuration: 6 * 3600, primaryApp: "Code",
+                                   eventCount: 900, daysSinceActive: 0, sessions: [])
+        XCTAssertFalse(stray.isWorthReporting)
+        XCTAssertTrue(real.isWorthReporting)
+    }
+
+    /// A sentence that reached the project table is still not a project name.
+    func testASentenceIsNotAProjectOnEitherSurface() {
+        let sentence = ProjectSnapshot(name: "基本は日本円だけど米ドルとかペソで貰うこともある",
+                                       lastActiveDate: Date(), lastFile: nil, lastClipboard: nil,
+                                       totalDuration: 3 * 3600, primaryApp: "Code",
+                                       eventCount: 40, daysSinceActive: 0, sessions: [])
+        XCTAssertFalse(sentence.isWorthReporting, "long enough, but not a name")
+    }
+
     // MARK: - Shape
 
     /// A block that says one project name nine times makes a reader look for nine

@@ -104,7 +104,7 @@ Both harnesses run. CI runs the synthetic one on every push.
 
 | | mull | dump everything | recent only | same project only |
 |---|---|---|---|---|
-| Synthetic, 32 cases | **F1 0.919** | 0.624 | 0.648 | 0.659 |
+| Synthetic, 32 cases | **F1 0.964** | 0.624 | 0.648 | 0.659 |
 | Real log, 4 windows / 1,493 events | **F1 0.220** | 0.020 | 0.045 | 0.045 |
 
 You can reproduce the first row: `./eval/run.sh`, same cases, same numbers. **You cannot
@@ -112,15 +112,16 @@ reproduce the second.** That corpus is raw keystrokes and clipboard from one mac
 gitignored, and it will never ship. Treat 0.220 as a report, not as evidence, and produce your
 own with `eval/real/`.
 
-The drop from 0.919 to 0.220 is the interesting part. It is what a real 25-minute window does to
+The drop from the synthetic score to 0.220 is the interesting part. The real-log number
+predates the deduplication added on 2026-08-09 and has not been measured since. It is what a real 25-minute window does to
 a ranker tuned on invented ones. Four failures account for most of it, and they are now cases
 29 to 32 in the synthetic set so CI can see them:
 
 | failure | what happens |
 |---|---|
-| `duplicate-flood` | Window titles are polled every 5 seconds. Six of eight slots went to six identical copies of one title. Nothing deduplicates. |
+| `duplicate-flood` | Window titles are polled every 5 seconds. Six of eight slots went to six identical copies of one title. Repeats now collapse before the cut, so the flood is gone; the case still fails because the other two answers do not contain the query's words and the lexical gate drops them. |
 | `query-echo` | The clipboard holds the question the user just pasted into an agent. It matches its own query perfectly and ranks first, so the agent gets its own question back as context. |
-| `subsumption` | The same note drafted three times, each longer than the last. All three rank, and the complete one came third. |
+| `subsumption` | The same note drafted three times, each longer than the last. All three ranked, and the complete one came third. Fixed on 2026-08-09: a draft contained whole inside a later one is the same draft. |
 | `entity-junk-profile` | `Entity.from` reads the trailing title segment, so a browser tab is filed under the browser profile instead of the project, and loses the anchor. |
 
 None of these show up in an invented corpus. `query-echo` cannot: nobody writes their own query

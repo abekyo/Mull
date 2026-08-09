@@ -138,6 +138,11 @@ final class MCPServer {
         [
             [
                 "name": "get_user_context",
+                "annotations": [
+                    "title": "Read the user's context files",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Get context about who this user is and what they are currently working on. Call this at the start of a conversation or when you need to understand the user's background, projects, and recent activity.",
                 "inputSchema": [
                     "type": "object",
@@ -152,6 +157,11 @@ final class MCPServer {
             ],
             [
                 "name": "whats_active_now",
+                "annotations": [
+                    "title": "See what the user is doing now",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Get what the user is doing RIGHT NOW — active app, current project/entity, and the most recent meaningful actions (notes, copied text, files). Call this FIRST to anchor any further retrieval on the user's present context. Cheap and current.",
                 "inputSchema": [
                     "type": "object",
@@ -160,6 +170,11 @@ final class MCPServer {
             ],
             [
                 "name": "search",
+                "annotations": [
+                    "title": "Search the user's activity",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Find the few most relevant past events for a need — ranked by relevance, NOT a raw dump. Omit 'entity' for cross-project search: results are ranked toward whatever the user has open now, but other projects are still returned — which is what you want for 'how did I solve this before?'. Pass 'entity' only to restrict to one project. If nothing matches your wording, the reply says so before offering anything else.",
                 "inputSchema": [
                     "type": "object",
@@ -174,6 +189,11 @@ final class MCPServer {
             ],
             [
                 "name": "get_projects",
+                "annotations": [
+                    "title": "List the user's projects",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Get all detected projects with status, last active date, resume point (last file + last clipboard), session history, and stall detection. Use this when the user asks 'what was I working on?' or 'where did I leave off on X?'",
                 "inputSchema": [
                     "type": "object",
@@ -187,6 +207,11 @@ final class MCPServer {
             ],
             [
                 "name": "get_knowledge",
+                "annotations": [
+                    "title": "Search recorded decisions",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Search the user's accumulated knowledge — decisions they've made, solutions they've found, alternatives they've rejected. Use this when the user faces a decision similar to one they've made before, or when they ask 'how did I solve this last time?'",
                 "inputSchema": [
                     "type": "object",
@@ -200,6 +225,11 @@ final class MCPServer {
             ],
             [
                 "name": "get_relevant",
+                "annotations": [
+                    "title": "Find activity relevant to a topic",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Given a context string (file name, project name, topic), find relevant knowledge and past activity. Use this proactively when the user is working on something — it may surface decisions or solutions from their past that apply to the current task.",
                 "inputSchema": [
                     "type": "object",
@@ -214,6 +244,11 @@ final class MCPServer {
             ],
             [
                 "name": "search_history",
+                "annotations": [
+                    "title": "Search raw events",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Search the user's activity history by keyword. Returns matching events from recorded keystrokes, clipboard, and window titles.",
                 "inputSchema": [
                     "type": "object",
@@ -232,6 +267,13 @@ final class MCPServer {
             ],
             [
                 "name": "write_note",
+                "annotations": [
+                    "title": "Write a note into the vault",
+                    "readOnlyHint": false,
+                    "destructiveHint": true,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Create or update a markdown note in the user's mull folder.",
                 "inputSchema": [
                     "type": "object",
@@ -250,6 +292,11 @@ final class MCPServer {
             ],
             [
                 "name": "list_files",
+                "annotations": [
+                    "title": "List the vault",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "List all markdown files in the user's mull folder.",
                 "inputSchema": [
                     "type": "object",
@@ -258,6 +305,11 @@ final class MCPServer {
             ],
             [
                 "name": "read_file",
+                "annotations": [
+                    "title": "Read a vault file",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Read a markdown file from the user's mull vault (a project briefing, note, me.md, etc). Use list_files to discover paths. Provenance markers are stripped for clean reading.",
                 "inputSchema": [
                     "type": "object",
@@ -272,6 +324,13 @@ final class MCPServer {
             ],
             [
                 "name": "curate",
+                "annotations": [
+                    "title": "Merge a block into a vault file",
+                    "readOnlyHint": false,
+                    "destructiveHint": false,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Write your contribution back into a mull file SAFELY. Unlike write_note (raw overwrite), curate updates only your own provenance-tagged block (by id) and NEVER clobbers the user's hand edits. Use this for anything mull/agent-generated.",
                 "inputSchema": [
                     "type": "object",
@@ -285,6 +344,11 @@ final class MCPServer {
             ],
             [
                 "name": "get_corrections",
+                "annotations": [
+                    "title": "Read corrections with no rule yet",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Corrections the user made to mull's output that nobody has drawn a rule from yet. Each one is a diff: what mull wrote, what the user kept, and what they were doing at the time. Read them, work out WHY the edit was made, and write the rule back with `curate` (path: the card's path, block_id: 'rule'). That rule then lands in ~/mull/rules.md and is handed to every later session. This is the only place a rule can come from: mull observes facts, and no amount of observation yields 'stop giving me option lists'. That appears only when a human corrects something. Do not invent a rule you cannot point at in the diff; leaving a card unfilled is correct when the reason is not visible.",
                 "inputSchema": [
                     "type": "object",
@@ -295,6 +359,11 @@ final class MCPServer {
             ],
             [
                 "name": "calendar",
+                "annotations": [
+                    "title": "Compare planned and actual",
+                    "readOnlyHint": true,
+                    "openWorldHint": false
+                ],
                 "description": "Planned vs actual, per day: scheduled calendar events (if calendar access is granted) alongside the activity mull actually observed.",
                 "inputSchema": [
                     "type": "object",
@@ -920,7 +989,10 @@ final class MCPServer {
 
     private func toolGetProjects(days: Int) -> String {
         let engine = TimeBlockEngine(database: database)
-        let projects = engine.projectSnapshots(days: days)
+        // The same gate the pasted block uses. Two copies of this question
+        // disagreed for a day, and the one that stayed wrong was this one, which
+        // is the surface an agent actually calls.
+        let projects = engine.projectSnapshots(days: days).filter(\.isWorthReporting)
 
         if projects.isEmpty {
             return "No projects detected in the last \(days) days."

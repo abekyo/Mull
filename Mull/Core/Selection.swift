@@ -195,11 +195,29 @@ struct Selection {
              + 0.03 * c.attributable + 0.06 * c.mode + 0.10 * c.correction, c.result)
         }
 
-        let results = scored
-            .filter { $0.0 > 0 }
-            .sorted { $0.0 > $1.0 }
-            .prefix(limit)
-            .map(\.1)
+        // Deduplicate before taking the top `limit`, not after.
+        //
+        // Window titles are polled every 5 seconds, so one screen produces the
+        // same string dozens of times, and every copy scores the same. A real
+        // search for `訂正ループ` returned eight results that were all one title:
+        // the ranker had no reason to prefer any copy, so it took eight of them
+        // and the answer was one fact repeated. Taking the top 8 and then
+        // deduplicating would have been worse, because it would return fewer
+        // than 8 results while better ones sat just below the cut.
+        var results: [Result] = []
+        var resultText: [String] = []
+        for (_, result) in scored.filter({ $0.0 > 0 }).sorted(by: { $0.0 > $1.0 }) {
+            // `coverage: 1` means the shorter text must appear whole inside the
+            // longer one: identical titles, and a title that is a prefix of a
+            // richer one. Deliberately stricter than the composer, which folds
+            // partial overlaps because it is looking at a dictation buffer. Here
+            // the material is search results, where `payment reconciliation step 1`
+            // and `step 2` overlap by 97% and are two different things.
+            if NearDuplicate.isRepeat(result.text, of: resultText, coverage: 1) { continue }
+            results.append(result)
+            resultText.append(result.text)
+            if results.count >= limit { break }
+        }
 
         return Slice(results: Array(results), substituted: substituting && !results.isEmpty)
     }

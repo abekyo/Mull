@@ -756,6 +756,32 @@ struct ProjectSnapshot: Identifiable {
     let daysSinceActive: Int
     let sessions: [ProjectSession]
 
+    /// Is this worth naming to a reader as a project?
+    ///
+    /// Asked in one place because it was answered in two and they disagreed. On
+    /// 2026-08-09 the pasted block stopped reporting a one-minute stray and a
+    /// sentence about payment currencies, and `get_projects` went on serving both
+    /// over MCP, which is the surface CLAUDE.md §5 calls the product. The paste is
+    /// the fallback for tools that cannot call it.
+    ///
+    /// Two questions, both structural:
+    ///
+    /// - **Is the name a name?** `ProjectNames.isPlausible` plus the shapes only a
+    ///   window title produces: a path, a truncation, a "NNN notes" counter.
+    /// - **Is there enough of it?** A minute is a rounding error arriving in the
+    ///   same bold formatting as five hours of real work, and nothing in the line
+    ///   tells a reader which is which.
+    var isWorthReporting: Bool {
+        guard totalDuration >= Self.minimumReportedDuration else { return false }
+        if name.contains("/") { return false }
+        if name.contains("…") || name.hasSuffix("...") { return false }
+        if name.range(of: #"\d+\s*notes"#, options: .regularExpression) != nil { return false }
+        return ProjectNames.isPlausible(name)
+    }
+
+    /// Five minutes. Below this, mull cannot tell working from passing through.
+    static let minimumReportedDuration: TimeInterval = 300
+
     var totalDurationFormatted: String {
         let minutes = Int(totalDuration / 60)
         if minutes < 1 { return "<1m" }

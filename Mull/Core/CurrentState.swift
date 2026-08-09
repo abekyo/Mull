@@ -74,13 +74,28 @@ struct CurrentState {
     /// window titles), newest-first, deduped. Keystroke fragments and app
     /// switches are excluded as low-salience.
     private static func recentActions(from events: [RecordingEvent], limit: Int = 8) -> [String] {
-        var seen = Set<String>()
         var out: [String] = []
+        var kept: [String] = []
         for event in events.reversed() where event.eventType == .clipboard || event.eventType == .screenText {
             guard let text = meaningfulText(event) else { continue }
-            let key = String(text.prefix(40)).lowercased()
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
+            // What was watched is not what was done.
+            //
+            // This is the anchor: an agent calls `whats_active_now` first and
+            // conditions everything after it on the answer. A YouTube title in
+            // here does not merely waste a slot, it moves the anchor, and the
+            // eight slots are the agent's whole first impression. The composer
+            // learned this on 2026-08-09 and this function did not, so the same
+            // video was filtered out of the pasted block and served by the tool
+            // that the pasted block exists as a fallback for.
+            switch event.resolvedMode {
+            case .consume, .research: continue
+            case .produce, .decide, .think, .communicate: break
+            }
+            // Window titles are polled every 5 seconds and a dictation buffer
+            // flushes as it grows, so the same thing arrives repeatedly in
+            // slightly different lengths. An exact-prefix key saw neither.
+            guard !NearDuplicate.isRepeat(text, of: kept) else { continue }
+            kept.append(text)
             let app = event.appName.map { "[\($0)] " } ?? ""
             out.append(app + String(text.prefix(80)))
             if out.count >= limit { break }
