@@ -26,6 +26,13 @@ final class ReportWriterTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        // The suite runs inside the real app as its test host. A failed
+        // expectation that runs on into `series[0]` or a force-unwrap does not
+        // fail one test — it SIGTRAPs the whole host and takes every remaining
+        // suite down with it (seen live: unattended runs where read-after-write
+        // returned nil crashed the app twice per session). Stop at the first
+        // broken expectation instead.
+        continueAfterFailure = false
         MullDirectory.setup()
         // The test vault is shared by every test in the process. Reports and their
         // hidden sidecars are wiped between cases so one test's approval cannot be
@@ -205,15 +212,14 @@ final class ReportWriterTests: XCTestCase {
         XCTAssertTrue(writer.fidelitySeries().isEmpty)
     }
 
-    func testFidelityNoteIsSilentUntilSomethingIsMeasured() {
+    func testFidelityNoteIsSilentUntilSomethingIsMeasured() throws {
         XCTAssertNil(writer.fidelityNote(for: day))
 
         writer.cacheDraft(.init(text: "I fixed the parser today.", sources: []), for: day)
         XCTAssertTrue(writer.save("I fixed the parser today.", for: day))
 
-        let note = writer.fidelityNote(for: day)
-        XCTAssertNotNil(note)
-        XCTAssertTrue(note!.contains("0%"), "Kept verbatim means nothing was changed")
+        let note = try XCTUnwrap(writer.fidelityNote(for: day))
+        XCTAssertTrue(note.contains("0%"), "Kept verbatim means nothing was changed")
     }
 
     // MARK: - Language stability

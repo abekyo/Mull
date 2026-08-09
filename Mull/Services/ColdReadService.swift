@@ -41,51 +41,87 @@ struct ColdReadService {
         // pasteboard. These don't cross a process boundary, so they can't wedge.
         let snapshot = await MainActor.run { Snapshot.capture() }
 
-        let work = Task.detached(priority: .userInitiated) { () -> ColdReading in
-            var facts = snapshot.appFacts
+        // Everything knowable without crossing a process boundary — what the read
+        // falls back to when the parts that do cross one never come back. It keeps
+        // the clipboard alongside the app list: both came from the cheap pass that
+        // has already finished, so dropping one of them on timeout made the short
+        // reading shorter than it needed to be.
+        let fallback = ColdReading(facts: snapshot.appFacts + [snapshot.clipboardFact].compactMap { $0 },
+                                   runningApps: snapshot.runningApps,
+                                   frontApp: snapshot.frontAppName,
+                                   frontWindow: nil,
+                                   schedule: [],
+                                   calendarAccess: .unknown,
+                                   timedOut: true)
 
-            let windowTitle = Self.frontWindowTitle(snapshot)
-            if let title = windowTitle {
-                facts.append(Self.frontWindowFact(title: title, appName: snapshot.frontAppName))
+        // A syscall already in flight can't be interrupted, so the budget can only
+        // be something the caller *returns* from — never a wait for the slow half
+        // to notice it has been cancelled.
+        return await withCheckedContinuation { (continuation: CheckedContinuation<ColdReading, Never>) in
+            let answer = FirstAnswer(continuation)
+
+            // The blocking half: Accessibility across a process boundary, then
+            // EventKit. Raced, never awaited.
+            Task.detached(priority: .userInitiated) {
+                var facts = snapshot.appFacts
+
+                let windowTitle = Self.frontWindowTitle(snapshot)
+                if let title = windowTitle {
+                    facts.append(Self.frontWindowFact(title: title, appName: snapshot.frontAppName))
+                }
+                if let clipboardFact = snapshot.clipboardFact { facts.append(clipboardFact) }
+
+                let calendar = Self.readCalendar()
+                // A blind spot is worth naming next to things mull *can* see. On its
+                // own it isn't a reading — a screen whose only line is "mull can't
+                // read your calendar" should fall through to the empty state instead.
+                if calendar.access == .granted || !facts.isEmpty {
+                    facts.append(contentsOf: calendar.facts)
+                }
+
+                answer.resume(ColdReading(facts: facts,
+                                          runningApps: snapshot.runningApps,
+                                          frontApp: snapshot.frontAppName,
+                                          frontWindow: windowTitle,
+                                          schedule: calendar.schedule,
+                                          calendarAccess: calendar.access,
+                                          timedOut: false))
             }
-            if let clipboardFact = snapshot.clipboardFact { facts.append(clipboardFact) }
 
-            let calendar = Self.readCalendar()
-            // A blind spot is worth naming next to things mull *can* see. On its own
-            // it isn't a reading — a screen whose only line is "mull can't read your
-            // calendar" should fall through to the empty state instead.
-            if calendar.access == .granted || !facts.isEmpty {
-                facts.append(contentsOf: calendar.facts)
+            // The budget itself. Take what the cheap pass already knows and move on.
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
+                answer.resume(fallback)
             }
+        }
+    }
 
-            return ColdReading(facts: facts,
-                               runningApps: snapshot.runningApps,
-                               frontApp: snapshot.frontAppName,
-                               frontWindow: windowTitle,
-                               schedule: calendar.schedule,
-                               calendarAccess: calendar.access,
-                               timedOut: false)
+    /// Whichever of the two racers above answers first, delivered exactly once.
+    ///
+    /// `withTaskGroup` cannot express this race, which is what it was written as.
+    /// A task group awaits every child on the way out of its scope, so a group
+    /// whose losing child is parked in a blocking Accessibility call returns only
+    /// once that call finishes — budget or no budget. Measured against a wedged
+    /// front app, a 2.5s budget picked the right (short) reading and then handed
+    /// it back five seconds late, which is the single thing the budget exists to
+    /// prevent; the `timedOut` flag was reachable but the deadline was not.
+    ///
+    /// One continuation has no such join. The loser resumes nothing, and the
+    /// abandoned work finishes into this box, which drops it.
+    private final class FirstAnswer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<ColdReading, Never>?
+
+        init(_ continuation: CheckedContinuation<ColdReading, Never>) {
+            self.continuation = continuation
         }
 
-        // A syscall already in flight can't be interrupted, so don't wait on it past
-        // the budget: take what the cheap pass already knows and move on. The
-        // abandoned task finishes into nothing.
-        return await withTaskGroup(of: ColdReading?.self) { group -> ColdReading in
-            group.addTask { await work.value }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            if first == nil { work.cancel() }
-            return first ?? ColdReading(facts: snapshot.appFacts,
-                                        runningApps: snapshot.runningApps,
-                                        frontApp: snapshot.frontAppName,
-                                        frontWindow: nil,
-                                        schedule: [],
-                                        calendarAccess: .unknown,
-                                        timedOut: true)
+        func resume(_ reading: ColdReading) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: reading)
         }
     }
 
@@ -253,14 +289,15 @@ struct ColdReadService {
                                    schedule: [])
         }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
+        // These lines are read by the person, not by an AI, so they follow the
+        // reader's clock. (A bare "HH:mm" formatter would not have anyway — an
+        // unpinned locale rewrites that pattern; see `TimeFormat`.)
         var facts: [String] = []
 
         // The next meeting, as a time on a clock. No nudge, no question.
         if let next = events.first(where: { $0.startDate > Date() }),
            next.startDate.timeIntervalSince(Date()) < 3600 {
-            facts.append("\"\(next.title ?? "A meeting")\" is at \(formatter.string(from: next.startDate)), from your calendar.")
+            facts.append("\"\(next.title ?? "A meeting")\" is at \(TimeFormat.person(next.startDate)), from your calendar.")
         }
 
         // The count, without a verdict on what kind of day that makes.
@@ -268,7 +305,7 @@ struct ColdReadService {
             facts.append("Your calendar has \(events.count) events today.")
         }
 
-        let schedule = events.prefix(3).map { "\(formatter.string(from: $0.startDate)) \($0.title ?? "Meeting")" }
+        let schedule = events.prefix(3).map { "\(TimeFormat.person($0.startDate)) \($0.title ?? "Meeting")" }
         return CalendarReading(access: .granted, facts: facts, schedule: schedule)
     }
 }

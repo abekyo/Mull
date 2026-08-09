@@ -244,17 +244,11 @@ struct TimeBlock: Identifiable {
         return remainingMinutes > 0 ? "\(hours)h \(remainingMinutes)m" : "\(hours)h"
     }
 
-    var startFormatted: String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: start)
-    }
+    /// Shown to a person, so it follows their clock — see `TimeFormat`. The MCP
+    /// tools spell their own times with `TimeFormat.machine`, which stays 24-hour.
+    var startFormatted: String { TimeFormat.person(start) }
 
-    var endFormatted: String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: end)
-    }
+    var endFormatted: String { TimeFormat.person(end) }
 
     init(from segment: EventSegment) {
         self.app = segment.app

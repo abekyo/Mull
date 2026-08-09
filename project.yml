@@ -35,7 +35,7 @@ targets:
         NSMicrophoneUsageDescription: "Mull can optionally record audio for meeting transcription."
         NSCalendarsUsageDescription: "Mull reads your calendar to give AI context about your schedule."
         NSCalendarsFullAccessUsageDescription: "Mull reads your calendar to give AI context about your schedule."
-        NSAppleEventsUsageDescription: "Mull reads browser URLs to understand what pages you are viewing."
+        NSAppleEventsUsageDescription: "Mull asks your browser for the address of the page you are viewing, and Mail for the subject and sender of recent messages. It never reads message bodies."
     entitlements:
       path: Mull/Resources/Mull.entitlements
       properties:
@@ -55,26 +55,44 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
-        # TODO(release): notarization requires the hardened runtime. It is off here
-        # because the CGEvent tap needs the debugger attached during development;
-        # split this into a Release configuration before shipping.
-        ENABLE_HARDENED_RUNTIME: false
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: true
-        # Stable Development signing so macOS TCC grants (Calendar, Accessibility,
-        # Input Monitoring) persist across rebuilds instead of re-prompting.
-        # Select the cert by SHA-1 hash to avoid team-matching ambiguity; local
-        # macOS dev runs need no provisioning profile.
-        #
-        # MULL_CODE_SIGN_IDENTITY is machine-specific — a committed cert hash makes
-        # the project unbuildable for anyone else. Set it in Local.xcconfig
-        # (gitignored, see Local.xcconfig.example) to keep stable TCC grants;
-        # leave it unset and signing falls back to ad-hoc "-", which builds and
-        # runs fine but re-prompts for permissions on each rebuild.
         CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "$(MULL_CODE_SIGN_IDENTITY:default=-)"
+      # Debug and Release sign for opposite purposes, so they are split rather
+      # than sharing one identity.
+      #
+      # Debug: a Development certificate, selected by SHA-1 hash, so macOS TCC
+      # grants (Calendar, Accessibility, Input Monitoring) persist across
+      # rebuilds instead of re-prompting. Hardened runtime is OFF because it
+      # blocks the debugger from attaching, and the CGEvent tap is what you most
+      # need a debugger for.
+      #
+      # MULL_CODE_SIGN_IDENTITY is machine-specific — a committed cert hash makes
+      # the project unbuildable for anyone else. Set it in Local.xcconfig
+      # (gitignored, pulled in by Signing.xcconfig, see Local.xcconfig.example);
+      # leave it unset and signing falls back to ad-hoc "-", which builds and
+      # runs fine but re-prompts for permissions on every rebuild.
+      configs:
+        Debug:
+          ENABLE_HARDENED_RUNTIME: false
+          CODE_SIGN_IDENTITY: "$(MULL_CODE_SIGN_IDENTITY:default=-)"
+        # Release: a Developer ID Application certificate plus the hardened
+        # runtime, because notarization requires BOTH and rejects the build
+        # otherwise. An Apple Development certificate cannot be notarized no
+        # matter what else is set — see scripts/release.sh, which checks this
+        # before spending a build on it.
+        #
+        # The default is still ad-hoc "-", so `xcodebuild -configuration Release`
+        # keeps working on a clone with no certificate; such a build just is not
+        # distributable. release.sh is the thing that refuses to proceed.
+        Release:
+          ENABLE_HARDENED_RUNTIME: true
+          CODE_SIGN_IDENTITY: "$(MULL_DEVELOPER_ID_IDENTITY:default=-)"
+    # Signing.xcconfig is tracked (so `xcodegen generate` works on a fresh clone)
+    # and optionally includes the gitignored Local.xcconfig.
     configFiles:
-      Debug: Local.xcconfig
-      Release: Local.xcconfig
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
 
   MullTests:
     type: bundle.unit-test
@@ -120,3 +138,11 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
         GENERATE_INFOPLIST_FILE: true
+      # This binary is copied into Mull.app/Contents/Helpers, so notarization
+      # inspects it too: an embedded executable without the hardened runtime
+      # fails the whole submission. Mirror the app's Debug/Release split.
+      configs:
+        Debug:
+          ENABLE_HARDENED_RUNTIME: false
+        Release:
+          ENABLE_HARDENED_RUNTIME: true

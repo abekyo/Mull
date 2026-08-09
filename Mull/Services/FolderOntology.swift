@@ -36,7 +36,21 @@ enum FolderOntology {
         /// One plain line for the index header: how this folder fills and what,
         /// if anything, the user should DO. The fool-proofing — every folder
         /// explains itself, so an empty one never reads as "broken / now what?".
-        var guidance: String {
+        var guidance: String { guidance(japanese: UserLanguage.isJapanese) }
+
+        func guidance(japanese: Bool) -> String {
+            if japanese {
+                switch fills {
+                case .automatic:
+                    return "mull が作業を見ながら自動で埋めます — 何もしなくて大丈夫です。"
+                case .nightlyAI:
+                    return "Settings で AI をオンにすると自動で埋まります。自分で書いても構いません。AI なしでも mull は動きます。"
+                case .connectSource(let name):
+                    return "Settings で \(name) を接続すると自動で埋まります。自分で書き足しても構いません。"
+                case .yourNotes:
+                    return "自動では埋まりません — 自由に書く場所です。書いたことは AI が読む文脈になります。"
+                }
+            }
             switch fills {
             case .automatic:
                 return "Fills automatically as mull watches you work — nothing to do."
@@ -50,13 +64,33 @@ enum FolderOntology {
         }
 
         /// Short placeholder shown inside an otherwise-empty section.
-        var emptyHint: String {
+        var emptyHint: String { emptyHint(japanese: UserLanguage.isJapanese) }
+
+        func emptyHint(japanese: Bool) -> String {
+            if japanese {
+                switch fills {
+                case .automatic:            return "_まだ何もありません — 作業すると自動で埋まります。_"
+                case .nightlyAI:            return "_まだ何もありません — Settings で AI をオンにするか、自分で書いてください。_"
+                case .connectSource(let n): return "_まだ何もありません — Settings で \(n) を接続するか、自分で書いてください。_"
+                case .yourNotes:            return "_自由に書いてください。_"
+                }
+            }
             switch fills {
             case .automatic:            return "_Nothing here yet — fills automatically as you work._"
             case .nightlyAI:            return "_Nothing here yet — turn on AI in Settings, or add your own._"
             case .connectSource(let n): return "_Nothing here yet — connect \(n) in Settings, or add your own._"
             case .yourNotes:            return "_Write here freely._"
             }
+        }
+
+        /// Heading + purpose as the reader's language spells them. The folder's
+        /// on-disk name (`03_projects`) and block ids stay English — they are
+        /// structure, stable across locale switches; only display text follows.
+        var displayTitle: String {
+            UserLanguage.isJapanese ? (FolderOntology.jaTitles[number] ?? title) : title
+        }
+        var displayPurpose: String {
+            UserLanguage.isJapanese ? (FolderOntology.jaPurposes[number] ?? purpose) : purpose
         }
     }
 
@@ -125,6 +159,47 @@ enum FolderOntology {
         folders.first { $0.number == number }
     }
 
+    // MARK: - Japanese display text
+    //
+    // Keyed by the stable identifiers (folder number, English section name), so
+    // schema and translation cannot drift silently — a folder or section missing
+    // from these maps falls back to English, and a test asserts completeness.
+
+    static let jaTitles: [String: String] = [
+        "00": "自分", "01": "いま", "02": "仕事", "03": "プロジェクト",
+        "04": "キャリア", "05": "人", "06": "知識", "09": "インボックス",
+    ]
+
+    static let jaPurposes: [String: String] = [
+        "00": "あなたが誰か — プロフィール、スキル、好み、価値観。",
+        "01": "いまの状態 — 直近で取り組んでいること。",
+        "02": "関わっている事業・勤め先。",
+        "03": "進行中のプロジェクト。プロジェクト別の資料もこのフォルダに入ります。",
+        "04": "キャリアの歩み — 役割、実績、目標。",
+        "05": "大事な人間関係と、その背景。",
+        "06": "決めたこと、参照資料、学んだこと。",
+        "09": "取り込んだばかりの未整理データ。ここから各フォルダへ振り分けられます。",
+    ]
+
+    static let jaSections: [String: String] = [
+        "Summary": "概要", "Skills": "スキル", "Preferences": "好み", "Values": "価値観",
+        "Current focus": "いまの焦点", "This week": "今週", "Upcoming": "この先",
+        "Organizations": "組織", "Responsibilities": "担当", "Status": "状況",
+        "Active projects": "進行中", "Recently touched": "最近触れたもの",
+        "Roles": "役割", "Achievements": "実績", "Goals": "目標", "Resume material": "職務経歴の材料",
+        "Key people": "主要な人", "Context per person": "人ごとの背景",
+        "Decisions": "決定", "References": "参照", "Learnings": "学び",
+        "Unsorted": "未整理",
+    ]
+
+    /// Display heading for a schema section. Block ids stay slugs of the ENGLISH
+    /// name (stable across locale switches); only the visible `## heading` follows
+    /// the reader. Shared by seedIndex, FolderFiller and SynthesisEngine so all
+    /// three writers produce the same heading for the same block.
+    static func sectionHeading(_ section: String, japanese: Bool = UserLanguage.isJapanese) -> String {
+        japanese ? (jaSections[section] ?? section) : section
+    }
+
     // MARK: - Scaffold
 
     /// Create the folder structure and seed each folder's `index.md` template.
@@ -154,19 +229,49 @@ enum FolderOntology {
     /// The Curator header for a folder's index.md. Shared by `seedIndex` (the
     /// empty template) and `FolderFiller` (the rule-based fill) so both produce
     /// an identical header and only the section blocks differ.
+    /// Four separate pieces of chrome — purpose, how-it-fills, canonical link and
+    /// a never-overwritten promise — used to open every index above the content,
+    /// and in a folder with nothing in it yet they were four times longer than the
+    /// three `_Nothing here yet_` placeholders they introduced. Three of the four
+    /// are facts ABOUT the file, so they belong in front matter; only the promise,
+    /// which changes how the user may safely act, stays in the body.
     static func indexHeader(for folder: Folder) -> String {
-        var header = "# \(folder.number) \(folder.title)\n\n_\(folder.purpose)_"
-        // Always-visible, so the user knows what this is and what (if anything) to do.
-        header += "\n\n**How this fills** — \(folder.guidance)"
+        let ja = UserLanguage.isJapanese
+        var meta: [(String, String)] = [
+            (ja ? "内容" : "purpose", folder.displayPurpose),
+            (ja ? "埋まり方" : "fills", folder.guidance),
+        ]
         if let canonical = folder.canonical {
-            header += "\n\nCanonical file: [../\(canonical)](../\(canonical))"
+            meta.append((ja ? "元ファイル" : "canonical", "../\(canonical)"))
         }
-        header += "\n\n> mull keeps its own blocks below up to date. Edit anything else freely — it won't be overwritten."
-        return header
+        return MarkdownDoc.header(
+            title: "\(folder.number) \(folder.displayTitle)",
+            meta: meta,
+            note: ja
+                ? "mull が自動更新するのは、mull 自身が書いたブロックだけです。それ以外はどこを編集しても上書きされません。"
+                : "mull keeps its own blocks below up to date. Edit anything else freely — it won't be overwritten.")
     }
 
+    /// Seed a folder's index with its section skeleton — but only on first
+    /// creation.
+    ///
+    /// The skeleton exists so a brand-new vault is shaped and self-explaining
+    /// rather than a bare header. Re-applying it on every launch would fight the
+    /// fillers, which own `section:` blocks and (correctly) omit the ones they
+    /// have nothing for: scaffold would re-add the placeholder at startup and the
+    /// filler would drop it five minutes later, forever.
     private static func seedIndex(_ folder: Folder) {
         let header = indexHeader(for: folder)
+
+        // An existing index gets its header refreshed and nothing else — the
+        // fillers and the user own the blocks by then. No agent candidates and no
+        // managed prefixes means `merge` carries every existing block through
+        // untouched, which is exactly the intent.
+        guard !MullDirectory.exists(folder.indexPath) else {
+            _ = Curator.curate(relativePath: folder.indexPath, header: header,
+                               pinnedContent: nil, agentBlocks: [])
+            return
+        }
 
         // Each empty section explains itself (folder.emptyHint) instead of the old
         // jargon "(awaiting synthesis)" — a fresh, empty vault is never confusing.
@@ -175,7 +280,7 @@ enum FolderOntology {
             ContextBlock(
                 id: "section:\(ContextBlockFile.slug(section))",
                 source: .agent,
-                content: "## \(section)\n\n\(placeholder)",
+                content: "## \(sectionHeading(section))\n\n\(placeholder)",
                 agentHash: nil
             )
         }

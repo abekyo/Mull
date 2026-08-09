@@ -13,17 +13,17 @@ final class SearchQueryTests: XCTestCase {
     // MARK: - CJK detection
 
     func testDetectsJapaneseScripts() {
-        XCTAssertTrue(DatabaseService.containsCJK("会議"))          // kanji
-        XCTAssertTrue(DatabaseService.containsCJK("ひらがな"))       // hiragana
-        XCTAssertTrue(DatabaseService.containsCJK("カタカナ"))       // katakana
-        XCTAssertTrue(DatabaseService.containsCJK("今日のmeeting"))  // mixed
+        XCTAssertTrue(TextScript.containsCJK("会議"))          // kanji
+        XCTAssertTrue(TextScript.containsCJK("ひらがな"))       // hiragana
+        XCTAssertTrue(TextScript.containsCJK("カタカナ"))       // katakana
+        XCTAssertTrue(TextScript.containsCJK("今日のmeeting"))  // mixed
     }
 
     func testDoesNotFlagLatinOrPunctuation() {
-        XCTAssertFalse(DatabaseService.containsCJK("meeting notes"))
-        XCTAssertFalse(DatabaseService.containsCJK("re-render main()"))
-        XCTAssertFalse(DatabaseService.containsCJK(""))
-        XCTAssertFalse(DatabaseService.containsCJK("123 — ok"))
+        XCTAssertFalse(TextScript.containsCJK("meeting notes"))
+        XCTAssertFalse(TextScript.containsCJK("re-render main()"))
+        XCTAssertFalse(TextScript.containsCJK(""))
+        XCTAssertFalse(TextScript.containsCJK("123 — ok"))
     }
 
     // MARK: - FTS expression building

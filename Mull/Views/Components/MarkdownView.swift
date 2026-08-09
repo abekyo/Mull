@@ -27,16 +27,51 @@ struct MarkdownView: View {
     /// (Crane: 1行目=タイトル); false where the text is a paragraph that happens to lead a
     /// document — e.g. a chat reply, whose first line should read as body, not a headline.
     var titleFirstLine: Bool = true
+    /// Vault-relative path of the document being rendered, so a relative link
+    /// (`memory/x.md`) can be resolved against the folder it was written in.
+    var sourcePath: String? = nil
+    /// Called with a vault-relative path when the reader clicks a link that points
+    /// inside `~/mull`. Surfaces that can navigate (the Files tab) open the file;
+    /// where this is nil the file is revealed in Finder instead, because doing
+    /// nothing is what this whole change is about.
+    var onOpenVaultFile: ((String) -> Void)? = nil
 
     /// Parsed once per instance rather than per `body` call. The whole point of the
     /// lazy stack below is that a long file doesn't build every line up front; re-walking
     /// the text on each layout pass would hand that saving straight back.
     private let blocks: [MarkdownBlock]
 
-    init(_ text: String, titleFirstLine: Bool = true) {
+    init(_ text: String, titleFirstLine: Bool = true,
+         sourcePath: String? = nil, onOpenVaultFile: ((String) -> Void)? = nil) {
         self.text = text
         self.titleFirstLine = titleFirstLine
+        self.sourcePath = sourcePath
+        self.onOpenVaultFile = onOpenVaultFile
         self.blocks = MarkdownBlock.parse(text, titleFirstLine: titleFirstLine)
+    }
+
+    /// Links were styled here but never wired to anything, so `openURL` got the
+    /// default behaviour: hand the URL to the system. mull's own links are
+    /// vault-relative paths with no scheme, which the system cannot open, so
+    /// clicking one did nothing and said nothing — including in `MEMORY.md`,
+    /// which is nothing but links.
+    private func open(_ url: URL) -> OpenURLAction.Result {
+        // `relativeString` rather than `absoluteString`: a schemeless link stays
+        // relative, and absoluteString would resolve it against the app's own
+        // working directory.
+        switch MarkdownDoc.linkTarget(url.relativeString, from: sourcePath) {
+        case .external(let target):
+            return .systemAction(target)
+        case .vaultFile(let path):
+            if let onOpenVaultFile {
+                onOpenVaultFile(path)
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([MullDirectory.url(for: path)])
+            }
+            return .handled
+        case .unresolved:
+            return .discarded
+        }
     }
 
     var body: some View {
@@ -50,6 +85,7 @@ struct MarkdownView: View {
                 row(block)
             }
         }
+        .environment(\.openURL, OpenURLAction { open($0) })
     }
 
     // MARK: - Blocks
@@ -59,6 +95,20 @@ struct MarkdownView: View {
         switch block.kind {
         case .blank:
             Color.clear.frame(height: DS.readLineSpacing + DS.xs)        // paragraph breathing
+
+        case .frontMatter(let pairs):
+            // Small, dim, above the title — present for the reader who wants to
+            // know how fresh the file is, and out of the way of the one who doesn't.
+            // These lines used to be the document's opening paragraph.
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
+                    (Text(pair.key.uppercased() + "  ").font(DS.labelFont)
+                        + Text(pair.value).font(DS.captionFont))
+                        .foregroundStyle(DS.inkFaint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.bottom, DS.sm)
 
         case .title(let text):
             inline(text)
@@ -260,6 +310,7 @@ struct MarkdownBlock: Identifiable {
 
     enum Kind {
         case blank
+        case frontMatter(pairs: [(key: String, value: String)])
         case title(String)
         case heading(level: Int, text: String)
         case rule
@@ -284,6 +335,16 @@ struct MarkdownBlock: Identifiable {
 
         func emit(_ kind: Kind) {
             blocks.append(MarkdownBlock(id: blocks.count, kind: kind))
+        }
+
+        // Front matter, if the document opens with it. Consumed before anything
+        // else so its `---` is not mistaken for a horizontal rule and its `key:
+        // value` lines are not shown as prose — which is what mull's own preview
+        // did to every generated file the moment the metadata moved up here.
+        // The title offer survives: the H1 is still the first *content* line.
+        if let matter = frontMatter(lines) {
+            emit(.frontMatter(pairs: matter.pairs))
+            i = matter.end
         }
 
         while i < lines.count {
@@ -360,6 +421,32 @@ struct MarkdownBlock: Identifiable {
     }
 
     // MARK: Line classifiers
+
+    /// A leading YAML front-matter block: `---`, `key: "value"` lines, `---`.
+    /// Only at the very top — a `---` anywhere else is a horizontal rule.
+    /// Returns the parsed pairs and the index of the first line after it.
+    static func frontMatter(_ lines: [String]) -> (pairs: [(key: String, value: String)], end: Int)? {
+        var start = 0
+        while start < lines.count, lines[start].trimmingCharacters(in: .whitespaces).isEmpty { start += 1 }
+        guard start < lines.count,
+              lines[start].trimmingCharacters(in: .whitespaces) == MarkdownDoc.fence,
+              let close = (start + 1..<lines.count).first(where: {
+                  lines[$0].trimmingCharacters(in: .whitespaces) == MarkdownDoc.fence
+              })
+        else { return nil }
+
+        let pairs: [(key: String, value: String)] = lines[(start + 1)..<close].compactMap { line in
+            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return nil }
+            var value = parts[1].trimmingCharacters(in: .whitespaces)
+            if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
+                value = String(value.dropFirst().dropLast())
+            }
+            return (key: parts[0].trimmingCharacters(in: .whitespaces),
+                    value: value.replacingOccurrences(of: "\\\"", with: "\""))
+        }
+        return (pairs, close + 1)
+    }
 
     /// Both fence spellings, and either one closes either one — matching the editor's
     /// fence scan, which is prefix-based for the same reason: a mismatched pair in a

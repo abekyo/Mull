@@ -17,6 +17,27 @@ enum Mode: String, Codable, CaseIterable {
     case research       // purposeful consume — gathering toward a goal
     case communicate    // message, email, post, meeting
 
+    /// How much this engagement counts as **an act of yours** rather than ambient
+    /// input. Feeds `Selection.rank` as a small ordering term.
+    ///
+    /// MAP-ARCHITECTURE calls MODE "一番効く" and says it is used for
+    /// 「重み付け・選別・配置」, but until 2026-08-09 nothing in the selection path
+    /// read it — the axis was computed, stored, and ignored. This is the weight
+    /// that connects it.
+    ///
+    /// It orders; it never filters. Law 5 forbids destructive lenses, so a
+    /// `consume` event is ranked lower, never dropped.
+    var weight: Double {
+        switch self {
+        case .decide:      return 1.00   // a commitment — the scarcest signal
+        case .produce:     return 0.80   // you authored it
+        case .think:       return 0.60   // your reasoning, not yet a commitment
+        case .research:    return 0.50   // consumption with intent behind it
+        case .communicate: return 0.40   // authored, but for someone else
+        case .consume:     return 0.20   // input you received
+        }
+    }
+
     /// Classify one captured signal from app + event kind + text shape, plus the
     /// content kind when known. Co-occurrence lifts a bare `consume` to `research`
     /// (e.g. a how-to video watched while working), so consumption isn't dropped —
@@ -39,7 +60,9 @@ enum Mode: String, Codable, CaseIterable {
             return looksLikeResearch(title: title, text: t.lowercased()) ? .research : .consume
         }
 
-        if eventType == .clipboard || eventType == .keystroke, looksLikeDecision(t) {
+        // Vocabulary lives in `Signal` — the content axis and this axis must agree
+        // on what a decision is, and two copies would drift (HARNESS.md 原理4).
+        if eventType == .clipboard || eventType == .keystroke, Signal.looksLikeDecision(t) {
             return .decide
         }
         if looksLikeThinking(t) { return .think }
@@ -75,13 +98,6 @@ enum Mode: String, Codable, CaseIterable {
                        "stack overflow", "github", "search", "comparison",
                        "やり方", "とは", "解説", "比較", "手法", "戦略"]
         return needles.contains { title.contains($0) || text.contains($0) }
-    }
-    private static func looksLikeDecision(_ t: String) -> Bool {
-        let lower = t.lowercased()
-        let en = ["decided", "let's go with", "we'll use", "going with",
-                  "rejected", "instead of"]
-        let ja = ["の方がいい", "にする", "やめる", "採用", "却下", "方針"]
-        return en.contains { lower.contains($0) } || ja.contains { t.contains($0) }
     }
     private static func looksLikeThinking(_ t: String) -> Bool {
         // Long, sentence-like prose (often dictation) rather than a title/snippet.

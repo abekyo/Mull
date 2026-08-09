@@ -22,12 +22,41 @@ struct ContextBlock {
     /// Hash of `content` as the agent last wrote it. If the on-disk content no longer
     /// matches this, a human edited the block → it gets promoted to `.human`.
     var agentHash: String?
+    /// When mull last wrote this block. Nil for human/pinned blocks (mull did not
+    /// write them, so it has no claim about their age) and for agent blocks
+    /// written before the stamp existed.
+    ///
+    /// It exists because a file can hold blocks on very different clocks: the 60s
+    /// pass rewrites its own every minute, while the `nightly:` blocks are only
+    /// touched when the nightly consolidation runs — and that pass needs an LLM
+    /// provider, so with the LLM off it may never run again. Without an age, a
+    /// block that stopped being maintained is indistinguishable from a current
+    /// one, and the shipped vault showed the consequence: now.md and full.md were
+    /// still presenting a two-month-old consolidation, in a markdown style three
+    /// releases out of date, under the heading "From last night's consolidation".
+    var writtenAt: Date?
 
     /// Deterministic content hash (FNV-1a, stable across runs — unlike Swift's Hasher).
     static func hash(_ s: String) -> String {
         var h: UInt64 = 0xcbf29ce484222325
         for byte in s.utf8 { h = (h ^ UInt64(byte)) &* 0x100000001b3 }
         return String(h, radix: 16)
+    }
+
+    /// Content as it will exist after a serialize→parse round trip.
+    ///
+    /// `parse` trims each block's outer whitespace; `serialize` used to write
+    /// whatever the caller handed it. So a block whose content ended in a space or
+    /// a newline — routine for text assembled from a clipboard entry — came back
+    /// different from what was hashed, `merge` read that difference as a human
+    /// edit, and promoted mull's own block to `.human`. Since mull never rewrites
+    /// a human block, it froze permanently: the OneTab dump in the shipped
+    /// proactive.md was mull's own output, held in place by its own protection.
+    ///
+    /// Normalising before hashing makes the round trip a fixed point, so the only
+    /// thing that can trip the human-edit check is an actual human edit.
+    static func normalized(_ content: String) -> String {
+        content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -52,12 +81,14 @@ enum ContextBlockFile {
         var curID: String?
         var curSource: BlockSource = .agent
         var curHash: String?
+        var curWrittenAt: Date?
         var buffer: [String] = []
 
         func flush() {
             guard let id = curID else { return }
-            let content = buffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            blocks.append(ContextBlock(id: id, source: curSource, content: content, agentHash: curHash))
+            let content = ContextBlock.normalized(buffer.joined(separator: "\n"))
+            blocks.append(ContextBlock(id: id, source: curSource, content: content,
+                                       agentHash: curHash, writtenAt: curWrittenAt))
             buffer = []
         }
 
@@ -69,6 +100,7 @@ enum ContextBlockFile {
                 curID = attrs["id"] ?? "unknown"
                 curSource = BlockSource(rawValue: attrs["src"] ?? "agent") ?? .agent
                 curHash = attrs["hash"]
+                curWrittenAt = attrs["ts"].flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
             } else if !sawBlock {
                 headerLines.append(line)
             } else {
@@ -105,12 +137,22 @@ enum ContextBlockFile {
             .joined(separator: "\n")
     }
 
+    /// Blocks are separated by a BLANK line, not just a newline.
+    ///
+    /// With the markers present the file reads fine either way — a marker line is
+    /// its own separator. But every surface that shows this text to a human or an
+    /// AI runs `stripMarkers` first (the daily snapshot, full.md's embed, the
+    /// Files tab, the AI clipboard, the MCP context tools), and that deletes the
+    /// only thing keeping the blocks apart. The last bullet of one block then sat
+    /// directly against the next block's `##` heading, which is how the shipped
+    /// `daily/2026-08-09.md` ran "Key references" straight into "From last night's
+    /// consolidation". The blank line is what survives the strip.
+    ///
+    /// `parse` trims each block's outer whitespace, so the extra newline does not
+    /// come back as content on the round trip.
     static func serialize(header: String, blocks: [ContextBlock]) -> String {
-        var out: [String] = []
-        if !header.isEmpty {
-            out.append(header)
-            out.append("")
-        }
+        var chunks: [String] = []
+        if !header.isEmpty { chunks.append(header) }
         for b in blocks {
             // Drop vacuous agent blocks, but KEEP an emptied human/pinned block as
             // a tombstone marker. If the user clears a block's body, that empty
@@ -119,11 +161,13 @@ enum ContextBlockFile {
             if b.content.isEmpty && b.source == .agent { continue }
             var marker = "\(markerPrefix) id=\(b.id) src=\(b.source.rawValue)"
             if b.source == .agent, let h = b.agentHash { marker += " hash=\(h)" }
+            if b.source == .agent, let ts = b.writtenAt {
+                marker += " ts=\(Int(ts.timeIntervalSince1970))"
+            }
             marker += " -->"
-            out.append(marker)
-            if !b.content.isEmpty { out.append(b.content) }
+            chunks.append(b.content.isEmpty ? marker : marker + "\n" + b.content)
         }
-        return out.joined(separator: "\n")
+        return chunks.joined(separator: "\n\n")
     }
 
     /// Slugify into a marker-safe id fragment (no spaces; letters/digits kept, incl. CJK).

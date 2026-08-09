@@ -28,7 +28,7 @@ final class AnalyticsEngine {
         let textEvents = events.filter { $0.eventType == .keystroke || $0.eventType == .clipboard }
 
         var wordCounts: [String: Int] = [:]
-        let stopWords = Self.stopWords
+        let stopWords = Self.allStopWords
 
         for event in textEvents {
             guard let text = event.textContent else { continue }
@@ -37,7 +37,7 @@ final class AnalyticsEngine {
             // recording-gate filter existed).
             if TestInput.isLikelyTestInput(text) { continue }
             // Skip noise sources
-            if text.contains("auto-updated") || text.contains("mull is recording") { continue }
+            if MarkdownDoc.isGeneratedByMull(text) { continue }
             if text.hasPrefix("/Users/") || text.hasPrefix("Screenshot ") { continue }
             if text.contains("Conditional downcast") || text.contains("Validation failed") { continue }
             if text.hasPrefix("#") && text.contains("0x") { continue }
@@ -47,9 +47,21 @@ final class AnalyticsEngine {
             // Skip HTML/structured data noise
             if text.contains("インデックス登録") || text.contains("クロール") { continue }
             if text.contains("noindex") || text.contains("canonical") { continue }
-            // Skip short romaji fragments from keystroke events
-            if event.eventType == .keystroke && text.count < 5 &&
-               !text.unicodeScalars.contains(where: { $0.value > 127 }) { continue }
+            // Skip un-converted romaji from keystroke events.
+            //
+            // A keystroke buffer is what the fingers did, not what was written: on
+            // a Japanese IME it is the pre-conversion romaji, and mull captures it
+            // before the space bar turns it into kana. The old rule only caught
+            // fragments under 5 characters, so `deknanngaete`, `karahodotooi` and
+            // `tukurenaidarouk` sailed through and were published as the user's
+            // "focus topics" — the same reason `CurrentState` and `ProactiveLoop`
+            // exclude keystroke events from anything a person reads.
+            //
+            // The discriminator is shape, not length: an IME buffer is a single
+            // unbroken latin run. Real typed English has spaces, and confirmed
+            // Japanese has kana or kanji, so both survive.
+            if event.eventType == .keystroke,
+               !text.contains(" "), !TextScript.containsCJK(text) { continue }
             // Skip long unbroken strings (Japanese clipboard text with no spaces = 1 giant "word")
             if !text.contains(" ") && text.count > 20 { continue }
             let words = tokenize(text)
@@ -87,7 +99,7 @@ final class AnalyticsEngine {
             guard let text = event.textContent else { continue }
             guard let app = event.appName, !Self.isNoiseApp(app) else { continue }
             if TestInput.isLikelyTestInput(text) { continue }
-            if text.contains("auto-updated") || text.hasPrefix("/Users/") { continue }
+            if MarkdownDoc.isGeneratedByMull(text) || text.hasPrefix("/Users/") { continue }
             if text.contains("http://") || text.contains("https://") { continue }
             if text.contains(".org/") || text.contains(".com/") || text.contains(".net/") { continue }
             if text.hasPrefix("Screenshot ") || text.contains("Validation failed") { continue }
@@ -312,41 +324,48 @@ final class AnalyticsEngine {
 
     /// Generate a rule-based analytics summary that can be appended to me.md/now.md.
     /// No LLM needed. Pure data.
+    /// Behavioral patterns as a markdown list.
+    ///
+    /// Bullets, not the bare `Label: value` lines this used to emit. Six of those
+    /// stacked on consecutive lines are ONE paragraph to markdown — the newlines
+    /// between them are soft breaks — so what read as a table in the source
+    /// rendered as a single run-on sentence everywhere the file was displayed.
+    /// The caller supplies the heading; the old self-titling first line put
+    /// "Behavioral patterns (auto-detected, last 7 days):" directly beneath
+    /// whatever heading had just introduced it.
     func generatePatternSummary(days: Int = 7) -> String {
         var lines: [String] = []
-        lines.append("Behavioral patterns (auto-detected, last \(days) days):")
-        lines.append("")
 
         // Top keywords — only show if meaningful results exist
         let keywords = topKeywords(days: days, limit: 15)
             .filter { !$0.word.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if !keywords.isEmpty {
-            lines.append("Focus topics: \(keywords.prefix(8).map { "\($0.word)(\($0.count))" }.joined(separator: ", "))")
+            lines.append("- **Focus topics** — \(keywords.prefix(8).map { "\($0.word) (\($0.count))" }.joined(separator: ", "))")
         }
 
         // Top phrases — only show if meaningful results exist
         let phrases = topPhrases(days: days, limit: 5)
             .filter { !$0.word.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if !phrases.isEmpty {
-            lines.append("Recurring themes: \(phrases.prefix(3).map { "\"\($0.word)\"(\($0.count))" }.joined(separator: ", "))")
+            lines.append("- **Recurring themes** — \(phrases.prefix(3).map { "\"\($0.word)\" (\($0.count))" }.joined(separator: ", "))")
         }
 
         // App usage
         let apps = appUsage(days: days)
         if !apps.isEmpty {
-            let topApps = apps.prefix(5).map { "\($0.appName)(\(String(format: "%.0f", $0.percentage))%)" }
-            lines.append("Top apps: \(topApps.joined(separator: ", "))")
+            let topApps = apps.prefix(5).map { "\($0.appName) (\(String(format: "%.0f", $0.percentage))%)" }
+            lines.append("- **Top apps** — \(topApps.joined(separator: ", "))")
         }
 
         // Peak hours
         let peaks = peakHours(days: days)
         if !peaks.isEmpty {
-            lines.append("Peak hours: \(peaks.map { "\($0):00" }.joined(separator: ", "))")
+            lines.append("- **Peak hours** — \(peaks.map { "\($0):00" }.joined(separator: ", "))")
         }
 
         // Language mix
         let lang = languageMix(days: days)
-        lines.append("Language mix: Japanese \(String(format: "%.0f", lang.japanesePercent))%, English \(String(format: "%.0f", lang.englishPercent))%, Code \(String(format: "%.0f", lang.codePercent))%")
+        lines.append("- **Language mix** — Japanese \(String(format: "%.0f", lang.japanesePercent))%, English \(String(format: "%.0f", lang.englishPercent))%, Code \(String(format: "%.0f", lang.codePercent))%")
 
         // Weekday pattern — only report once enough weekdays have data, so a
         // not-yet-seen day isn't misreported as the "quietest."
@@ -355,7 +374,7 @@ final class AnalyticsEngine {
         let busiestDay = weekdays.max(by: { $0.eventCount < $1.eventCount })
         let quietestDay = weekdays.min(by: { $0.eventCount < $1.eventCount })
         if daysWithData >= 4, let busiest = busiestDay, let quietest = quietestDay, busiest.name != quietest.name {
-            lines.append("Busiest day: \(busiest.name), Quietest: \(quietest.name)")
+            lines.append("- **Busiest day** — \(busiest.name) · **quietest** — \(quietest.name)")
         }
 
         return lines.joined(separator: "\n")
@@ -425,7 +444,7 @@ final class AnalyticsEngine {
         "png", "jpg", "jpeg", "gif", "svg", "pdf", "md", "txt",
         "swift", "ts", "tsx", "js", "json", "html", "css",
         "screenshot", "img", "image", "file", "folder",
-        "users", "stanford", "downloads", "documents", "library",
+        "users", "downloads", "documents", "library",
         "developer", "xcode", "deriveddata", "build", "products",
         "debug", "release", "contents", "macos", "resources",
         "about", "auto", "updated",
@@ -446,6 +465,23 @@ final class AnalyticsEngine {
         "お世話になっております", "お世話になります", "ご興味をお持ちいただけましたら",
         "ご連絡", "ご案内", "拝啓", "敬具", "各位", "ご質問", "その他",
     ]
+
+    /// Path noise that is machine-specific rather than universal.
+    ///
+    /// The account name appears in every `/Users/<name>/…` title and every
+    /// derived-data path, so it out-ranks real topics. It used to be hard-coded
+    /// as one developer's login name, which meant this filter worked on exactly
+    /// one Mac and leaked that name into the source; read it from the running
+    /// account instead.
+    private static let accountWords: Set<String> = {
+        let home = FileManager.default.homeDirectoryForCurrentUser.lastPathComponent
+        return Set([NSUserName(), home]
+            .map { $0.lowercased() }
+            .filter { $0.count > 2 })
+    }()
+
+    /// What `analyze` actually filters against.
+    private static let allStopWords: Set<String> = stopWords.union(accountWords)
 }
 
 // MARK: - Data Types

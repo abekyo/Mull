@@ -108,6 +108,7 @@ final class MullEngine {
 
             // Phase 3: Consolidate — try LLM first, fall back to rule-based
             let summary: ConsolidatedSummary
+            var llmFailure: String?
             do {
                 summary = try await phase3Consolidate(
                     rawData: rawData,
@@ -117,6 +118,7 @@ final class MullEngine {
                 // LLM failed (no API key, Ollama not running, etc.)
                 // Fall back to rule-based summary — still useful, no LLM needed
                 print("[mull] LLM failed: \(error.localizedDescription). Using rule-based summary.")
+                llmFailure = error.localizedDescription
                 summary = phase3RuleBasedFallback(rawData: rawData)
             }
 
@@ -127,7 +129,14 @@ final class MullEngine {
             try phase4PruneAndIndex(summary: summary)
 
             let duration = Date().timeIntervalSince(startTime)
-            let provider = UserDefaults.standard.string(forKey: "llmProvider") ?? "off"
+            // What actually wrote this summary, not what was configured to. The
+            // setting was stamped even when the model never answered, so a row
+            // produced by the rule-based fallback claimed to be Claude's work —
+            // and the Profile tab reads this field to tell the user how their
+            // record was made.
+            let provider = llmFailure == nil
+                ? (UserDefaults.standard.string(forKey: "llmProvider") ?? "off")
+                : "rule-based"
 
             let dailySummary = DailySummary(
                 // Stamp the day the summary is ABOUT, not the day it ran. Phase 2
@@ -733,7 +742,7 @@ final class MullEngine {
     private func generateMeFile() throws {
         let memories = database.fetchAllMemories()
         let recentSummaries = database.fetchRecentSummaries(limit: 7)
-        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
+        let timestamp = Curator.timestamp()
 
         try fileManager.createDirectory(at: mullOutputDir, withIntermediateDirectories: true)
 
@@ -775,10 +784,14 @@ final class MullEngine {
                 source: .agent, content: "- \(mem.description)", agentHash: nil))
         }
 
-        let header = "About the user (auto-updated: \(timestamp)).\nPinned/edited blocks are authoritative; agent blocks are rule-based and may be inaccurate — correct them in place or in me.pinned.md."
+        // The header is a whole-file property and both passes write it, so it comes
+        // from Curator — the two used to disagree (this one said "About the user
+        // (auto-updated…)", the 60s pass said the same thing in three more lines),
+        // which meant each rewrote the other's header on every tick.
+        //
         // Nightly pass owns memory/preference blocks (NOT fact: — those belong to
         // the 60s pass), so it prunes only stale mem:/pref: and never wipes facts.
-        Curator.curate(relativePath: "me.md", header: header,
+        Curator.curate(relativePath: "me.md", header: Curator.meHeader(timestamp: timestamp),
                        pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks,
                        managedPrefixes: ["mem:", "pref:"])
     }
@@ -790,52 +803,46 @@ final class MullEngine {
     /// `String.write(to:)` this used to do was clobbered within a minute, so the
     /// nightly LLM output never survived long enough for anyone to read it.
     private func generateLayerB(memories: [MemoryEntry], summaries: [DailySummary], timestamp: String) throws {
-        var lines: [String] = []
-        lines.append("## From last night's consolidation")
-        lines.append("")
-
-        // Active projects
+        // Everything this pass writes belongs UNDER "From last night's
+        // consolidation", so it is `###`. It used to be `##` — the same level as
+        // the heading it was supposedly inside — which made the whole nightly
+        // block read as nested while being flat, and put a second "Projects"
+        // section beside the 60s pass's own.
         let projects = memories.filter { $0.memoryType == .project }
-        if !projects.isEmpty {
-            lines.append("## Projects")
-            for p in projects {
-                lines.append("- **\(p.name)**: \(p.description)")
-            }
-            lines.append("")
-        }
-
-        // This week's activity — 1 line per day
-        let weekSummaries = summaries.prefix(7)
-        if !weekSummaries.isEmpty {
-            lines.append("## This Week")
-            for s in weekSummaries {
-                lines.append("- \(s.dateShort): \(s.preview)")
-            }
-            lines.append("")
-        }
-
-        // Key references
         let refs = memories.filter { $0.memoryType == .reference }
-        if !refs.isEmpty {
-            lines.append("## References")
-            for r in refs.prefix(5) {
-                lines.append("- \(r.name): \(r.description)")
-            }
-            lines.append("")
-        }
 
-        // Behavioral patterns (rule-based, no LLM)
-        let patterns = AnalyticsEngine(database: database).generatePatternSummary(days: 7)
-        if !patterns.isEmpty {
-            lines.append(patterns)
-        }
+        // "This week" means this week. A summary from two months ago listed here
+        // is the same misreport `splitByRecency` exists to prevent, and this pass
+        // is the one that would produce it: it runs, finds the newest rows in the
+        // table, and has no reason of its own to notice they are old.
+        let thisWeek = summaries.splitByRecency().recent
+
+        // The keyword/app/peak-hour digest is deliberately absent.
+        //
+        // The 60s pass cut it from now.md as vague, analytics-grade pre-digestion
+        // that does not change an AI's next answer (DIRECTION §4) — and then this
+        // pass put it back into the same file, which is how now.md ended up
+        // announcing `Focus topics: deknanngaete(1), karahodotooi(1)`: romaji IME
+        // buffers presented to every assistant as what the user was thinking
+        // about. It belongs in the Insights UI, where a human reads it as a
+        // measurement and can see how it was counted.
+        let body = MarkdownDoc.join([
+            MarkdownDoc.section("Projects", level: 3, items: projects.map {
+                "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))"
+            }),
+            MarkdownDoc.section("This week", level: 3, items: thisWeek.prefix(7).map {
+                "- **\($0.dateShort)** — \(MarkdownDoc.inline($0.preview))"
+            }),
+            MarkdownDoc.section("References", level: 3, items: refs.prefix(5).map {
+                "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))"
+            }),
+        ])
 
         Curator.curate(relativePath: "now.md", header: Curator.nowHeader(timestamp: timestamp),
                        pinnedContent: nil,
                        agentBlocks: [ContextBlock(
                            id: "nightly:now", source: .agent,
-                           content: lines.joined(separator: "\n")
-                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           content: MarkdownDoc.section("From last night's consolidation", body) ?? "",
                            agentHash: nil)],
                        managedPrefixes: ["nightly:"])
     }
@@ -845,90 +852,68 @@ final class MullEngine {
     /// Same story as layer B: curated under `nightly:`, disjoint from the 60s pass's
     /// `full:` block, so the two coexist instead of overwriting each other.
     private func generateLayerC(memories: [MemoryEntry], summaries: [DailySummary], timestamp: String) throws {
-        var lines: [String] = []
-        lines.append("## From last night's consolidation")
-        lines.append("")
+        // me.md and now.md are NOT embedded here.
+        //
+        // They used to be, and the 60s pass embeds them too (LiveContextGenerator's
+        // `full:live`), so full.md carried each of them twice. Worse, now.md
+        // contains this pass's own `nightly:now` block, so "From last night's
+        // consolidation" appeared three times in one file: once inside the live
+        // block's copy of now.md, once as this block's heading, and once more
+        // inside this block's second copy of now.md.
+        //
+        // The division is by ownership, not by topic: full.md's identity and
+        // current-work sections belong to the pass that regenerates them every 60
+        // seconds. What only this pass can produce — the LLM day summaries, the
+        // detected patterns, the knowledge base — is what it contributes.
 
-        // me.md / now.md are curated files; strip provenance markers before
-        // embedding them here — full.md is read as prose by humans and AIs, and
-        // the markers are internal Curator metadata.
-        if let meContent = try? String(contentsOf: meFilePath, encoding: .utf8) {
-            lines.append(ContextBlockFile.stripMarkers(meContent))
-            lines.append("")
+        let daily = summaries.prefix(7).compactMap { s -> String? in
+            let detail = s.content.components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .prefix(15)
+                .joined(separator: "\n")
+            return MarkdownDoc.section(s.dateShort, level: 4, detail)
         }
 
-        if let nowContent = try? String(contentsOf: nowFilePath, encoding: .utf8) {
-            lines.append(ContextBlockFile.stripMarkers(nowContent))
-            lines.append("")
-        }
-
-        // Extended: full daily summaries (not just preview)
-        if !summaries.isEmpty {
-            lines.append("## Daily Details (Last 7 Days)")
-            for s in summaries.prefix(7) {
-                lines.append("### \(s.dateShort)")
-                let detail = s.content.components(separatedBy: "\n")
-                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                    .prefix(15)
-                    .joined(separator: "\n")
-                lines.append(detail)
-                lines.append("")
-            }
-        }
-
-        // Extended: all feedback memories
         let feedback = memories.filter { $0.memoryType == .feedback }
-        if !feedback.isEmpty {
-            lines.append("## Working Style & Feedback")
-            for f in feedback {
-                lines.append("- \(f.content)")
-            }
-            lines.append("")
-        }
 
         // Behavioral patterns — what the user can't see about themselves
         let patterns = BehaviorPatternEngine(database: database).detectPatterns()
-        if !patterns.isEmpty {
-            lines.append("## Behavioral Patterns (auto-detected)")
-            lines.append("These are patterns the user cannot see about themselves. Use them to give better advice:")
-            lines.append("")
-            for pattern in patterns.prefix(5) {
-                lines.append("### \(pattern.title)")
-                lines.append("**Insight:** \(pattern.insight)")
-                lines.append("**Action:** \(pattern.action)")
-                lines.append("**Evidence:** \(pattern.evidence)")
-                lines.append("")
-            }
+        let patternBlocks = patterns.prefix(5).compactMap { p in
+            MarkdownDoc.section(MarkdownDoc.inline(p.title, limit: 80), level: 4, """
+                - **Insight** — \(MarkdownDoc.inline(p.insight, limit: 240))
+                - **Action** — \(MarkdownDoc.inline(p.action, limit: 240))
+                - **Evidence** — \(MarkdownDoc.inline(p.evidence, limit: 240))
+                """)
         }
 
         // Knowledge base — decisions, solutions, discoveries
-        let knowledgeEntries = database.fetchAllKnowledge()
-        if !knowledgeEntries.isEmpty {
-            lines.append("## Knowledge Base")
-            lines.append("Decisions and solutions I've accumulated:")
-            lines.append("")
-            for entry in knowledgeEntries.prefix(20) {
-                lines.append("### \(entry.topic) [\(entry.project)]")
-                lines.append(entry.decision)
-                if let reasoning = entry.reasoning, !reasoning.isEmpty {
-                    lines.append("Why: \(reasoning)")
-                }
-                if let rejected = entry.rejected, !rejected.isEmpty {
-                    lines.append("Rejected: \(rejected)")
-                }
-                if let related = entry.relatedProjects, !related.isEmpty {
-                    lines.append("Also applies to: \(related)")
-                }
-                lines.append("")
-            }
+        let knowledgeBlocks = database.fetchAllKnowledge().prefix(20).compactMap { entry -> String? in
+            var body = ["- **Decision** — \(MarkdownDoc.inline(entry.decision, limit: 300))"]
+            if let r = entry.reasoning, !r.isEmpty { body.append("- **Why** — \(MarkdownDoc.inline(r, limit: 300))") }
+            if let r = entry.rejected, !r.isEmpty { body.append("- **Rejected** — \(MarkdownDoc.inline(r, limit: 300))") }
+            if let r = entry.relatedProjects, !r.isEmpty { body.append("- **Also applies to** — \(MarkdownDoc.inline(r, limit: 200))") }
+            return MarkdownDoc.section("\(MarkdownDoc.inline(entry.topic, limit: 80)) [\(entry.project)]",
+                                       level: 4, body.joined(separator: "\n"))
         }
+
+        let body = MarkdownDoc.join([
+            MarkdownDoc.section("Daily details (last 7 days)", level: 3, MarkdownDoc.join(daily)),
+            MarkdownDoc.section("Working style & feedback", level: 3, items:
+                feedback.map { "- \(MarkdownDoc.inline($0.content, limit: 240))" }),
+            MarkdownDoc.section("Behavioral patterns (auto-detected)", level: 3,
+                                patternBlocks.isEmpty ? nil :
+                                "These are patterns the user cannot see about themselves. Use them to give better advice.\n\n"
+                                + MarkdownDoc.join(patternBlocks)),
+            MarkdownDoc.section("Knowledge base", level: 3,
+                                knowledgeBlocks.isEmpty ? nil :
+                                "Decisions and solutions I've accumulated.\n\n" + MarkdownDoc.join(knowledgeBlocks)),
+        ])
 
         Curator.curate(relativePath: "full.md", header: Curator.fullHeader(timestamp: timestamp),
                        pinnedContent: nil,
                        agentBlocks: [ContextBlock(
                            id: "nightly:full", source: .agent,
-                           content: lines.joined(separator: "\n")
-                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           content: MarkdownDoc.section("From last night's consolidation", body) ?? "",
                            agentHash: nil)],
                        managedPrefixes: ["nightly:"])
     }
@@ -945,7 +930,14 @@ final class MullEngine {
         let retentionSetting = UserDefaults.standard.string(forKey: "dataRetention")
             ?? AppState.defaultDataRetentionDays
         guard retentionSetting != "unlimited", let days = Int(retentionSetting) else { return }
-        try? database.deleteEventsOlderThan(days: days)
+        do {
+            try database.deleteEventsOlderThan(days: days)
+        } catch {
+            // Nightly and unattended, so a log is the only surface — but a
+            // retention limit that silently stops being enforced is a privacy
+            // setting that lies, so it must at least be visible here.
+            print("[mull] Retention cleanup failed — events older than \(days) days were kept: \(error.localizedDescription)")
+        }
     }
 
 }

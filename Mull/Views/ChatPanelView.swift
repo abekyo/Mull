@@ -2,11 +2,30 @@ import SwiftUI
 
 /// A scoped chat over your own mull data — NOT a general-purpose chatbot.
 ///
-/// Per DIRECTION.md §5 (need-scoped context assembly): the chat box is "a window to instruct
-/// re-processing of the raw source," not a ChatGPT clone. The system prompt
-/// grounds every answer in me.md / now.md / the project files and forbids
-/// generic open-domain assistance. Heavy chatting belongs in Claude/ChatGPT,
+/// The system prompt grounds every answer in me.md / now.md / the project files and
+/// forbids generic open-domain assistance. Heavy chatting belongs in Claude/ChatGPT,
 /// which can read mull via MCP; this panel is for asking mull about *you*.
+///
+/// **What this panel is not, stated plainly so nobody has to infer it from the code.**
+/// It does not go through the selection layer. `Selection.slice` / `Selection.rank` —
+/// the thing CLAUDE.md §5.1 and DIRECTION §5 call the product — are reached by the MCP
+/// tools (`MCPServer.swift`) and by nothing here. This panel does the opposite: it
+/// inlines me.md, now.md, a 7-day digest and up to 12,000 characters of project notes
+/// into every turn, and tells the model it has no tools. That is "一発RAGで詰め込む",
+/// which DIRECTION §5 names as the ❌ side of its first design principle.
+///
+/// It is kept anyway, as a satellite (CLAUDE.md §9 / §12: the GUI is frozen but stays
+/// working). It is the only LLM path for someone with neither Claude Desktop nor
+/// Cursor, its rule-based instant layer answers with no provider at all, and its
+/// "Inspect" affordance is the one screen that shows the outgoing payload verbatim.
+///
+/// Re-decide when the eval numbers are published: if selected context measurably beats
+/// raw whole-file context, this panel is a counterexample to mull's own claim and has
+/// to be either put through `Selection` or removed. (Decision of 2026-08-09.)
+///
+/// This comment replaces one that cited DIRECTION §5 for a sentence — "a window to
+/// instruct re-processing of the raw source" — that does not appear anywhere in that
+/// file. A citation to a line that does not exist is worse than no citation.
 @MainActor
 final class ChatViewModel: ObservableObject {
 
@@ -60,6 +79,16 @@ final class ChatViewModel: ObservableObject {
     /// to wait out the provider's timeout.
     private var generation: Task<Void, Never>?
 
+    /// The instant layer's database scan, held for the same reason. It is the part of a
+    /// turn that runs before there is any model task to cancel, and Stop is on screen
+    /// for the whole of it.
+    private var localScan: Task<String?, Never>?
+
+    /// Which transcript a turn belongs to, bumped every time the transcript is thrown
+    /// away. A reply still arriving into the conversation the user just cleared is not
+    /// a reply to anything, and must not be written down.
+    private var transcript = 0
+
     /// Injected by the view (the VM is created parameterless as a @StateObject).
     /// Needed to ground "what did I do this week?" in actual recorded activity.
     var database: DatabaseService?
@@ -95,6 +124,16 @@ final class ChatViewModel: ObservableObject {
     func send() async {
         let prompt = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isRunning else { return }
+        // Raised here, not deep inside `runModel`. Between this guard and that
+        // assignment sat a real, reachable window: the instant layer's SQLite scan
+        // below suspends for as long as a large database takes, and the composer and
+        // the suggestion chips are only disabled once `isRunning` is true. Two
+        // Returns inside that window put two turns in the air at once, sharing one
+        // `streamingIndex` — so their tokens interleaved into a single bubble, Stop
+        // could only reach the second, and the first one's cleanup flipped Stop back
+        // to Send while the second was still streaming.
+        isRunning = true
+        defer { isRunning = false }
 
         withAnimation(Self.appear) { messages.append(Message(role: .user, text: prompt)) }
         input = ""
@@ -112,7 +151,14 @@ final class ChatViewModel: ObservableObject {
         // the user's own SQLite, was unreachable on day one.
         if let db = database {
             let calSvc = calendar
-            let local = await Task.detached { Self.localAnswer(to: prompt, database: db, calendar: calSvc) }.value
+            let turn = transcript
+            let scan = Task.detached { Self.localAnswer(to: prompt, database: db, calendar: calSvc) }
+            localScan = scan
+            let local = await scan.value
+            localScan = nil
+            // Stop during the scan, or Clear while it ran: either way this answer is
+            // to a question that is no longer on screen.
+            guard !scan.isCancelled, turn == transcript else { return }
             if let local {
                 withAnimation(Self.appear) {
                     messages.append(Message(role: .assistant, text: local,
@@ -130,6 +176,8 @@ final class ChatViewModel: ObservableObject {
     /// bubble, because the user already asked once.
     func askModelInstead(about prompt: String) async {
         guard !isRunning else { return }
+        isRunning = true
+        defer { isRunning = false }
         streamingIndex = nil
         await run(prompt: prompt)
     }
@@ -137,6 +185,8 @@ final class ChatViewModel: ObservableObject {
     /// Put a failed question again, dropping the failure notice it replaces.
     func retry(_ message: Message) async {
         guard !isRunning, let prompt = message.retryPrompt else { return }
+        isRunning = true
+        defer { isRunning = false }
         withAnimation(Self.appear) { messages.removeAll { $0.id == message.id } }
         streamingIndex = nil
         await run(prompt: prompt)
@@ -145,7 +195,24 @@ final class ChatViewModel: ObservableObject {
     /// Abandon the turn in flight. URLSession honours task cancellation, so this drops
     /// the connection rather than merely hiding the wait.
     func stop() {
+        localScan?.cancel()
         generation?.cancel()
+    }
+
+    /// Throw the transcript away.
+    ///
+    /// Stopping first is the point. Clearing mid-stream used to leave the generation
+    /// running against an emptied array: `receive` no longer found its bubble, so it
+    /// appended a fresh one and kept streaming into it, and the settle step then wrote
+    /// the *complete* reply there. The conversation the user had just destroyed came
+    /// back holding an answer with no question above it — and the tokens were paid for
+    /// after they had visibly abandoned the turn.
+    func clear() {
+        stop()
+        transcript &+= 1
+        messages.removeAll()
+        streamingIndex = nil
+        isThinking = false
     }
 
     /// Wrap the model turn in a cancellable task and wait on it, so `stop()` has
@@ -158,10 +225,8 @@ final class ChatViewModel: ObservableObject {
             withAnimation(Self.appear) {
                 messages.append(Message(
                     role: .assistant,
-                    text: "That one needs an AI provider. Questions like \"what did I do today?\" "
-                        + "are answered here from your own records with no provider at all, but "
-                        + "this one needs a model to read them. Ollama and LM Studio run on this "
-                        + "Mac and never send anything out.",
+                    text: "That one needs a model to read your records. Ollama and LM Studio "
+                        + "run on this Mac and never send anything out.",
                     retryPrompt: prompt,
                     offersProviderSetup: true))
             }
@@ -176,16 +241,13 @@ final class ChatViewModel: ObservableObject {
     /// The LLM turn: ground, stream, settle.
     private func runModel(prompt: String) async {
         let appear = Self.appear
-        withAnimation(.easeOut(duration: 0.2)) {
-            isThinking = true
-            isRunning = true
-        }
+        // Which transcript this turn is answering into. Every write below checks it
+        // still is the one on screen.
+        let turn = transcript
+        withAnimation(.easeOut(duration: 0.2)) { isThinking = true }
         startedAt = Date()
         defer {
-            withAnimation(.easeOut(duration: 0.2)) {
-                isThinking = false
-                isRunning = false
-            }
+            withAnimation(.easeOut(duration: 0.2)) { isThinking = false }
             startedAt = nil
         }
 
@@ -193,7 +255,10 @@ final class ChatViewModel: ObservableObject {
         // close the stream and let its consumer finish.
         let (tokens, continuation) = AsyncStream<String>.makeStream()
         let consumer = Task { @MainActor [weak self] in
-            for await piece in tokens { self?.receive(piece) }
+            for await piece in tokens {
+                guard let self, self.transcript == turn else { continue }
+                self.receive(piece)
+            }
         }
 
         do {
@@ -229,6 +294,7 @@ final class ChatViewModel: ObservableObject {
             )
             continuation.finish()
             await consumer.value   // drain the queue before settling the final text
+            guard turn == transcript else { return }
             if let i = streamingIndex, i < messages.count {
                 messages[i].text = reply
             } else {
@@ -237,6 +303,7 @@ final class ChatViewModel: ObservableObject {
         } catch {
             continuation.finish()
             await consumer.value
+            guard turn == transcript else { return }
 
             // A stop is not a failure. Keep whatever text arrived, mark it unfinished,
             // and hand the question back to the composer if nothing came through at all.
@@ -284,59 +351,7 @@ final class ChatViewModel: ObservableObject {
     /// developer editing `Options.maxTokens`. Classify on that detail rather than
     /// printing it: the user is not the one who can raise a token budget.
     private static func explain(_ error: Error) -> (text: String, needsProvider: Bool) {
-        let raw = error.localizedDescription
-        let d = raw.lowercased()
-        let provider = providerName(UserDefaults.standard.string(forKey: "llmProvider") ?? "off")
-
-        // Configuration — no provider, no key, or a provider id nothing answers to.
-        if d.contains("llm is off") || d.contains("unknown llm provider") {
-            return ("No AI provider is switched on. Pick one in Settings → AI — Ollama and "
-                    + "LM Studio run on this Mac.", true)
-        }
-        if d.contains("no api key") || d.contains("missing api key") {
-            return ("\(provider) needs an API key before it can answer. Add yours in "
-                    + "Settings → AI.", true)
-        }
-        // Authentication — the key is there and the provider rejected it.
-        if d.contains("http 401") || d.contains("http 403") || d.contains("invalid_api_key")
-            || d.contains("authentication") || d.contains("unauthorized") {
-            return ("\(provider) rejected the API key. Check it in Settings → AI — keys expire "
-                    + "and get revoked.", true)
-        }
-        // Rate limit / capacity.
-        if d.contains("http 429") || d.contains("rate limit") || d.contains("quota")
-            || d.contains("is busy") || d.contains("overloaded") {
-            return ("\(provider) is rate-limiting this account right now. Wait a minute and "
-                    + "retry, or use a different provider.", false)
-        }
-        // Reachability — offline, or a local server that isn't up.
-        if d.contains("no internet") || d.contains("not running") || d.contains("cannot connect")
-            || d.contains("no local server") || d.contains("cannot find host") {
-            return ("Couldn't reach \(provider). \(raw.hasSuffix(".") ? raw : raw + ".")", false)
-        }
-        // Timeout.
-        if d.contains("timed out") || d.contains("timeout") {
-            return ("\(provider) didn't answer in time. Retry, or ask something narrower — a "
-                    + "week of activity rides along with every question.", false)
-        }
-        // Budget exhaustion, phrased for someone who cannot edit maxTokens.
-        if d.contains("token budget") || d.contains("maxtokens") || d.contains("max_tokens")
-            || d.contains("token limit") {
-            return ("\(provider) used up the reply budget before writing anything. Ask for one "
-                    + "thing at a time — a narrower question leaves room for the answer.", false)
-        }
-        // Content policy.
-        if d.contains("policy") || d.contains("content filter") || d.contains("blocked")
-            || d.contains("safety") {
-            return ("\(provider) declined to answer this one on content-policy grounds.", false)
-        }
-        // Server-side trouble — 5xx and the empty/no-text shapes.
-        if d.contains("http 5") || d.contains("returned no text") || d.contains("empty response") {
-            return ("\(provider) had trouble on its end and sent nothing back. Retry in a "
-                    + "moment.", false)
-        }
-        return ("\(provider) couldn't answer that. Retry, or switch provider in Settings → AI.",
-                false)
+        LLMFailure.explain(error)
     }
 
     // MARK: - Disclosure
@@ -344,15 +359,7 @@ final class ChatViewModel: ObservableObject {
     /// Human name for a provider id — used in errors and in the "what leaves this Mac"
     /// line, which must never be vaguer than the setting it reports.
     nonisolated static func providerName(_ id: String) -> String {
-        switch id {
-        case "off": "No provider"
-        case "gemini": "Google Gemini"
-        case "claude": "Anthropic Claude"
-        case "openai": "OpenAI"
-        case "local": "Ollama"
-        case "localopenai": "Local server"
-        default: id
-        }
+        LLMFailure.providerName(id)
     }
 
     /// True when the selected provider runs on this machine (or there is none), i.e. when
@@ -662,7 +669,7 @@ struct ChatPanelView: View {
         }
         .confirmationDialog("Clear this conversation?", isPresented: $confirmingClear) {
             Button("Clear", role: .destructive) {
-                withAnimation(.easeOut(duration: 0.2)) { vm.messages.removeAll() }
+                withAnimation(.easeOut(duration: 0.2)) { vm.clear() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -676,7 +683,7 @@ struct ChatPanelView: View {
     private var header: some View {
         HStack(spacing: DS.sm) {
             Image(systemName: "moon")
-                .font(.system(size: 13))
+                .font(DS.iconSmall)
                 .foregroundStyle(DS.moon)
             VStack(alignment: .leading, spacing: DS.hair) {
                 Text("Chat with mull")
@@ -687,7 +694,7 @@ struct ChatPanelView: View {
                 // The subtitle now says who writes the answer; the composer's disclosure
                 // line says what is handed to them.
                 Text(onDevice
-                     ? "Reads your own records — nothing leaves this Mac"
+                     ? "Reads your own records"
                      : "Reads your own records, answered by \(providerLabel)")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
@@ -697,7 +704,7 @@ struct ChatPanelView: View {
                 // Confirmed, because the transcript is held in memory only: a mis-click
                 // used to destroy the whole conversation with nothing to undo it with.
                 Button { confirmingClear = true } label: {
-                    Image(systemName: "trash").font(.system(size: 12))
+                    Image(systemName: "trash").font(DS.iconSmall)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DS.inkFaint)
@@ -719,9 +726,11 @@ struct ChatPanelView: View {
         HStack(spacing: DS.sm) {
             Image(systemName: "moon.zzz").foregroundStyle(DS.paused)
             Text("No AI provider. Questions like \"what did I do today?\" are answered "
-                 + "from your records; anything needing a model asks you first.")
+                 + "from your records anyway.")
                 .font(DS.captionFont).foregroundStyle(DS.inkDim)
-                .fixedSize(horizontal: false, vertical: true)
+                // Same reason as `disclosureLine`: priority over the Spacer, not a
+                // fixed size — `fixedSize` in this shape oversizes the whole window.
+                .layoutPriority(1)
             Spacer(minLength: DS.sm)
             // Lands on the AI tab: the sentence beside it is about a provider,
             // and General is two tabs from the switch it just asked you to flip.
@@ -729,6 +738,9 @@ struct ChatPanelView: View {
                 .font(DS.captionFont)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                // The sentence may take the width it needs; the button's own words
+                // are not negotiable — "Open Settin…" is not an instruction.
+                .fixedSize()
         }
         .padding(.horizontal, DS.lg)
         .padding(.vertical, DS.sm)
@@ -746,7 +758,7 @@ struct ChatPanelView: View {
     private var disclosureLine: some View {
         HStack(spacing: DS.xs) {
             Image(systemName: onDevice ? "lock" : "arrow.up.forward.square")
-                .font(.system(size: 9))
+                .font(DS.iconMini)
                 .foregroundStyle(onDevice ? DS.recording : DS.paused)
             Text(onDevice
                  ? (isLLMOff
@@ -756,12 +768,27 @@ struct ChatPanelView: View {
                    + "activity to \(providerLabel).")
                 .font(DS.miniFont)
                 .foregroundStyle(DS.inkGhost)
-                .fixedSize(horizontal: false, vertical: true)
+                // Served width before the Spacer is — NOT `fixedSize`.
+                //
+                // `fixedSize(vertical: true)` here took the whole window down with it.
+                // It makes this Text refuse any height but the one its own ideal width
+                // implies, and in an HStack that also holds a Spacer that width is not
+                // settled at the moment the height is asked for. SwiftUI resolved the
+                // circle by handing the detail column ~125pt more height than the window
+                // had, so the entire hierarchy — sidebar included — was laid out
+                // oversized: the Chat header slid up under the title bar and the composer
+                // fell off the bottom edge. (Only Chat showed it; only Chat asked.)
+                //
+                // Layout priority says the same thing without the paradox: this sentence
+                // takes the width it needs, the Spacer takes what is left, and a window
+                // too narrow for one line still wraps rather than truncating.
+                .layoutPriority(1)
             Button("Inspect") { openPayloadInspector() }
                 .font(DS.miniMedium)
                 .buttonStyle(.plain)
                 .foregroundStyle(DS.moon)
                 .help("Read exactly what is sent with your question")
+                .fixedSize()   // the one word that has to survive a narrow window
             Spacer(minLength: 0)
         }
     }
@@ -880,7 +907,7 @@ struct ChatPanelView: View {
             scrollToEnd(proxy)
         } label: {
             HStack(spacing: DS.xs) {
-                Image(systemName: "arrow.down").font(.system(size: 9, weight: .medium))
+                Image(systemName: "arrow.down").font(DS.iconMini.weight(.medium))
                 Text("Jump to latest").font(DS.miniMedium)
             }
             .foregroundStyle(DS.moon)
@@ -905,19 +932,17 @@ struct ChatPanelView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: DS.md) {
             HStack(spacing: DS.sm) {
-                Image(systemName: "moon.stars").font(.system(size: 18)).foregroundStyle(DS.moon)
+                Image(systemName: "moon.stars").font(DS.iconBody).foregroundStyle(DS.moon)
                 Text("Ask mull about you")
                     .font(DS.readH2Font).foregroundStyle(DS.ink)
             }
-            Text("It reads your me.md, now.md and project notes to answer.")
-                .font(DS.bodyFont).foregroundStyle(DS.inkDim)
-
             VStack(alignment: .leading, spacing: DS.sm) {
                 ForEach(suggestions, id: \.self) { s in
                     Button { Task { await vm.ask(s) } } label: {
-                        HStack(spacing: DS.sm) {
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 10)).foregroundStyle(DS.moon.opacity(0.7))
+                        HStack(alignment: .firstTextBaseline, spacing: DS.sm) {
+                            // The ring-fragment, not an outward arrow: nothing
+                            // leaves — these questions are answered from the record.
+                            StippleMark(dot: 2.5)
                             Text(s).font(DS.bodyFont).foregroundStyle(DS.inkDim)
                             Spacer()
                         }
@@ -1011,7 +1036,6 @@ struct ChatPanelView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(vm.isRunning)
-                        .help("Put the same question to the model")
                     }
                 }
             }
@@ -1049,21 +1073,19 @@ struct ChatPanelView: View {
             .buttonStyle(.plain)
             .foregroundStyle(copiedMessage == msg.id ? DS.recording : DS.inkFaint)
             .opacity(hoveredMessage == msg.id || copiedMessage == msg.id ? 1 : 0)
-            .help("Copy reply")
         }
     }
 
     private func retryButton(_ msg: ChatViewModel.Message) -> some View {
         Button { Task { await vm.retry(msg) } } label: {
             HStack(spacing: DS.hair) {
-                Image(systemName: "arrow.clockwise").font(.system(size: 8, weight: .medium))
+                Image(systemName: "arrow.clockwise").font(DS.iconMini.weight(.medium))
                 Text("Retry").font(DS.miniMedium)
             }
             .foregroundStyle(DS.moon)
         }
         .buttonStyle(.plain)
         .disabled(vm.isRunning)
-        .help("Ask the same question again")
     }
 
     private func copyMessage(_ msg: ChatViewModel.Message) {
@@ -1130,7 +1152,7 @@ struct ChatPanelView: View {
                 if vm.isRunning {
                     Button { vm.stop() } label: {
                         Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 26))
+                            .font(DS.iconAction)
                             .foregroundStyle(DS.moon)
                     }
                     .buttonStyle(.plain)
@@ -1140,14 +1162,13 @@ struct ChatPanelView: View {
                 } else {
                     Button { Task { await vm.send() } } label: {
                         Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 26))
+                            .font(DS.iconAction)
                             .foregroundStyle(canSend ? DS.moon : DS.inkFaint)
                     }
                     .buttonStyle(.plain)
                     .disabled(!canSend)
-                    .help("Send")
+                    .help("Send (↩)")
                     .accessibilityLabel("Send")
-                    .accessibilityHint("Sends your message to mull")
                 }
 
                 // Shift+Return inserts a line break. `TextField(axis: .vertical)` leaves

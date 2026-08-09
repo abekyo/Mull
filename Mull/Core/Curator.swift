@@ -14,25 +14,61 @@ enum Curator {
 
     // MARK: - Pinned facts (me.pinned.md)
 
-    /// User-owned pinned facts file. mull creates it once, then only ever reads it.
+    /// User-owned pinned facts file. mull scaffolds it, then only ever reads it —
+    /// except that a file still containing nothing but the scaffold may be
+    /// re-scaffolded (see `readPinned`), since no user writing exists in it yet.
     static let pinnedFileName = "me.pinned.md"
 
-    private static let pinnedTemplate = """
-    # Pinned facts — you own this file. mull NEVER overwrites it.
-    #
-    # Every line below that does NOT start with '#' is treated as authoritative and
-    # placed at the top of me.md, above mull's own auto-detected guesses. Use it to
-    # lock facts auto-detection gets wrong or can't know. Example:
-    #
-    # - Founder running several businesses; FX trading is the current priority.
-    # - Primary working language: Japanese.
-    #
-    # Delete these comment lines and add your own. An empty file disables the layer.
+    /// The scaffold, in the reader's language. Plain words, no house vocabulary:
+    /// the shipped English version spoke of "authoritative" facts and "disabling
+    /// the layer" — to a Japanese-speaking user it read as a wall of foreign
+    /// jargon at the top of a file mull was asking them to own.
+    ///
+    /// It is written as real markdown — a title and a blockquote — because the
+    /// file is a `.md`. The previous scaffold used shell-style `#` comments, which
+    /// markdown does not have: every explanation line rendered as a full-size H1,
+    /// and the bare `#` spacer lines rendered as a lone `#` with nothing after it.
+    /// mull's own preview, Obsidian, VS Code and GitHub all showed the same thing —
+    /// a hash mark floating on an empty line — in the one file mull most wants the
+    /// user to open and edit.
+    static func pinnedTemplate(japanese: Bool = UserLanguage.isJapanese) -> String {
+        japanese
+            ? """
+            # 自分について、AI に必ず正しく伝えたいこと
 
-    """
+            > mull はこのファイルを絶対に上書きしません。
+            > ここに書いた行がそのまま me.md の先頭に載り、mull の自動推測より優先されます。
+            > 自動では間違うこと・知りようがないことを、ここで確定できます。
+            >
+            > 例:
+            > - 複数の事業を経営。いまの最優先は FX。
+            > - 仕事は日本語。AI の返答も日本語で。
+            >
+            > 見出し（`#`）と引用（`>`）の行は読み飛ばされるので、この説明は消しても残しても構いません。
+            > 空のままなら me.md には何も追加されません。
 
-    /// Read the user's pinned facts (comment + blank lines stripped). Scaffolds the
-    /// file once if missing; never overwrites an existing one. Empty if none.
+
+            """
+            : """
+            # Facts AI should always get right about you
+
+            > mull NEVER overwrites this file.
+            > Lines you write here go straight to the top of me.md, above anything mull
+            > guesses on its own — use it for what auto-detection gets wrong or cannot know.
+            >
+            > For example:
+            > - Founder running several businesses; FX trading is the current priority.
+            > - I work in Japanese; AI should reply in Japanese.
+            >
+            > Heading (`#`) and quote (`>`) lines are skipped, so keep or delete this note
+            > as you like. Leave the file empty and nothing is added.
+
+
+            """
+    }
+
+    /// Read the user's pinned facts (scaffold + blank lines stripped). Scaffolds the
+    /// file once if missing; never overwrites the user's writing. Empty if none.
     static func pinnedFacts() -> String { readPinned().text }
 
     /// Pinned content, split into what was used and what was withheld.
@@ -53,11 +89,41 @@ enum Curator {
     /// is being ignored and why. Deleting someone's writing without telling them
     /// is the one thing a custode may not do.
     static func readPinned() -> (text: String, withheld: [String]) {
+        let template = pinnedTemplate()
         if !MullDirectory.exists(pinnedFileName) {
-            MullDirectory.write(pinnedTemplate, to: pinnedFileName)
+            MullDirectory.write(template, to: pinnedFileName)
+        } else if let raw = MullDirectory.read(pinnedFileName),
+                  raw != template, isPristineScaffold(raw) {
+            // The file still contains nothing but scaffold lines — mull's own
+            // scaffold, possibly an outdated or wrong-language version of it.
+            // Refreshing it keeps the header's promise: the promise protects the
+            // user's writing, and there is none here to protect.
+            MullDirectory.write(template, to: pinnedFileName)
         }
         guard let raw = MullDirectory.read(pinnedFileName) else { return ("", []) }
         return filterPinned(raw)
+    }
+
+    /// Markdown's two chrome constructs — headings and blockquotes — are how the
+    /// scaffold speaks, so they are what a reader skips. This is also what keeps
+    /// the change backward-compatible: every line of the old `#`-comment scaffold,
+    /// and both of onboarding's `# ── … ──` section markers, are headings, so
+    /// files written by earlier versions still parse to exactly the same facts.
+    ///
+    /// A pinned fact is a plain statement about the user; nobody writes one as a
+    /// heading or a pull-quote. Everything else in the file is theirs.
+    static func isScaffoldLine(_ trimmed: String) -> Bool {
+        trimmed.hasPrefix("#") || trimmed.hasPrefix(">")
+    }
+
+    /// True when the file holds only scaffold and blank lines — i.e. no user
+    /// content the never-overwrite promise applies to. Onboarding's projected fact
+    /// lines ("- Role: …") are not scaffold, so their presence blocks a refresh.
+    static func isPristineScaffold(_ raw: String) -> Bool {
+        raw.components(separatedBy: "\n").allSatisfy { line in
+            let t = line.trimmingCharacters(in: .whitespaces)
+            return t.isEmpty || isScaffoldLine(t)
+        }
     }
 
     /// The filtering half of `readPinned`, split out so it can be tested without
@@ -69,7 +135,7 @@ enum Curator {
         var withheld: [String] = []
         for line in raw.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("#") { continue }
+            if isScaffoldLine(trimmed) { continue }
             if trimmed.isEmpty { kept.append(line); continue }
             // A pinned fact is a statement about the user. Strip list markers
             // before judging, so "- ああ" is caught as readily as "ああ".
@@ -92,20 +158,54 @@ enum Curator {
     // whole-file property, so both must agree on its wording — otherwise every pass
     // would rewrite the header the other just wrote. Only the timestamp differs.
 
+    /// The one timestamp format for generated-file headers: ISO 8601 with the local
+    /// UTC offset ("2026-08-02T04:12+09:00"). The previous locale `.short` format
+    /// ("11/06/2026, 12:26 AM") is unreadable to the files' primary audience — an
+    /// AI cannot tell June 11 from November 6, and these headers are how a reader
+    /// judges whether the context is current or stale.
+    static func timestamp(_ date: Date = Date()) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")   // fixed format; never localized
+        f.timeZone = .current                          // local time, offset explicit
+        f.dateFormat = "yyyy-MM-dd'T'HH:mmZZZZZ"
+        return f.string(from: date)
+    }
+
+    /// The three contract files' headers, built to the one house style
+    /// (MarkdownDoc): front matter for the housekeeping, a single H1, and one
+    /// line of orientation only where a reader needs it to edit safely.
+    ///
+    /// What moved out of the body: the update time, the token budget, and which
+    /// block prefix refreshes on which cadence. Those are properties OF the
+    /// document, and they were occupying its first three lines — so the answer to
+    /// "what am I working on" began two screens of italics later than it needed to.
+
+    static func meHeader(timestamp: String) -> String {
+        MarkdownDoc.header(
+            title: "Who I am",
+            meta: [("updated", timestamp),
+                   ("layer", "me.md — durable facts, ~200 tokens, always safe to include"),
+                   ("sources", "me.pinned.md (yours) + nightly consolidation (mull's)")],
+            note: "Pinned and edited blocks win over mull's own. Correct anything here in place, "
+                + "or in `me.pinned.md`. For live work, call `whats_active_now` / `search` — it is not kept here.")
+    }
+
     static func nowHeader(timestamp: String) -> String {
-        """
-        # now.md — what I'm working on
-        _Auto-updated \(timestamp). ~500 tokens. Include when task context helps._
-        _Live blocks (`now:`) refresh every 60s; nightly LLM blocks (`nightly:`) refresh once a day. Edit either — your edits are kept._
-        """
+        MarkdownDoc.header(
+            title: "What I'm working on",
+            meta: [("updated", timestamp),
+                   ("layer", "now.md — current work, ~500 tokens, include when task context helps"),
+                   ("refresh", "live every 60s · consolidated nightly")],
+            note: "Edit any of this — your edits are kept.")
     }
 
     static func fullHeader(timestamp: String) -> String {
-        """
-        # full.md — complete context
-        _Auto-updated \(timestamp). me.md + now.md + recent activity in one file. Use when starting a big task._
-        _Live blocks (`full:`) refresh every 60s; nightly LLM blocks (`nightly:`) refresh once a day. Edit either — your edits are kept._
-        """
+        MarkdownDoc.header(
+            title: "Full context",
+            meta: [("updated", timestamp),
+                   ("layer", "full.md — me.md + now.md + today's material, ~1500 tokens"),
+                   ("refresh", "live every 60s · consolidated nightly")],
+            note: "Assembled from the other two files. Edit those, not this one.")
     }
 
     // MARK: - Curate (chokepoint)
@@ -122,12 +222,71 @@ enum Curator {
     @discardableResult
     static func curate(relativePath: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock], managedPrefixes: [String] = []) -> Bool {
         let existing = MullDirectory.read(relativePath) ?? ""
+        // Before the merge promotes edited blocks to `.human` and the evidence is
+        // gone: record what was corrected. This is the chokepoint every writer
+        // goes through, which is why the capture belongs here and not at the 16
+        // call sites.
+        recordCorrections(existing: existing, agentBlocks: agentBlocks, path: relativePath)
         let merged = merge(existing: existing, header: header, pinnedContent: pinnedContent, agentBlocks: agentBlocks, managedPrefixes: managedPrefixes)
         return MullDirectory.write(merged, to: relativePath)
     }
 
+    // MARK: - Correction capture (the learning signal)
+
+    /// Supplies "what were you doing when this correction happened" for the card's
+    /// section 1. Set once at startup by the layer that owns the database; left
+    /// nil in the MCP binary and in tests, where the card records the correction
+    /// without it rather than inventing one.
+    ///
+    /// Section 1 is the part **only mull can fill** — Copilot Memory and ChatGPT
+    /// let you delete a remembered item, but neither knows what you were doing
+    /// when you deleted it (HARNESS.md 第II部 §6).
+    static var contextSnapshotProvider: (() -> String?)?
+
+    /// Pure detection (no I/O, so it is unit-testable): which agent blocks in
+    /// `existing` no longer match the hash mull wrote — i.e. which ones a human
+    /// edited since the last pass.
+    ///
+    /// This is the same check `merge` step 1 makes. `merge` uses it to *protect*
+    /// the block; this uses it to *learn* from it. Until 2026-08-09 only the first
+    /// existed: mull knew it had been corrected and kept no record of about what.
+    static func detectCorrections(existing: String,
+                                  agentBlocks: [ContextBlock],
+                                  path: String,
+                                  context: String? = nil,
+                                  now: Date = Date()) -> [CorrectionCard] {
+        let (_, blocks) = ContextBlockFile.parse(existing)
+        var candidateByID: [String: String] = [:]
+        for b in agentBlocks where candidateByID[b.id] == nil {
+            candidateByID[b.id] = ContextBlock.normalized(b.content)
+        }
+        return blocks.compactMap { b in
+            guard b.source == .agent,
+                  let stored = b.agentHash,
+                  stored != ContextBlock.hash(b.content) else { return nil }
+            return CorrectionCard(path: path, blockID: b.id, date: now,
+                                  kept: b.content, wouldWrite: candidateByID[b.id],
+                                  context: context)
+        }
+    }
+
+    /// Write the cards and fold their verdicts into the ledger the selection layer
+    /// reads. Additive: an existing ledger the user has hand-edited is parsed and
+    /// merged, never replaced (Invariant Contract 契約2).
+    private static func recordCorrections(existing: String, agentBlocks: [ContextBlock], path: String) {
+        let cards = detectCorrections(existing: existing, agentBlocks: agentBlocks,
+                                      path: path, context: contextSnapshotProvider?())
+        guard !cards.isEmpty else { return }
+        for card in cards {
+            _ = MullDirectory.write(card.render(), to: "06_knowledge/corrections/\(card.id).md")
+        }
+        let onDisk = CorrectionIndex.parseLedger(MullDirectory.read(CorrectionIndex.ledgerPath) ?? "")
+        let merged = CorrectionIndex.merge(onDisk, CorrectionIndex.fold(cards))
+        _ = MullDirectory.write(merged.renderLedger(), to: CorrectionIndex.ledgerPath)
+    }
+
     /// Pure merge (no I/O) so it can be unit-tested.
-    static func merge(existing: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock], managedPrefixes: [String] = []) -> String {
+    static func merge(existing: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock], managedPrefixes: [String] = [], now: Date = Date()) -> String {
         let pinnedID = "pinned-facts"
         var (_, existingBlocks) = ContextBlockFile.parse(existing)
 
@@ -158,11 +317,17 @@ enum Curator {
 
         for var cand in agentBlocks {
             cand.source = .agent
+            // Normalise BEFORE hashing: the hash has to describe the content as it
+            // will read back off disk, or the next merge mistakes the round trip
+            // for a human edit (see `ContextBlock.normalized`).
+            cand.content = ContextBlock.normalized(cand.content)
             cand.agentHash = ContextBlock.hash(cand.content)
+            cand.writtenAt = now
             if let idx = indexByID[cand.id] {
                 if result[idx].source == .agent {
                     result[idx].content = cand.content
                     result[idx].agentHash = cand.agentHash
+                    result[idx].writtenAt = cand.writtenAt
                 }
                 // human / pinned → leave untouched
             } else {
@@ -185,6 +350,121 @@ enum Curator {
         }
 
         return ContextBlockFile.serialize(header: header, blocks: result)
+    }
+
+    // MARK: - Retract (the forget path)
+
+    /// Withdraw mull's own blocks under `idPrefixes` from a curated file, and
+    /// report the ones it refused to touch.
+    ///
+    /// `curate` already prunes stale agent blocks — but only for the prefixes the
+    /// *calling pass* manages, and only when that pass next runs. That is enough
+    /// for a fact that quietly stopped being true; it is not enough for a forget.
+    /// The nightly blocks in now.md/full.md refresh once a day, so between a
+    /// forget at 15:00 and the next consolidation, a block sourced from the
+    /// erased window would keep describing it. Retraction is the pull, where
+    /// curate is the push.
+    ///
+    /// Returns the ids mull left in place because they are the user's — a block
+    /// they edited (which `merge` promotes to `.human`) or pinned content. mull
+    /// deletes its own writing, never theirs; the caller is expected to SAY so.
+    /// A forget that silently leaves the sentence you were trying to erase is
+    /// worse than one that admits it.
+    /// What a retraction left behind.
+    struct Retraction {
+        /// Ids mull kept because they are the user's.
+        var retained: [String] = []
+        /// False when the pruned file could not be written back — every block this
+        /// call meant to pull is still sitting in the file. A forget that reports
+        /// success on top of this is describing something that did not happen.
+        var written: Bool = true
+    }
+
+    @discardableResult
+    static func retract(relativePath: String, idPrefixes: [String]) -> Retraction {
+        guard let existing = MullDirectory.read(relativePath), !existing.isEmpty else { return Retraction() }
+        let (text, retained) = withdraw(existing: existing, idPrefixes: idPrefixes)
+        guard text != existing else { return Retraction(retained: retained) }
+        return Retraction(retained: retained,
+                          written: MullDirectory.write(text, to: relativePath))
+    }
+
+    /// Pure half of `retract` (no I/O) so it can be unit-tested.
+    static func withdraw(existing: String, idPrefixes: [String]) -> (text: String, retained: [String]) {
+        let (header, parsed) = ContextBlockFile.parse(existing)
+
+        var kept: [ContextBlock] = []
+        var retained: [String] = []
+        for var block in parsed {
+            guard idPrefixes.contains(where: { block.id.hasPrefix($0) }) else {
+                kept.append(block)
+                continue
+            }
+
+            // Same human-edit detection `merge` does, and for the same reason —
+            // a block still marked `src=agent` whose content no longer matches
+            // the hash mull wrote is the user's text. Retracting on the marker
+            // alone would delete an edit they made, which is the one thing a
+            // custode may not do.
+            if block.source == .agent,
+               let stored = block.agentHash,
+               stored != ContextBlock.hash(block.content) {
+                block.source = .human
+                block.agentHash = nil
+            }
+
+            if block.source == .agent {
+                continue                     // mull's own — withdraw it
+            }
+            retained.append(block.id)        // the user's — keep, and report
+            kept.append(block)
+        }
+
+        return (ContextBlockFile.serialize(header: header, blocks: kept), retained)
+    }
+
+    // MARK: - Expire (the staleness path)
+
+    /// Withdraw mull's own blocks under `idPrefixes` that it can no longer vouch
+    /// for the age of. Returns true when something was removed.
+    ///
+    /// `curate` prunes a block the moment its own pass stops emitting it, and
+    /// `retract` pulls one on demand. Neither helps when the pass itself stops
+    /// running: the `nightly:` blocks in now.md and full.md are written by the LLM
+    /// consolidation, the LLM is off by default, and a block nothing rewrites is a
+    /// block nothing corrects. The shipped vault still headed both files with "From
+    /// last night's consolidation" over content from two months earlier, formatted
+    /// by a markdown generation since replaced — the wrong date, the wrong shape,
+    /// and no way for either to heal, because healing was the job of the pass that
+    /// had stopped.
+    ///
+    /// A block with no `ts` is expired rather than kept. It was written before the
+    /// stamp existed, which makes its age unknowable, and "last night's" is a claim
+    /// about age. The next consolidation writes a stamped one; until then the
+    /// section is absent, and absence is the honest state.
+    @discardableResult
+    static func expire(relativePath: String, idPrefixes: [String],
+                       maxAge: TimeInterval, now: Date = Date()) -> Bool {
+        guard let existing = MullDirectory.read(relativePath), !existing.isEmpty else { return false }
+        let text = sweep(existing: existing, idPrefixes: idPrefixes, maxAge: maxAge, now: now)
+        guard text != existing else { return false }
+        return MullDirectory.write(text, to: relativePath)
+    }
+
+    /// Pure half of `expire` (no I/O) so it can be unit-tested.
+    static func sweep(existing: String, idPrefixes: [String],
+                      maxAge: TimeInterval, now: Date) -> String {
+        let (header, parsed) = ContextBlockFile.parse(existing)
+        let kept = parsed.filter { block in
+            // Only mull's own writing is ever swept. A human or pinned block has
+            // no `ts` by design — mull did not write it and has no claim on when
+            // it should stop being true.
+            guard block.source == .agent,
+                  idPrefixes.contains(where: { block.id.hasPrefix($0) }) else { return true }
+            guard let written = block.writtenAt else { return false }
+            return now.timeIntervalSince(written) <= maxAge
+        }
+        return ContextBlockFile.serialize(header: header, blocks: kept)
     }
 
     /// Drop an agent block whose text is a word-boundary prefix of another

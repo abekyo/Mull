@@ -68,12 +68,7 @@ final class DatabaseService: Sendable {
             }
         }
 
-        var config = Configuration()
-        config.prepareDatabase { db in
-            try db.execute(sql: "PRAGMA journal_mode = WAL")
-            try db.execute(sql: "PRAGMA synchronous = NORMAL")
-            try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
-        }
+        let config = Self.poolConfiguration()
 
         // Recovery strategy:
         //   1. Try opening existing DB
@@ -91,39 +86,76 @@ final class DatabaseService: Sendable {
             try pool!.read { db in
                 let result = try String.fetchOne(db, sql: "PRAGMA integrity_check")
                 if result != "ok" {
-                    throw DatabaseError(message: "Integrity check failed: \(result ?? "unknown")")
+                    throw DatabaseError(resultCode: .SQLITE_CORRUPT,
+                                        message: "Integrity check failed: \(result ?? "unknown")")
                 }
             }
         } catch {
             logger.error("Primary database failed: \(error.localizedDescription)")
             pool = nil
 
-            // Step 2: Rename corrupted DB and create fresh one
-            let fm = FileManager.default
-            let timestamp = ISO8601DateFormatter().string(from: Date())
-                .replacingOccurrences(of: ":", with: "-")
-            let corruptPath = dbPath + ".corrupt-\(timestamp)"
-
-            for ext in ["", "-wal", "-shm"] {
-                let src = dbPath + ext
-                let dst = corruptPath + ext
-                if fm.fileExists(atPath: src) {
-                    do {
-                        try fm.moveItem(atPath: src, toPath: dst)
-                        logger.warning("Renamed corrupted file: \(src) → \(dst)")
-                    } catch {
-                        logger.error("Failed to rename corrupted DB: \(error.localizedDescription)")
-                        try? fm.removeItem(atPath: src)
-                    }
+            // Quarantine ONLY on true corruption. Any other failure (lock
+            // contention, sandbox denial, out of disk) is transient: renaming
+            // the primary DB away would destroy the user's history over a
+            // recoverable error — which is exactly what happened on
+            // 2026-07-18, when concurrent test runs quarantined the real DB
+            // eight times in 36 minutes and every "corrupt" file later passed
+            // integrity_check. Leave the files untouched and use the
+            // temporary fallback below instead.
+            let resultCode = (error as? DatabaseError)?.resultCode
+            let claimsCorruption = resultCode == .SQLITE_CORRUPT || resultCode == .SQLITE_NOTADB
+            // SQLITE_CORRUPT is not proof of corruption. A second process attached
+            // to the same WAL — the app plus a test host, the app plus MullMCP —
+            // can make a reader see a page it cannot reconcile, and SQLite reports
+            // that with the same code as a genuinely damaged file. Both quarantines
+            // this database has suffered (2026-07-18, 2026-08-08) were that: eight
+            // files in 36 minutes the first time, 8,013 events the second, and
+            // every quarantined file passed `integrity_check` afterwards.
+            //
+            // So the claim is checked before it is acted on: drop the connection,
+            // let the other process settle, and open again from scratch. A file
+            // that is actually corrupt fails the same way twice. One that was
+            // merely being shared comes back.
+            var isCorruption = false
+            if claimsCorruption {
+                if let recovered = Self.reopenAfterCorruptionClaim(at: dbPath, config: config) {
+                    pool = recovered
+                    logger.warning("Corruption reported but not reproduced on a fresh connection — primary database kept")
+                } else {
+                    isCorruption = true
                 }
+            } else {
+                logger.error("Failure is not corruption — primary database left untouched; using temporary fallback")
             }
 
-            do {
-                pool = try DatabasePool(path: dbPath, configuration: config)
-                reason = "Database was corrupted and has been reset. Previous data saved to \(corruptPath)"
-                logger.warning("\(reason!)")
-            } catch {
-                logger.error("Fresh database creation also failed: \(error.localizedDescription)")
+            if isCorruption {
+                // Step 2: Rename corrupted DB and create fresh one
+                let fm = FileManager.default
+                let timestamp = ISO8601DateFormatter().string(from: Date())
+                    .replacingOccurrences(of: ":", with: "-")
+                let corruptPath = dbPath + ".corrupt-\(timestamp)"
+
+                for ext in ["", "-wal", "-shm"] {
+                    let src = dbPath + ext
+                    let dst = corruptPath + ext
+                    if fm.fileExists(atPath: src) {
+                        do {
+                            try fm.moveItem(atPath: src, toPath: dst)
+                            logger.warning("Renamed corrupted file: \(src) → \(dst)")
+                        } catch {
+                            logger.error("Failed to rename corrupted DB: \(error.localizedDescription)")
+                            try? fm.removeItem(atPath: src)
+                        }
+                    }
+                }
+
+                do {
+                    pool = try DatabasePool(path: dbPath, configuration: config)
+                    reason = "Database was corrupted and has been reset. Previous data saved to \(corruptPath)"
+                    logger.warning("\(reason!)")
+                } catch {
+                    logger.error("Fresh database creation also failed: \(error.localizedDescription)")
+                }
             }
         }
 
@@ -223,6 +255,39 @@ final class DatabaseService: Sendable {
 
     // MARK: - Cross-process migration lock
 
+    /// Retry an open that reported corruption, and return the pool if the file
+    /// comes back healthy. Nil means the claim held up and the file really is
+    /// damaged — only then may the caller quarantine it.
+    ///
+    /// Three attempts with a widening pause, because what is being waited out is
+    /// another process finishing a WAL checkpoint, and that is measured in
+    /// milliseconds. The pauses total under a second, and only on a path that
+    /// otherwise ends in the user losing their history.
+    ///
+    /// `integrity_check` is re-run each time rather than trusting a successful
+    /// open: the first attempt failed *inside* that check, and a file that opens
+    /// but does not verify is exactly the case this exists to catch.
+    private static func reopenAfterCorruptionClaim(at path: String,
+                                                   config: Configuration) -> DatabasePool? {
+        for attempt in 1...3 {
+            Thread.sleep(forTimeInterval: 0.15 * Double(attempt))
+            do {
+                let pool = try DatabasePool(path: path, configuration: config)
+                try pool.read { db in
+                    let result = try String.fetchOne(db, sql: "PRAGMA integrity_check")
+                    if result != "ok" {
+                        throw DatabaseError(resultCode: .SQLITE_CORRUPT,
+                                            message: "Integrity check failed: \(result ?? "unknown")")
+                    }
+                }
+                return pool
+            } catch {
+                logger.error("Corruption re-check \(attempt)/3 failed: \(error.localizedDescription)")
+            }
+        }
+        return nil
+    }
+
     /// Take an exclusive advisory lock on `<dbPath>.migrate.lock`, blocking until
     /// it is available. Returns -1 if the lock could not be taken, in which case
     /// the caller proceeds unlocked — a possible race is still better than
@@ -247,6 +312,28 @@ final class DatabaseService: Sendable {
         close(fd)
     }
 
+    /// Connection setup shared by the live pool and the test-path pool.
+    private static func poolConfiguration() -> Configuration {
+        var config = Configuration()
+        config.prepareDatabase { db in
+            // Runs on every connection the pool opens — including its read-only
+            // reader connections. journal_mode and auto_vacuum live in the
+            // database file itself, and auto_vacuum touches the header even
+            // when it already says INCREMENTAL, so on a reader the pragma dies
+            // with SQLITE_READONLY. That one line took down every read in the
+            // app while writes kept succeeding — including the startup
+            // integrity check, which sent the app to the temporary fallback
+            // database. Persistent settings belong to the writer; readers pick
+            // them up from the file.
+            if !db.configuration.readonly {
+                try db.execute(sql: "PRAGMA journal_mode = WAL")
+                try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
+            }
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
+        }
+        return config
+    }
+
     /// Open a database at an explicit path, with the same schema and pragmas as
     /// the real one but none of the recovery/fallback machinery.
     ///
@@ -255,13 +342,7 @@ final class DatabaseService: Sendable {
     /// `deleteAllData()` in `setUp`, which destroys everything mull has recorded
     /// on any machine where that file is writable.
     init(path: String) throws {
-        var config = Configuration()
-        config.prepareDatabase { db in
-            try db.execute(sql: "PRAGMA journal_mode = WAL")
-            try db.execute(sql: "PRAGMA synchronous = NORMAL")
-            try db.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
-        }
-        let pool = try DatabasePool(path: path, configuration: config)
+        let pool = try DatabasePool(path: path, configuration: Self.poolConfiguration())
         try Self.buildMigrator().migrate(pool)
 
         dbPool = pool
@@ -528,8 +609,11 @@ final class DatabaseService: Sendable {
 
     // MARK: - FTS Rebuild
 
-    /// Rebuild all FTS5 indexes. Call after data import or if search results seem stale.
-    func rebuildFTSIndexes() {
+    /// Rebuild all FTS5 indexes. Call after data import or if search results seem
+    /// stale. Returns whether the rebuild happened — ForgetService reports a
+    /// `false` to the user, because a stale index still serves up forgotten text.
+    @discardableResult
+    func rebuildFTSIndexes() -> Bool {
         do {
             try dbPool.write { db in
                 try db.execute(sql: "INSERT INTO recording_events_fts(recording_events_fts) VALUES('rebuild')")
@@ -537,8 +621,10 @@ final class DatabaseService: Sendable {
                 try db.execute(sql: "INSERT INTO knowledge_entries_fts(knowledge_entries_fts) VALUES('rebuild')")
             }
             logger.info("FTS indexes rebuilt successfully")
+            return true
         } catch {
             logger.error("FTS rebuild failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -654,23 +740,19 @@ final class DatabaseService: Sendable {
         }
     }
 
-    // MARK: - Search (FTS5)
-
-    /// True when the string contains kana or CJK ideographs.
-    ///
-    /// FTS5's default `unicode61` tokenizer treats every CJK codepoint as a token
-    /// character, so a contiguous Japanese run indexes as ONE token: 「今日の会議のメモ」
-    /// is a single term. A substring query like 会議 therefore can never
-    /// prefix-match it, and FTS silently returns nothing. Those queries take the
-    /// LIKE path against the base table instead.
-    static func containsCJK(_ s: String) -> Bool {
-        s.unicodeScalars.contains { u in
-            (0x3040...0x30FF).contains(u.value) ||   // hiragana + katakana
-            (0x3400...0x4DBF).contains(u.value) ||   // CJK extension A
-            (0x4E00...0x9FFF).contains(u.value) ||   // CJK unified ideographs
-            (0xF900...0xFAFF).contains(u.value)      // CJK compatibility
+    /// How many daily summaries exist. A `COUNT(*)`, because the caller that wants
+    /// this number was fetching every row — decoding each summary's whole text —
+    /// purely to ask for `.count`.
+    func summaryCount() -> Int {
+        do {
+            return try dbPool.read { db in try DailySummary.fetchCount(db) }
+        } catch {
+            logger.warning("Failed to count summaries: \(error.localizedDescription)")
+            return 0
         }
     }
+
+    // MARK: - Search (FTS5)
 
     /// Build a safe FTS5 MATCH expression, or nil if the query has no usable terms.
     ///
@@ -701,7 +783,7 @@ final class DatabaseService: Sendable {
 
         do {
             return try dbPool.read { db in
-                if Self.containsCJK(trimmed) {
+                if TextScript.containsCJK(trimmed) {
                     let p = Self.likePattern(trimmed)
                     return try DailySummary.fetchAll(db, sql: """
                         SELECT * FROM daily_summaries
@@ -769,7 +851,7 @@ final class DatabaseService: Sendable {
 
         do {
             return try dbPool.read { db in
-                if Self.containsCJK(trimmed) {
+                if TextScript.containsCJK(trimmed) {
                     // Walks the timestamp index newest-first and stops at LIMIT.
                     let p = Self.likePattern(trimmed)
                     return try RecordingEvent.fetchAll(db, sql: """
@@ -965,7 +1047,7 @@ final class DatabaseService: Sendable {
 
         do {
             return try dbPool.read { db in
-                if Self.containsCJK(trimmed) {
+                if TextScript.containsCJK(trimmed) {
                     let p = Self.likePattern(trimmed)
                     return try KnowledgeEntry.fetchAll(db, sql: """
                         SELECT * FROM knowledge_entries
@@ -1064,14 +1146,17 @@ final class DatabaseService: Sendable {
     /// Delete exactly one memory, keyed by its unique `filePath` — never by
     /// name. Two memories can share a name, and `DELETE WHERE name=?` would
     /// wipe them all while removing only one file, orphaning the rest.
-    func deleteMemory(_ entry: MemoryEntry) {
+    @discardableResult
+    func deleteMemory(_ entry: MemoryEntry) -> Bool {
         do {
             try dbPool.write { db in
                 try db.execute(sql: "DELETE FROM memory_entries WHERE filePath = ?",
                                arguments: [entry.filePath])
             }
+            return true
         } catch {
             logger.error("Failed to delete memory '\(entry.name)': \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -1139,6 +1224,109 @@ final class DatabaseService: Sendable {
         }
     }
 
+    // MARK: - Forget (time-scoped erasure)
+    //
+    // Raw events are only the INPUT. Within 60 seconds mull derives context files
+    // from them, and overnight it derives summaries, memories and knowledge. So a
+    // forget that stops at `recording_events` erases the source and leaves every
+    // conclusion drawn from it standing. These queries let ForgetService reach the
+    // derived layers too — and, first, tell the user what is about to go.
+
+    func deleteEvents(in interval: DateInterval) throws {
+        try dbPool.write { db in
+            try db.execute(sql: "DELETE FROM recording_events WHERE timestamp >= ? AND timestamp <= ?",
+                           arguments: [interval.start, interval.end])
+        }
+    }
+
+    /// Memories mull *formed* inside the window — these are conclusions about the
+    /// user drawn from the events being erased, so they go with them.
+    func fetchMemories(createdIn interval: DateInterval) -> [MemoryEntry] {
+        do {
+            return try dbPool.read { db in
+                try MemoryEntry
+                    .filter(Column("createdAt") >= interval.start && Column("createdAt") <= interval.end)
+                    .fetchAll(db)
+            }
+        } catch {
+            logger.warning("Failed to fetch memories created in window: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Memories that predate the window but were *revised* inside it. Their text
+    /// is a blend of the erased window and everything before it, and mull cannot
+    /// unmix the two — so it keeps them and reports them rather than deleting a
+    /// month of accumulated understanding to erase fifteen minutes of it.
+    func fetchMemories(revisedIn interval: DateInterval) -> [MemoryEntry] {
+        do {
+            return try dbPool.read { db in
+                try MemoryEntry
+                    .filter(Column("updatedAt") >= interval.start && Column("updatedAt") <= interval.end)
+                    .filter(Column("createdAt") < interval.start)
+                    .fetchAll(db)
+            }
+        } catch {
+            logger.warning("Failed to fetch memories revised in window: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func deleteMemories(_ entries: [MemoryEntry]) throws {
+        guard !entries.isEmpty else { return }
+        try dbPool.write { db in
+            for entry in entries {
+                try db.execute(sql: "DELETE FROM memory_entries WHERE filePath = ?",
+                               arguments: [entry.filePath])
+            }
+        }
+    }
+
+    /// Daily summaries whose subject day overlaps the window.
+    func fetchSummaries(in interval: DateInterval) -> [DailySummary] {
+        do {
+            return try dbPool.read { db in
+                try DailySummary
+                    .filter(Column("date") >= Calendar.current.startOfDay(for: interval.start)
+                            && Column("date") <= interval.end)
+                    .order(Column("date").asc)
+                    .fetchAll(db)
+            }
+        } catch {
+            logger.warning("Failed to fetch summaries in window: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func deleteSummaries(_ summaries: [DailySummary]) throws {
+        guard !summaries.isEmpty else { return }
+        try dbPool.write { db in
+            for summary in summaries where summary.id != nil {
+                try db.execute(sql: "DELETE FROM daily_summaries WHERE id = ?", arguments: [summary.id])
+            }
+        }
+    }
+
+    func countKnowledge(sourcedIn interval: DateInterval) -> Int {
+        do {
+            return try dbPool.read { db in
+                try KnowledgeEntry
+                    .filter(Column("sourceDate") >= interval.start && Column("sourceDate") <= interval.end)
+                    .fetchCount(db)
+            }
+        } catch {
+            logger.warning("Failed to count knowledge in window: \(error.localizedDescription)")
+            return 0
+        }
+    }
+
+    func deleteKnowledge(sourcedIn interval: DateInterval) throws {
+        try dbPool.write { db in
+            try db.execute(sql: "DELETE FROM knowledge_entries WHERE sourceDate >= ? AND sourceDate <= ?",
+                           arguments: [interval.start, interval.end])
+        }
+    }
+
     func deleteEventsOlderThan(days: Int) throws {
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
         try dbPool.write { db in
@@ -1160,7 +1348,12 @@ final class DatabaseService: Sendable {
     /// setting — including every `whatly.sqlite` migrated in at init — report
     /// auto_vacuum = NONE and silently ignore it, so the file never shrinks after
     /// a delete. Fall back to a full VACUUM for those.
-    func vacuum() {
+    ///
+    /// Returns whether the pages were actually reclaimed. Callers cleaning up
+    /// after a *forget* must report a `false`: until the vacuum runs, the
+    /// deleted text is still sitting in unreferenced pages of the file.
+    @discardableResult
+    func vacuum() -> Bool {
         do {
             let mode = try dbPool.read { db in
                 try Int.fetchOne(db, sql: "PRAGMA auto_vacuum") ?? 0
@@ -1176,8 +1369,10 @@ final class DatabaseService: Sendable {
                     try db.execute(sql: "VACUUM")
                 }
             }
+            return true
         } catch {
             logger.warning("Vacuum failed: \(error.localizedDescription)")
+            return false
         }
     }
 

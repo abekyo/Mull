@@ -125,4 +125,21 @@ final class ModeTests: XCTestCase {
         event.mode = "not-a-mode"
         XCTAssertEqual(event.resolvedMode, .communicate)
     }
+
+    // MARK: - weight (the term Selection.rank reads)
+
+    func testWeightOrdersActsAboveAmbientInput() {
+        // MAP-ARCHITECTURE says MODE is used for 「重み付け・選別」, but nothing in
+        // the selection path read it until 2026-08-09. This is that term.
+        XCTAssertGreaterThan(Mode.decide.weight, Mode.produce.weight)
+        XCTAssertGreaterThan(Mode.produce.weight, Mode.think.weight)
+        XCTAssertGreaterThan(Mode.think.weight, Mode.research.weight)
+        XCTAssertGreaterThan(Mode.research.weight, Mode.communicate.weight)
+        XCTAssertGreaterThan(Mode.communicate.weight, Mode.consume.weight)
+    }
+
+    func testWeightOrdersButNeverFilters() {
+        // Law 5: no destructive lenses. Even `consume` stays selectable.
+        for m in Mode.allCases { XCTAssertGreaterThan(m.weight, 0) }
+    }
 }

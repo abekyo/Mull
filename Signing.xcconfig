@@ -1,0 +1,19 @@
+// Build settings for the Mull target. Tracked in git, so a fresh clone always
+// has the file `project.yml` points at.
+//
+// Anything machine-specific belongs in Local.xcconfig instead — it is gitignored
+// and optional, and the include below is the `#include?` form, which is silently
+// skipped when the file is absent. Pointing XcodeGen straight at Local.xcconfig
+// used to fail `xcodegen generate` on any clone but the author's:
+//
+//     Target "Mull" has invalid config file path ".../Local.xcconfig"
+//
+// Without Local.xcconfig, MULL_CODE_SIGN_IDENTITY stays unset and the signing
+// identity falls back to ad-hoc "-" (see project.yml), which builds and runs but
+// makes macOS re-prompt for Accessibility/Calendar/Input Monitoring on every
+// rebuild. See Local.xcconfig.example for how to stop the re-prompting.
+//
+// Local.xcconfig also carries the Release-only values (Developer ID identity,
+// team ID, notary profile). scripts/release.sh reads them from that same file
+// rather than keeping a second copy, so there is one place to set them.
+#include? "Local.xcconfig"

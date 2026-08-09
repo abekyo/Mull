@@ -31,5 +31,17 @@ Mull*.xcodeproj/
 # Claude Code local state
 .claude/
 
-# Machine-specific signing identity (see Local.xcconfig.example)
+# Machine-specific signing identity (see Local.xcconfig.example). Signing.xcconfig
+# is the tracked one project.yml points at; it #include?s this file when present.
 Local.xcconfig
+
+# Internal business documents — deliberately NOT published (decided 2026-08-09).
+# The technical docs (DIRECTION / SELECTION-LAYER / MAP-ARCHITECTURE / ROADMAP)
+# ship with the repo; these two hold the live commercial plan and the competitor
+# revenue ledger it rests on. Docs that reference them use plain text, not links,
+# so nothing dangles in the published tree.
+STRATEGY-2026-08.md
+MARKET-2026-08.md
+
+# Build artifacts that land in the repo root
+default.profraw

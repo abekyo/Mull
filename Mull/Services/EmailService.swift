@@ -72,6 +72,11 @@ final class EmailService {
     private static let problemLock = NSLock()
     private static var storedProblem: AccessProblem?
 
+    /// Called once when a working capture starts failing, so the app can say so
+    /// somewhere the user is actually looking. Set by AppState; the poll runs on
+    /// `scriptQueue`, so implementations must hop to the main actor themselves.
+    nonisolated(unsafe) static var onProblemAppeared: ((AccessProblem) -> Void)?
+
     static var lastProblem: AccessProblem? {
         get { problemLock.lock(); defer { problemLock.unlock() }; return storedProblem }
         set { problemLock.lock(); storedProblem = newValue; problemLock.unlock() }
@@ -162,9 +167,15 @@ final class EmailService {
         guard isEnabled else { return }
         Self.scriptQueue.async { [weak self] in
             guard let self, self.isEnabled else { return }
+            let hadProblem = Self.lastProblem != nil
             switch Self.runInboxQuery() {
             case .failure(let problem):
                 Self.lastProblem = problem
+                // Settings › Data was the only place this ever showed, so a
+                // permission revoked months after the user agreed left the
+                // toggle on, the capture dead, and nothing anywhere saying so.
+                // Announce the transition once — not on every five-minute poll.
+                if !hadProblem { Self.onProblemAppeared?(problem) }
             case .success(let output):
                 Self.lastProblem = nil
                 self.record(output)

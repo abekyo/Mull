@@ -13,20 +13,80 @@ import AppKit
 ///   3. This Week — week-over-week comparison + deep work
 ///   4. Schedule — today's calendar
 ///   5. Activity — recent proof of life
+/// Home's reading of the record, held above the view that draws it.
+///
+/// HomeTab is built inside `FullWindowView`'s `switch selection`, so navigating away
+/// destroys the view and every `@State` on it. That quietly made two pieces of this
+/// file's own logic dead letters — "the skeleton is first-load only", and the
+/// 60-second staleness guard — because every return to Home was a first load. Going
+/// to Calendar and coming back five seconds later flashed the skeleton and re-ran a
+/// fortnight of project analysis and pattern detection to reach the answer that had
+/// been on screen a moment earlier, and the reader's search filters went with it.
+///
+/// Anything here survives leaving Home. Anything still `@State` on the view below is
+/// deliberately per-visit.
+@MainActor
+final class HomeAnalysis: ObservableObject {
+    @Published var projects: [ProjectSnapshot] = []
+    @Published var weekDays: [DaySnapshot] = []
+    @Published var weekComp: WeekComparison?
+    @Published var behaviorPatterns: [BehaviorPattern] = []
+    @Published var directoryIssue: String? = MullDirectory.issueDescription
+    /// When the analysis on screen was computed, and whether one has ever landed.
+    @Published var lastRefreshed: Date?
+    @Published var isLoading = true
+    @Published var hasLoadedOnce = false
+    @Published var isRefreshing = false
+    /// Today's calendar. Here rather than on the view so the hero's countdown and the
+    /// schedule card are not blank for an EventKit round trip every time Home is
+    /// returned to.
+    @Published var todayEvents: [CalendarEvent] = []
+    @Published var calendarAuthorized = true
+
+    // Search filters — which kinds of hit to show, over what period, from which apps.
+    @Published var enabledKinds: Set<SearchHit.Kind> = Set(SearchHit.Kind.allCases)
+    @Published var timeRange: SearchRange = .all
+    @Published var selectedApps: Set<String> = []   // empty = all apps
+}
+
 struct HomeTab: View {
     @EnvironmentObject var appState: AppState
+    /// Owned by the parent, so it outlives a trip to Calendar. See `HomeAnalysis`.
+    @ObservedObject var analysis: HomeAnalysis
     @Binding var searchQuery: String
     /// Open a date in the Calendar Day view — wired by the parent so a search hit can jump
     /// to the day it happened.
     var onOpenDay: (Date) -> Void = { _ in }
     @State private var debouncedQuery = ""
-    @State private var projects: [ProjectSnapshot] = []
-    @State private var weekDays: [DaySnapshot] = []
-    @State private var weekComp: WeekComparison?
-    @State private var behaviorPatterns: [BehaviorPattern] = []
+    // Pass-throughs to `analysis`, so the ~40 places that read and write these read
+    // exactly as they did when they were `@State`. What changed is where the values
+    // live: on an object the parent holds, not on a view the parent throws away.
+    private var projects: [ProjectSnapshot] {
+        get { analysis.projects }
+        nonmutating set { analysis.projects = newValue }
+    }
+    private var weekDays: [DaySnapshot] {
+        get { analysis.weekDays }
+        nonmutating set { analysis.weekDays = newValue }
+    }
+    private var weekComp: WeekComparison? {
+        get { analysis.weekComp }
+        nonmutating set { analysis.weekComp = newValue }
+    }
+    private var behaviorPatterns: [BehaviorPattern] {
+        get { analysis.behaviorPatterns }
+        nonmutating set { analysis.behaviorPatterns = newValue }
+    }
+    private var isLoading: Bool {
+        get { analysis.isLoading }
+        nonmutating set { analysis.isLoading = newValue }
+    }
+    private var hasLoadedOnce: Bool {
+        get { analysis.hasLoadedOnce }
+        nonmutating set { analysis.hasLoadedOnce = newValue }
+    }
+
     @State private var searchDebounceTask: Task<Void, Never>?
-    @State private var isLoading = true
-    @State private var hasLoadedOnce = false
 
     // Search results are STATE, not derived in body: the three queries behind them
     // (event FTS, a 15-month EventKit scan, summary FTS) are blocking, and AppState
@@ -49,26 +109,51 @@ struct HomeTab: View {
     // summary CalendarService also produces. That string exists for AI context
     // files; re-parsing it back into rows here mangled any title containing a
     // hyphen ("Sprint - retro" → "Sprintretro").
-    @State private var todayEvents: [CalendarEvent] = []
-    @State private var nextEvent: (title: String, start: Date, minutesUntil: Int)?
-    @State private var calendarAuthorized = true
+    private var todayEvents: [CalendarEvent] {
+        get { analysis.todayEvents }
+        nonmutating set { analysis.todayEvents = newValue }
+    }
+    /// The next thing on the calendar, worked out against the clock every time this
+    /// page draws rather than fetched as a frozen "minutes until".
+    ///
+    /// It used to be its own EventKit read, stored with the countdown already
+    /// computed and refreshed only on appear, on app activation, or by hand — so on a
+    /// window left open the hero sat at "12m until Standup" while Standup began and
+    /// ended, and `scheduleRow` a few points below it (which does read the clock on
+    /// every pass) said "now" at the same moment. Today's events are already here;
+    /// asking them is both live and one EventKit call cheaper.
+    private var nextEvent: CalendarEvent? {
+        let now = Date()
+        return todayEvents.filter { $0.start > now }.min { $0.start < $1.start }
+    }
+    private var calendarAuthorized: Bool {
+        get { analysis.calendarAuthorized }
+        nonmutating set { analysis.calendarAuthorized = newValue }
+    }
 
     // Disclosure / expansion state — nothing here is truncated silently, so the
     // view has to remember what the reader chose to open.
     @State private var showAllProjects = false
     @State private var showAllPatterns = false
     @State private var revealedDiagnostics: Set<String> = []
-    @State private var directoryIssue: String? = MullDirectory.issueDescription
 
+    private var directoryIssue: String? {
+        get { analysis.directoryIssue }
+        nonmutating set { analysis.directoryIssue = newValue }
+    }
     /// When the analysis on screen was computed. Home used to refresh only on
     /// navigation and never said how old it was.
-    @State private var lastRefreshed: Date?
-    @State private var isRefreshing = false
-
-    // Search filters — which kinds of hit to show, and how far back to look.
-    @State private var enabledKinds: Set<SearchHit.Kind> = Set(SearchHit.Kind.allCases)
-    @State private var timeRange: SearchRange = .all
-    @State private var selectedApps: Set<String> = []   // empty = all apps
+    private var lastRefreshed: Date? {
+        get { analysis.lastRefreshed }
+        nonmutating set { analysis.lastRefreshed = newValue }
+    }
+    private var isRefreshing: Bool {
+        get { analysis.isRefreshing }
+        nonmutating set { analysis.isRefreshing = newValue }
+    }
+    private var enabledKinds: Set<SearchHit.Kind> { analysis.enabledKinds }
+    private var timeRange: SearchRange { analysis.timeRange }
+    private var selectedApps: Set<String> { analysis.selectedApps }
 
     var body: some View {
         ScrollView {
@@ -86,9 +171,9 @@ struct HomeTab: View {
                     hits: resultsAreCurrent ? searchHits : [],
                     summaries: resultsAreCurrent ? summaryHits : [],
                     isRunning: searchRunning || !resultsAreCurrent,
-                    enabledKinds: $enabledKinds,
-                    timeRange: $timeRange,
-                    selectedApps: $selectedApps,
+                    enabledKinds: $analysis.enabledKinds,
+                    timeRange: $analysis.timeRange,
+                    selectedApps: $analysis.selectedApps,
                     onOpenDay: onOpenDay,
                     projectCard: { projectCard($0, expanded: true) }
                 )
@@ -99,7 +184,16 @@ struct HomeTab: View {
         // Home is revisited constantly (Calendar → Home → Calendar). Re-running the
         // 14-day analysis is fine; replacing the loaded page with a skeleton
         // every single time is not — so the skeleton is first-load only.
-        .onAppear { refreshIfStale() }
+        .onAppear {
+            refreshIfStale()
+            // A query can already be in the field by the time Home is mounted:
+            // typing while Calendar, Live, Chat or a note was open navigates *here*,
+            // and that assignment happens before this view exists. `.onChange(of:
+            // searchQuery)` below therefore never saw it, `debouncedQuery` stayed
+            // empty, and the first character of a search started anywhere else
+            // produced no results at all until a second one was typed.
+            if debouncedQuery != searchQuery { debouncedQuery = searchQuery }
+        }
         // Coming back to the app is the honest moment to re-read: you were away,
         // the record moved on. Quietly, underneath what is already drawn.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -131,8 +225,16 @@ struct HomeTab: View {
             if let reason = appState.database.fallbackReason {
                 recordNotice(
                     title: "Some of the record may be missing",
-                    message: "mull is still keeping today, but it could not open its own store the usual way. Nothing already saved has been discarded. Restarting mull will try again from the beginning.",
+                    message: appState.database.isFallback
+                        // The temporary-location case is not "some may be missing",
+                        // it is "everything from this session goes on restart", and
+                        // that is worth its own sentence.
+                        ? "mull could not open its own store, so today is being kept in a temporary file that will not survive a restart. Nothing already saved has been discarded. Restarting mull will try the real store again."
+                        : "mull is still keeping today, but it could not open its own store the usual way. Nothing already saved has been discarded. Restarting mull will try again from the beginning.",
                     diagnostic: reason,
+                    // The database lives in Application Support, not ~/mull — the
+                    // shared button used to send people to the wrong folder.
+                    revealPath: "~/Library/Application Support/mull",
                     retry: nil
                 )
             }
@@ -278,6 +380,11 @@ struct HomeTab: View {
                         .font(DS.bodyFont)
                         .foregroundStyle(DS.inkDim)
                         .lineLimit(1)
+                        // File names carry their meaning at both ends — the folder
+                        // at the start, the extension at the end — so a long one
+                        // loses its middle, and the whole of it is on hover.
+                        .truncationMode(.middle)
+                        .help(resume.lastFile ?? resume.name)
                     Spacer()
                 }
                 .padding(.top, DS.xs)
@@ -286,9 +393,16 @@ struct HomeTab: View {
         .padding(DS.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: DS.radiusLg)
-                .fill(DS.surface)
-                .moonGlow(0.14)
+            ZStack {
+                RoundedRectangle(cornerRadius: DS.radiusLg)
+                    .fill(DS.surface)
+                    .moonGlow(0.14)
+                // The icon's stipple rings, held at watermark strength — the same
+                // figure as the Dock icon, growing out of the card's top-right
+                // corner. Kept faint enough that the type never has to fight it.
+                StippleRings(center: CGPoint(x: 0.86, y: 0.12))
+                    .opacity(0.08)
+            }
         )
         .overlay(
             RoundedRectangle(cornerRadius: DS.radiusLg)
@@ -311,43 +425,48 @@ struct HomeTab: View {
                     .tracking(1.2)
                     .foregroundStyle(DS.inkFaint)
 
-                ForEach(top) { project in
-                    strataRow(project, fraction: project.totalDuration / maxDur)
+                // A Grid, so the bars beside the names start on one shared line —
+                // that alignment is what makes the strata readable as a comparison.
+                // The name column sizes itself to the longest of the three names
+                // instead of a fixed 120pt, which cut anything past ~15 characters
+                // (about eight in Japanese) permanently. The cap keeps a pathological
+                // title from squeezing the bars into meaninglessness; past it, the
+                // full name is on hover.
+                Grid(alignment: .leading, horizontalSpacing: DS.md, verticalSpacing: DS.sm) {
+                    ForEach(top) { project in
+                        GridRow {
+                            Text(project.name)
+                                .font(DS.bodyFont)
+                                .foregroundStyle(DS.ink)
+                                .lineLimit(1)
+                                .frame(maxWidth: 220, alignment: .leading)
+                                .help(project.name)
+                            strataBar(fraction: project.totalDuration / maxDur)
+                            Text(project.totalDurationFormatted)
+                                .font(DS.microFont)
+                                .foregroundStyle(DS.inkFaint)
+                                .gridColumnAlignment(.trailing)
+                        }
+                    }
                 }
             }
             .padding(.top, DS.xs)
         }
     }
 
-    private func strataRow(_ project: ProjectSnapshot, fraction: Double) -> some View {
-        HStack(spacing: DS.md) {
-            // The column is fixed so the bars beside it start on one line — that
-            // alignment is what makes the strata readable as a comparison. The cost
-            // is that a name past ~15 characters is cut, permanently and with no
-            // way to ask what it was, so the full name is available on hover.
-            Text(project.name)
-                .font(DS.bodyFont)
-                .foregroundStyle(DS.ink)
-                .frame(width: 120, alignment: .leading)
-                .lineLimit(1)
-                .help(project.name)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(DS.hairline)
-                        .frame(height: 4)
-                    // Flat tobacco, not a gradient: the bar's length is the only
-                    // thing carrying meaning here.
-                    Capsule().fill(DS.moon)
-                        .frame(width: max(6, geo.size.width * fraction), height: 4)
-                }
-                .frame(maxHeight: .infinity, alignment: .center)
+    private func strataBar(fraction: Double) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(DS.hairline)
+                    .frame(height: 4)
+                // Flat tobacco, not a gradient: the bar's length is the only
+                // thing carrying meaning here.
+                Capsule().fill(DS.moon)
+                    .frame(width: max(6, geo.size.width * fraction), height: 4)
             }
-            .frame(height: 8)
-            Text(project.totalDurationFormatted)
-                .font(DS.microFont)
-                .foregroundStyle(DS.inkFaint)
-                .frame(width: 52, alignment: .trailing)
+            .frame(maxHeight: .infinity, alignment: .center)
         }
+        .frame(height: 8)
     }
 
     // MARK: - The today-claim
@@ -407,12 +526,13 @@ struct HomeTab: View {
     /// VStack stays simple enough to type-check.
     @ViewBuilder private var focusLineView: some View {
         if let focus = focusLine {
-            HStack(spacing: DS.sm) {
-                Image(systemName: focus.icon)
-                    .font(DS.captionFont)
-                    .foregroundStyle(DS.moon.opacity(0.8))
+            HStack(alignment: .firstTextBaseline, spacing: DS.sm) {
+                // One mark for every state. The per-state glyph (clock, calendar,
+                // checkmark) made four voices out of one quiet sentence — the
+                // words already say which case this is.
+                StippleMark(dot: 2.5)
                     .frame(width: 14)
-                Text(focus.text)
+                Text(focus)
                     .font(DS.smallFont)
                     .foregroundStyle(DS.inkDim)
                 Spacer()
@@ -422,21 +542,26 @@ struct HomeTab: View {
 
     /// Next meeting countdown, or uninterrupted-focus note. The one piece of the
     /// old Today's Briefing not already covered by the hero's resume point.
-    private var focusLine: (icon: String, text: String)? {
-        if let next = nextEvent, next.minutesUntil > 0 {
-            let h = next.minutesUntil / 60, m = next.minutesUntil % 60
+    private var focusLine: String? {
+        if let next = nextEvent {
+            // Rounded up and floored at one minute. Whole-minute truncation put a
+            // meeting starting in 40 seconds at `minutesUntil == 0`, which failed the
+            // "is there anything upcoming" test and made the page announce that the
+            // day's last meeting had ended — 40 seconds before the next one began.
+            let minutes = max(Int((next.start.timeIntervalSince(Date()) / 60).rounded(.up)), 1)
+            let h = minutes / 60, m = minutes % 60
             let t = h > 0 ? "\(h)h\(m > 0 ? " \(m)m" : "")" : "\(m)m"
-            return ("clock", "\(t) until \(next.title)")
+            return "\(t) until \(next.title)"
         }
         // "Nothing upcoming" has three very different meanings, and claiming
         // "uninterrupted focus" for all of them was a lie in two of them.
         if !calendarAuthorized {
-            return ("calendar.badge.exclamationmark", "No calendar access, so no schedule here")
+            return "No calendar access, so no schedule here"
         }
         if !todayEvents.isEmpty {
-            return ("checkmark.circle", "Today's last meeting has ended")
+            return "Today's last meeting has ended"
         }
-        return ("calendar", "Nothing on the calendar today")
+        return "Nothing on the calendar today"
     }
 
     // MARK: - Behavior Patterns Section
@@ -455,7 +580,7 @@ struct HomeTab: View {
                     .sectionLabel()
                 Spacer()
                 if behaviorPatterns.count > Self.patternPreviewCount {
-                    Text(Self.countLabel(showing: shown.count, of: behaviorPatterns.count, noun: "pattern"))
+                    Text(Self.countLabel(showing: shown.count, of: behaviorPatterns.count))
                         .font(DS.captionFont)
                         .foregroundStyle(DS.inkFaint)
                 }
@@ -479,6 +604,12 @@ struct HomeTab: View {
     private static func countLabel(showing: Int, of total: Int, noun: String) -> String {
         let unit = pluralNoun(total, noun)
         return showing == total ? "\(total) \(unit)" : "\(showing) of \(total) \(unit)"
+    }
+
+    /// The same count for a header that has already named the noun. "PATTERNS · 3 of 7"
+    /// says everything "PATTERNS · 3 of 7 patterns" does, without saying it twice.
+    private static func countLabel(showing: Int, of total: Int) -> String {
+        showing == total ? "\(total)" : "\(showing) of \(total)"
     }
 
     /// "Show N more" / "Show fewer", or nothing when everything is already out.
@@ -538,10 +669,8 @@ struct HomeTab: View {
                 .padding(.leading, DS.lg)
 
             // Action — what to do about it
-            HStack(spacing: DS.sm) {
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(DS.captionFont)
-                    .foregroundStyle(DS.moon)
+            HStack(alignment: .firstTextBaseline, spacing: DS.sm) {
+                StippleMark(dot: 2.5)
                 Text(pattern.action)
                     .font(DS.bodyMedium)
                     .foregroundStyle(DS.moon)
@@ -589,7 +718,7 @@ struct HomeTab: View {
                 Spacer()
                 // Reads "6 projects" when six is all there is, and
                 // "6 of 9 projects" when it isn't.
-                Text(Self.countLabel(showing: shown.count, of: projects.count, noun: "project"))
+                Text(Self.countLabel(showing: shown.count, of: projects.count))
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkGhost)
             }
@@ -619,6 +748,7 @@ struct HomeTab: View {
                             Text(project.name)
                                 .font(DS.bodyMedium)
                                 .lineLimit(1)
+                                .help(project.name)
 
                             if isStale {
                                 Text("stalled")
@@ -656,7 +786,7 @@ struct HomeTab: View {
             if project.lastFile != nil || project.lastClipboard != nil {
                 VStack(alignment: .leading, spacing: DS.xs) {
                     if isStale || expanded {
-                        Text("RESUME POINT")
+                        Text("RESUME")
                             .font(DS.miniBold)
                             .tracking(0.5)
                             .foregroundStyle(isStale ? DS.paused : DS.inkFaint)
@@ -671,6 +801,8 @@ struct HomeTab: View {
                                 .font(DS.captionFont)
                                 .foregroundStyle(DS.inkDim)
                                 .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(file)
                         }
                     }
 
@@ -684,6 +816,7 @@ struct HomeTab: View {
                                 .foregroundStyle(DS.inkFaint)
                                 .italic()
                                 .lineLimit(2)
+                                .help(clip)
                         }
                     }
                 }
@@ -765,10 +898,12 @@ struct HomeTab: View {
                         .foregroundStyle(isLast ? DS.inkDim : DS.inkFaint)
                         .frame(width: 65, alignment: .leading)
 
+                    // 48pt, not 40: "1h 45m" is seven mono glyphs at 10pt, which is
+                    // ~42pt — the old width cut the longest durations to "1h 4…".
                     Text(session.durationFormatted)
                         .font(DS.microFont)
                         .foregroundStyle(isLast ? DS.moon : DS.inkDim)
-                        .frame(width: 40, alignment: .trailing)
+                        .frame(width: 48, alignment: .trailing)
 
                     if !session.mainLabel.isEmpty && session.mainLabel != project.name {
                         Text(session.mainLabel)
@@ -778,15 +913,10 @@ struct HomeTab: View {
                             .help(session.mainLabel)
                     }
 
-                    // "← here" was a glyph the reader had to decode: an arrow into a
-                    // deictic with no referent. It marks the last session on a project
-                    // nothing has touched for days, so it says that.
-                    if isLast && project.daysSinceActive >= 3 {
-                        Text("you left off here")
-                            .font(DS.miniMedium)
-                            .foregroundStyle(DS.paused)
-                    }
-                }
+                    // No third dormancy marker here. A stalled card already carries the
+                    // `stalled` badge, the days-since figure and the RESUME block; the
+                    // last row is the moon-coloured one, which is marker enough.
+}
             }
         }
         .padding(.leading, DS.lg)
@@ -841,12 +971,17 @@ struct HomeTab: View {
                 .font(isNow ? DS.bodyMedium : DS.bodyFont)
                 .foregroundStyle(isNow ? DS.ink : DS.inkDim)
                 .lineLimit(1)
+                // When the row runs out of room, the location gives way before the
+                // title does — the event's name is the row.
+                .layoutPriority(1)
+                .help(event.title)
 
             if let location = event.location, !location.isEmpty {
                 Text(location)
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
                     .lineLimit(1)
+                    .help(location)
             }
 
             Spacer(minLength: 0)
@@ -882,9 +1017,12 @@ struct HomeTab: View {
         let recordingOff = !appState.isRecording
 
         return VStack(spacing: DS.lg) {
-            Image(systemName: "moon.stars")
-                .font(DS.heroFont)
-                .foregroundStyle(DS.moon.opacity(0.3))
+            // The first rings of the icon's figure, sparse and half-formed — a
+            // record that has only begun to accrete. The same motif as the Dock
+            // icon, so the empty page and the app wear one face.
+            StippleRings.roundel()
+                .frame(width: 88, height: 88)
+                .opacity(0.55)
 
             VStack(spacing: DS.sm) {
                 Text(recordingOff ? "Nothing is being kept" : "Still a quiet page")
@@ -892,8 +1030,8 @@ struct HomeTab: View {
                     .foregroundStyle(DS.ink)
 
                 Text(recordingOff
-                     ? "Recording is off, so there is nothing here for mull to hold. Turning it back on, and the permissions it needs, both live in Settings."
-                     : "A day's work makes the first page. Until there is one there is little to show — and everything kept stays on this Mac.")
+                     ? "Recording is off. Turning it back on, and the permissions it needs, both live in Settings."
+                     : "A day's work makes the first page, and there hasn't been one yet.")
                     .font(DS.bodyFont)
                     .foregroundStyle(DS.inkDim)
                     .multilineTextAlignment(.center)
@@ -936,7 +1074,7 @@ struct HomeTab: View {
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkDim)
 
-            Text("This page fills in as the day takes a shape worth naming. The written summary comes overnight, once there is a day between them and about \(ConsolidationScheduler.minEventsRequired) moments to read.")
+            Text("The written summary comes overnight, once there is a day between them and about \(ConsolidationScheduler.minEventsRequired) moments to read.")
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkFaint)
                 .multilineTextAlignment(.center)
@@ -1006,15 +1144,13 @@ struct HomeTab: View {
         // lets CalendarService read anything.
         let authorized = EKEventStore.authorizationStatus(for: .event) == .fullAccess
 
-        let loaded = await Task.detached(priority: .userInitiated) {
-            (events: calendarService.events(for: Date()),
-             next: calendarService.upcomingEvents(limit: 1).first)
+        let events = await Task.detached(priority: .userInitiated) {
+            calendarService.events(for: Date())
         }.value
 
         guard !Task.isCancelled else { return }
         calendarAuthorized = authorized
-        todayEvents = loaded.events
-        nextEvent = loaded.next
+        todayEvents = events
     }
 
     // MARK: - Data Loading
@@ -1149,6 +1285,10 @@ struct HomeTab: View {
         title: String,
         message: String,
         diagnostic: String,
+        /// Which folder the "Reveal" button opens. Defaults to the vault; the
+        /// database notice points at Application Support instead, because a
+        /// button that opens the wrong folder is worse than no button.
+        revealPath: String = "~/mull",
         retry: (() -> Void)?
     ) -> some View {
         let revealed = revealedDiagnostics.contains(diagnostic)
@@ -1177,10 +1317,10 @@ struct HomeTab: View {
                         .buttonStyle(HomeActionButtonStyle())
                 }
 
-                Button("Reveal ~/mull in Finder") {
+                Button("Reveal \(revealPath) in Finder") {
                     _ = NSWorkspace.shared.selectFile(
                         nil,
-                        inFileViewerRootedAtPath: NSString(string: "~/mull").expandingTildeInPath
+                        inFileViewerRootedAtPath: NSString(string: revealPath).expandingTildeInPath
                     )
                 }
                 .buttonStyle(HomeActionButtonStyle())

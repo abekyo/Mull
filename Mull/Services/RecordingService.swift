@@ -106,11 +106,14 @@ final class RecordingService {
 
         startBrowserURLMonitor()
 
-        startKeystrokeCapture()
-        // CGEvent tap creation logs its own success/failure
+        // A tap that cannot be created means keystroke capture is dead from the
+        // first second. The health check would notice, but only on its 10s tick,
+        // and it used to seed itself as healthy regardless — so the UI said
+        // "Recording" over nothing for the first ten seconds of every launch.
+        let tapAlive = startKeystrokeCapture()
 
         startWakeMonitor()
-        startHealthCheck()
+        startHealthCheck(initialHealth: tapAlive)
         updateCurrentApp()
         print("[mull] All monitors running")
     }
@@ -210,7 +213,7 @@ final class RecordingService {
             print("[mull] → Clipboard and window title recording will still work without this")
             return false
         }
-        print("[mull] ✓ CGEvent tap created successfully — keystroke capture active")
+        print("[mull] CGEvent tap created — keystroke capture active")
 
         eventTap = tap
         runLoopSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
@@ -450,11 +453,11 @@ final class RecordingService {
             return
         }
 
-        guard !browserFetchInFlight, let script = browserURLScript() else { return }
+        guard !browserFetchInFlight, let ask = browserURLScript() else { return }
         browserFetchInFlight = true
 
         Self.browserQueue.async {
-            let url = Self.runBrowserURLScript(script)
+            let url = Self.runBrowserURLScript(ask.script, browser: ask.browser)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.browserFetchInFlight = false
@@ -468,19 +471,19 @@ final class RecordingService {
     /// AppleScript source for the frontmost browser, or nil if the front app isn't
     /// one we can ask. Touches NSWorkspace, so it stays on the main thread.
     /// Works with Safari, Chrome, Arc, Brave, Edge (Firefox exposes no URL).
-    private func browserURLScript() -> String? {
+    private func browserURLScript() -> (script: String, browser: String)? {
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bundleID = app.bundleIdentifier else { return nil }
 
         switch bundleID {
         case "com.apple.Safari", "com.apple.SafariTechnologyPreview":
-            return "tell application \"Safari\" to get URL of current tab of front window"
+            return ("tell application \"Safari\" to get URL of current tab of front window", "Safari")
 
         case "com.google.Chrome", "com.google.Chrome.canary",
              "com.brave.Browser", "com.microsoft.edgemac",
              "company.thebrowser.Browser": // Arc
             let appName = app.localizedName ?? "Google Chrome"
-            return "tell application \"\(appName)\" to get URL of active tab of front window"
+            return ("tell application \"\(appName)\" to get URL of active tab of front window", appName)
 
         default:
             // Firefox included: it doesn't support AppleScript for URL.
@@ -488,13 +491,70 @@ final class RecordingService {
         }
     }
 
+    /// Why mull can't read the address bar, in the user's terms.
+    ///
+    /// This used to be nothing at all: the error dictionary was discarded, so a
+    /// denied Automation permission and "the front window has no URL" produced
+    /// the same silence. And the ask arrives unannounced — the first fetch runs
+    /// moments after onboarding's permission screen, so a reflexive "Don't Allow"
+    /// is permanent, invisible, and takes every browser URL with it.
+    enum BrowserAccessProblem: Equatable, Sendable {
+        /// The macOS Automation permission was denied (AppleScript -1743/-1744).
+        case automationDenied(browser: String)
+        /// Anything else AppleScript reported, verbatim.
+        case scriptFailed(browser: String, detail: String)
+
+        var message: String {
+            switch self {
+            case .automationDenied(let browser):
+                "macOS is blocking mull from reading \(browser)'s address bar. Allow it in System Settings › Privacy & Security › Automation › mull › \(browser)."
+            case .scriptFailed(let browser, let detail):
+                "\(browser) returned an error when mull asked for the current page: \(detail)"
+            }
+        }
+
+        var isPermission: Bool {
+            if case .automationDenied = self { return true }
+            return false
+        }
+    }
+
+    /// The last thing that went wrong asking a browser for its URL, or nil if the
+    /// last attempt worked. Lock-guarded: written from `browserQueue`, read from
+    /// the main thread by Settings.
+    private static let browserProblemLock = NSLock()
+    private static var storedBrowserProblem: BrowserAccessProblem?
+
+    static var lastBrowserProblem: BrowserAccessProblem? {
+        get { browserProblemLock.lock(); defer { browserProblemLock.unlock() }; return storedBrowserProblem }
+        set { browserProblemLock.lock(); storedBrowserProblem = newValue; browserProblemLock.unlock() }
+    }
+
     /// The blocking part. Static and argument-only so it cannot reach instance
     /// state from the background queue.
-    private static func runBrowserURLScript(_ source: String) -> String? {
+    private static func runBrowserURLScript(_ source: String, browser: String) -> String? {
         guard let scriptObj = NSAppleScript(source: source) else { return nil }
         var error: NSDictionary?
         let result = scriptObj.executeAndReturnError(&error)
-        guard error == nil, let url = result.stringValue, !url.isEmpty else { return nil }
+
+        if let error {
+            let code = (error[NSAppleScript.errorNumber] as? Int) ?? 0
+            // -1743: the user said no. -1744: not yet authorized for this target.
+            if code == -1743 || code == -1744 {
+                lastBrowserProblem = .automationDenied(browser: browser)
+            } else if code == -1728 || code == -600 {
+                // "No front window" / app not running — an ordinary state, not a
+                // problem to report. A browser with no window open hits this.
+                lastBrowserProblem = nil
+            } else {
+                let detail = (error[NSAppleScript.errorMessage] as? String) ?? "error \(code)"
+                lastBrowserProblem = .scriptFailed(browser: browser, detail: detail)
+            }
+            return nil
+        }
+
+        lastBrowserProblem = nil
+        guard let url = result.stringValue, !url.isEmpty else { return nil }
         return url
     }
 
@@ -553,18 +613,7 @@ final class RecordingService {
             // Skip mull's own output (recording our own output is a feedback loop).
             // Includes Curator provenance markers — copying a me.md block would
             // otherwise feed "hash", "src", "agent" back in as "focus topics".
-            if text.contains("mull:block") ||
-               text.contains("mull:auto") ||
-               text.contains("mull is recording") ||
-               text.contains("mull is still learning") ||
-               text.contains("auto-updated:") ||
-               text.contains("About the user (auto") ||
-               text.contains("What the user is currently") ||
-               text.contains("Raw activity data for") ||
-               text.contains("Context about the user") ||
-               text.contains("No activity recorded") {
-                return
-            }
+            if MarkdownDoc.isGeneratedByMull(text) { return }
 
             // Log the shape, never the content: Console.app is world-readable to any
             // process that can talk to the unified log, so echoing clipboard text
@@ -609,8 +658,9 @@ final class RecordingService {
     /// Notifies AppState via `onHealthStatusChanged` so UI stays in sync.
     private var lastHealthStatus: Bool = true
 
-    private func startHealthCheck() {
-        lastHealthStatus = true
+    private func startHealthCheck(initialHealth: Bool = true) {
+        lastHealthStatus = initialHealth
+        if !initialHealth { onHealthStatusChanged?(false) }
         healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             // While paused the tap is disabled *on purpose* (setPaused). Without the
             // isPaused check this timer read that as "macOS killed the tap" and

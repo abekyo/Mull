@@ -1,0 +1,17 @@
+name: eval
+
+# The selection layer is the product claim (STRATEGY §2-3), so the harness that
+# measures it has to keep running. It has broken twice by accident — both times
+# because something it compiles started importing GRDB — and nobody noticed
+# because nothing ran it. Now something does.
+on:
+  push:
+  pull_request:
+
+jobs:
+  selection-eval:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run selection eval
+        run: ./eval/run.sh

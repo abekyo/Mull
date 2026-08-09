@@ -57,11 +57,14 @@ struct FullWindowView: View {
     /// joined string because a folder name may legally contain any separator we'd pick.
     @AppStorage("sidebar.expandedFolders") private var storedExpandedFolders = "[]"
 
-    @State private var searchPresented = false          // ⌘K focuses the toolbar search
+    @FocusState private var searchFocused: Bool         // ⌘K focuses the sidebar search field
     /// Where the user was when search took them to Home, so Esc can put them back.
     /// Nil whenever there is nowhere to return to.
     @State private var searchReturn: SidebarItem?
     @State private var calendarJumpDate: Date? = nil    // a search hit asked to open this day
+    /// Home's reading of the record. Owned here so it survives Home being swapped
+    /// out of `detail` — see `HomeAnalysis`.
+    @StateObject private var homeAnalysis = HomeAnalysis()
     @State private var fileTree: [mullFileNode] = []
     @State private var editorContent: String = ""
     @State private var savedContent: String = ""   // baseline last loaded/saved (Round-trip ref)
@@ -117,18 +120,59 @@ struct FullWindowView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 300)
+                // One width, pinned — not a range.
+                //
+                // AppKit lays the title bar's sidebar-toggle button out against the
+                // *split divider*, not against the traffic lights: the button sits a
+                // fixed distance to the right of wherever the sidebar ends. So a column
+                // declared as min/ideal/max is a column whose width SwiftUI is free to
+                // re-resolve whenever the sidebar's content changes what it would like
+                // to be — a longer file name appearing, a folder opening, the tree being
+                // rebuilt — and every one of those re-resolutions slid the toggle button
+                // sideways in the title bar. The button appeared to wander on its own,
+                // because the thing it is anchored to was wandering.
+                //
+                // A fixed width can't drift, so the divider can't move and neither can
+                // the button. The cost is that the column is no longer drag-resizable;
+                // the sidebar holds one search field and a list of file names, all of
+                // which already truncate to one line, so there is nothing here that a
+                // wider column would reveal.
+                .navigationSplitViewColumnWidth(240)
+                // Nothing else goes in this window's toolbar, and that is deliberate:
+                // the toggle button is laid out *after* whatever items precede it, so
+                // every item added here is another thing that can move it. Measured: a
+                // single empty item pushed it 44pt to the right.
         } detail: {
-            detail
+            // A page must not be able to decide how tall the window's split view is.
+            //
+            // Every detail surface here reports an ideal height equal to all of its
+            // content — a ScrollView's ideal is its content's, and an NSScrollView
+            // wrapping an `isVerticallyResizable` NSTextView answers with the full
+            // laid-out height of the note. That ideal used to travel up into the
+            // NavigationSplitView, which then laid itself out at *that* height and
+            // overflowed the window in both directions. Measured on a 914pt window:
+            // a 1610pt split view whose top sat 374pt above the title bar. Both columns
+            // rode up with it — the sidebar's search field, "Copy context", Home /
+            // Calendar / Live / Chat and the Files header all off the top of the screen,
+            // the traffic lights drawn over the file list, the note's own header row
+            // gone. Selecting a file with any real content in it was all it took.
+            //
+            // A GeometryReader takes the size it is offered and never passes a child's
+            // appetite upward, so the split view is sized by the window and the page
+            // scrolls inside it. (`maxHeight: .infinity` on the page does not do this:
+            // it caps how far a view may stretch, not what height it asks for.)
+            GeometryReader { _ in
+                detail
+            }
         }
-        .searchable(text: $searchQuery, isPresented: $searchPresented,
-                    placement: .toolbar, prompt: "Search projects, files, keywords…")
         // The field belongs to the window; the results are drawn by Home and nowhere
         // else. So typing a query while Calendar, Live, Chat or a note was open used
         // to be swallowed in silence — the box took the text and no surface ever
         // answered it, which reads as "search is broken", not "search is elsewhere".
-        // A non-empty query is a request to look something up, so it goes where
-        // looking is visible: the same place ⌘K already sends you.
+        // A non-empty query is a request to look something up, so it goes where looking
+        // is visible. This is now the *only* thing that moves you: clicking or ⌘K-ing
+        // into the field does not, because until there is a query there is nothing to
+        // show and nothing worth losing your place over.
         .onChange(of: searchQuery) { _, query in
             let asked = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if asked, selection != .home { leaveForSearch() }
@@ -154,6 +198,7 @@ struct FullWindowView: View {
         .overlay(alignment: .bottom) { noticeBar }
         .animation(.easeOut(duration: 0.18), value: appState.actionNotice)
         .onAppear {
+            scaffoldPinnedFile()
             refreshFileTree()
             restoreSelection()
             startTreeWatch()
@@ -161,9 +206,29 @@ struct FullWindowView: View {
         .onDisappear { stopTreeWatch() }
         // The vault is a folder other things write to (mull's own 60s pass, the MCP
         // server, Obsidian, Finder). Coming back to the window is the moment the
-        // sidebar most needs to be true.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            refreshFileTree()
+        // sidebar most needs to be true. *This* window: the notification fires for
+        // every window in the app — the menu-bar panel, Settings, sheets — and each
+        // of those used to rebuild (and date-resort) the tree behind your back.
+        //
+        // Not forced: the click that brings mull forward from another app is the same
+        // click that is about to select a note, so a re-sort here lands between the
+        // mouse going down and the row being chosen (see `refreshFileTree`). A note
+        // added or removed elsewhere still shows up — that changes the vault signature.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard let window = note.object as? NSWindow,
+                  window === AppDelegate.shared?.mainWindow else { return }
+            // Signature first, off the main thread — the same care the tree watch
+            // takes, for the same reason: it walks the whole vault, and this is the
+            // one path that ran it inline. On a large vault the click that brings
+            // mull forward paid for the walk before the window would draw.
+            let root = mullDir
+            DispatchQueue.global(qos: .userInitiated).async {
+                let signature = Self.vaultSignature(root: root)
+                DispatchQueue.main.async {
+                    guard signature != treeSignature else { return }
+                    refreshFileTree()
+                }
+            }
         }
         .sheet(isPresented: $showNewFile) { newFileSheet }
         .sheet(isPresented: $showNewFolder) { newFolderSheet }
@@ -188,16 +253,16 @@ struct FullWindowView: View {
 
     // MARK: - Search — a place you can get to, and get back from
 
-    /// Open search. Invoked by the sidebar's search button and by its ⌘K equivalent.
+    /// Put the caret in the search field. Invoked by the field's own magnifier and by
+    /// its ⌘K equivalent.
     ///
-    /// Results are drawn by Home and by nowhere else, so search does have to move you.
-    /// What it must not do is move you *and forget*: pressing ⌘K over a half-written
-    /// note used to abandon it wherever it stood, with the only way back a hunt through
-    /// the sidebar. So the edit is written first and the origin is kept, and Esc walks
-    /// the whole thing back.
+    /// It does *nothing else*. Results are drawn by Home and by nowhere else, so search
+    /// does eventually have to move you — but only once you have asked something, which
+    /// is what `.onChange(of: searchQuery)` below does. Moving on the click itself threw
+    /// you off the note you were reading before you had typed a character, and if you had
+    /// come to the field by accident there was nothing to show for it but a lost place.
     private func beginSearch() {
-        if selection != .home { leaveForSearch() }
-        searchPresented = true
+        searchFocused = true
     }
 
     /// Go to Home on search's behalf, remembering where from.
@@ -210,7 +275,7 @@ struct FullWindowView: View {
     /// Put the query away and, if search had moved the user, put them back.
     private func endSearch() {
         searchQuery = ""
-        searchPresented = false
+        searchFocused = false
         guard let back = searchReturn else { return }
         searchReturn = nil
         // The note may have gone while search was open — trashed from the context menu,
@@ -253,7 +318,7 @@ struct FullWindowView: View {
     /// when the sidebar considers it read-only.
     private func isAutoGenerated(_ url: URL) -> Bool {
         if url.path.contains("/daily/") || url.path.contains("/memory/") { return true }
-        return ["me.md", "now.md", "MEMORY.md"].contains(url.lastPathComponent)
+        return Self.pinnedRootFiles.first { $0.name == url.lastPathComponent }?.autoGenerated ?? false
     }
 
     /// Which vault folders are open, by path. Held in defaults so the shape you left
@@ -296,7 +361,7 @@ struct FullWindowView: View {
                 }
                 Spacer(minLength: DS.md)
                 if let url = notice.revealURL {
-                    Button("Show in Finder") {
+                    Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([url])
                     }
                     .buttonStyle(.plain)
@@ -354,20 +419,27 @@ struct FullWindowView: View {
     }
 
     private nonisolated static func vaultSignature(root: URL) -> String {
-        let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey]
+        // Relative paths only — no mtimes. Folder mtimes looked like a cheap "did
+        // the shape move" bit, but every atomic save (write temp + rename, which is
+        // how both the 0.8s autosave and mull's own 60s context pass write) bumps
+        // the parent folder's mtime. So the signature moved while you typed, and the
+        // sidebar rebuilt and reshuffled under the cursor — the exact thing it was
+        // built to prevent. A path changes exactly when the shape changes: a note or
+        // folder added, removed, renamed, or moved. Typing inside one changes none.
         guard let enumerator = FileManager.default.enumerator(
-            at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return "" }
+            at: root, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]) else { return "" }
+        let rootPath = root.path
         var parts: [String] = []
         while let url = enumerator.nextObject() as? URL {
-            let values = try? url.resourceValues(forKeys: Set(keys))
-            if values?.isDirectory == true {
-                let stamp = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
-                parts.append("\(url.lastPathComponent)/\(Int(stamp))")
-            } else if url.pathExtension == "md" {
-                parts.append(url.lastPathComponent)
-            }
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            guard isDir || url.pathExtension == "md" else { continue }
+            var rel = url.path
+            if rel.hasPrefix(rootPath) { rel = String(rel.dropFirst(rootPath.count)) }
+            parts.append(isDir ? rel + "/" : rel)
         }
-        return parts.joined(separator: "|")
+        // Enumeration order is the filesystem's business, not a change in shape.
+        return parts.sorted().joined(separator: "|")
     }
 
     // MARK: - Sidebar
@@ -377,40 +449,30 @@ struct FullWindowView: View {
             // Header — utility actions only (the window title already says "mull").
             HStack {
                 Spacer()
-                // Search has a button of its own now. ⌘K used to live on a hidden,
-                // empty-titled button in the window's background: a command with no
-                // affordance is a command only the person who wrote it knows about,
-                // and VoiceOver announced it as an unnamed button. The key equivalent
-                // rides on the visible control it belongs to.
-                sidebarButton(
-                    icon: "magnifyingglass",
-                    label: "Search",
-                    hint: "Opens the search field; results appear on Home. Esc returns you here.",
-                    help: "Search (⌘K)"
-                ) { beginSearch() }
-                    .keyboardShortcut("k", modifiers: .command)
                 sidebarButton(
                     icon: "arrow.clockwise",
-                    label: "Reread vault",
+                    label: "Reread your mull folder",
                     hint: "Reloads ~/mull from disk, picking up edits made outside mull",
                     help: "Reread ~/mull from disk (⌘R)"
-                ) { refreshFileTree() }
+                ) { refreshFileTree(force: true) }   // asked for by hand: always rebuild
                     .keyboardShortcut("r", modifiers: .command)
                 sidebarButton(
                     icon: "folder",
-                    label: "Reveal vault in Finder",
-                    hint: "Opens the ~/mull folder in a Finder window",
+                    label: "Reveal your mull folder in Finder",
                     help: "Reveal ~/mull in Finder"
                 ) { NSWorkspace.shared.open(mullDir) }
                 sidebarButton(
                     icon: "gearshape",
                     label: "Settings",
-                    hint: "Opens mull's settings window",
                     help: "Settings (⌘,)"
                 ) { openSettingsWindow() }
             }
             .padding(.horizontal, DS.md)
             .padding(.vertical, DS.sm)
+
+            searchField
+                .padding(.horizontal, DS.sm)
+                .padding(.bottom, DS.sm)
 
             Divider()
 
@@ -479,6 +541,61 @@ struct FullWindowView: View {
         .background(DS.canvas)
     }
 
+    /// The search field, in one fixed place.
+    ///
+    /// It used to be `.searchable(placement: .toolbar)`, which on macOS is a *collapsing*
+    /// toolbar item: unfocused it is a magnifier glyph, and the click meant to focus it
+    /// is the click that expands it into a field — so the control slid out from under the
+    /// pointer at the moment it was aimed at. A box you have to catch is worse than one
+    /// that is simply always there, and the sidebar has the room. So it lives here and it
+    /// does not move: same size focused or not, same place whatever the detail shows.
+    private var searchField: some View {
+        HStack(spacing: DS.sm) {
+            // ⌘K rides on the visible glyph rather than on a hidden, empty-titled button
+            // in the window's background: a command with no affordance is one only its
+            // author knows about, and VoiceOver read the old one out as an unnamed button.
+            Button { beginSearch() } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(DS.iconSmall)
+                    .foregroundStyle(DS.inkFaint)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("k", modifiers: .command)
+            .help("Search (⌘K)")
+            .accessibilityLabel("Search")
+            .accessibilityHint("Results appear on Home. Esc clears the query and puts you back.")
+
+            TextField("Search projects, files, keywords…", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .font(DS.bodyFont)
+                .foregroundStyle(DS.ink)
+                .focused($searchFocused)
+                .accessibilityLabel("Search")
+
+            // Hidden rather than absent while there is nothing to clear: taking the
+            // button out of the layout would resize the field the moment you typed,
+            // which is the same twitch this whole change is here to remove.
+            Button { endSearch() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(DS.iconSmall)
+                    .foregroundStyle(DS.inkFaint)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(searchQuery.isEmpty ? 0 : 1)
+            .disabled(searchQuery.isEmpty)
+            .accessibilityHidden(searchQuery.isEmpty)
+            .help("Clear search")
+            .accessibilityLabel("Clear search")
+        }
+        .padding(.horizontal, DS.sm)
+        .padding(.vertical, DS.xs + 1)
+        .background(RoundedRectangle(cornerRadius: DS.radiusSm).fill(DS.surface))
+        .overlay(RoundedRectangle(cornerRadius: DS.radiusSm)
+            .strokeBorder(searchFocused ? DS.moon.opacity(0.4) : DS.hairline, lineWidth: 0.75))
+    }
+
     /// Open the macOS Settings window. The app is a menu-bar app whose main window
     /// is a custom NSWindow (outside the SwiftUI scene), so we open Settings via the
     /// AppKit action rather than SettingsLink/openSettings (which need the App scene env).
@@ -493,13 +610,16 @@ struct FullWindowView: View {
     private func sidebarButton(
         icon: String,
         label: String,
-        hint: String,
+        // Only where the hint has something the label and tooltip don't already say.
+        // A hint that paraphrases its own label is read aloud as a second sentence
+        // that carries no second fact.
+        hint: String = "",
         help: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(DS.iconBody)
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
         }
@@ -518,6 +638,7 @@ struct FullWindowView: View {
             Text(displayName(file))
                 .font(DS.bodyFont)
                 .lineLimit(1)
+                .help(displayName(file))
         } icon: {
             Image(systemName: "doc.text")
                 .foregroundStyle(fileAccent(file))
@@ -534,13 +655,13 @@ struct FullWindowView: View {
                 Button { startNew(.folder) } label: { Label("New Folder", systemImage: "folder.badge.plus") }
                 Divider()
                 Button { importFiles() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
-                Button { exportVault() } label: { Label("Export Vault (.zip)…", systemImage: "square.and.arrow.up") }
+                Button { exportVault() } label: { Label("Export mull Folder (.zip)…", systemImage: "square.and.arrow.up") }
                 Button { revealVault() } label: { Label("Reveal in Finder", systemImage: "folder") }
             } label: {
                 // A quiet, header-scaled plus — thin, tobacco, with a comfortable
                 // square hit target so it sits flush with the "Files" baseline.
                 Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(DS.iconMini.weight(.semibold))
                     .foregroundStyle(DS.moon)
                     .frame(width: 16, height: 16)
                     .contentShape(Rectangle())
@@ -548,8 +669,7 @@ struct FullWindowView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .help("New · import · export · reveal")
-            .accessibilityLabel("Vault actions")
-            .accessibilityHint("New note, new folder, import, export or reveal in Finder")
+            .accessibilityLabel("File actions")
         }
     }
 
@@ -635,15 +755,15 @@ struct FullWindowView: View {
     /// already there nor end with Finder proudly revealing an empty folder.
     private func exportVault() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "mull-vault.zip"
+        panel.nameFieldStringValue = "mull-folder.zip"
         panel.allowedContentTypes = [.zip]
         guard panel.runModal() == .OK, let dest = panel.url else { return }
         let source = mullDir
-        appState.postNotice("Exporting your vault…", detail: "Zipping ~/mull. A large vault takes a moment.")
+        appState.postNotice("Exporting your mull folder…", detail: "Zipping ~/mull. A large folder takes a moment.")
         Task {
             switch await Self.zipVault(source: source, to: dest) {
             case .success:
-                appState.postNotice("Vault exported",
+                appState.postNotice("mull folder exported",
                                     detail: "\(dest.lastPathComponent) — plain markdown, readable without mull.",
                                     revealURL: dest)
             case .failure(let message):
@@ -704,7 +824,11 @@ struct FullWindowView: View {
     private var detail: some View {
         switch selection {
         case .home:
-            HomeTab(searchQuery: $searchQuery, onOpenDay: { date in
+            // `homeAnalysis` is held here rather than inside HomeTab because this
+            // switch is what destroys HomeTab: each branch has its own identity, so
+            // leaving Home threw away the fortnight of analysis it had just run and
+            // the filters the reader had set. See `HomeAnalysis`.
+            HomeTab(analysis: homeAnalysis, searchQuery: $searchQuery, onOpenDay: { date in
                 calendarJumpDate = date
                 selection = .calendar
             })
@@ -728,7 +852,7 @@ struct FullWindowView: View {
         case nil:
             VStack(spacing: DS.lg) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 32, weight: .thin))
+                    .font(DS.iconHero.weight(.thin))
                     .foregroundStyle(DS.inkFaint)
                 Text("Select a file or view")
                     .font(DS.titleFont)
@@ -756,10 +880,12 @@ struct FullWindowView: View {
                 if file.isAutoGenerated {
                     // Read-only is a fact about who may write here, not a decorative
                     // tag — it says so in words, with the lock, at reading size.
+                    // No tooltip: every auto-generated file carries a custode note under
+                    // this header that says the same thing at reading size, and for me.md
+                    // hands over the button that acts on it.
                     Label("Written by mull · read-only", systemImage: "lock")
                         .font(DS.captionMedium)
                         .foregroundStyle(DS.inkDim)
-                        .help("mull rewrites this file as it learns, so edits made here wouldn't survive. Correct it in \(Curator.pinnedFileName) instead.")
                 }
 
                 Spacer()
@@ -777,6 +903,13 @@ struct FullWindowView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(DS.moon)
                     .help("A newer version is ready. Your place on the page is kept until you ask for it.")
+                }
+
+                if !file.isAutoGenerated {
+                    Text(editorStats)
+                        .font(DS.microFont)
+                        .foregroundStyle(DS.inkFaint)
+                        .help("Live word and character count for this note")
                 }
 
                 Text(file.sizeFormatted)
@@ -844,7 +977,9 @@ struct FullWindowView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.lg) {
                         custodeNote(for: file)
-                        MarkdownView(editorContent)
+                        MarkdownView(editorContent,
+                                     sourcePath: vaultRelativePath(of: file),
+                                     onOpenVaultFile: openVaultFile)
                             .textSelection(.enabled)
                     }
                     .frame(maxWidth: DS.readMeasure, alignment: .leading)
@@ -863,6 +998,12 @@ struct FullWindowView: View {
                     )
                 }
                 .coordinateSpace(name: Self.readScrollSpace)
+                // A fresh page per file, exactly as the editor gets one. Without this the
+                // same ScrollView is reused from one read-only file to the next, and it
+                // keeps the scroll offset it had: leave me.md scrolled to the bottom, open
+                // MEMORY.md, and it opens at the bottom too — or partway down a page you
+                // have never seen. A file opens at its top.
+                .id(file.path)
                 // Moving the pointer over the page is the cheapest available signal
                 // that someone is actually reading it (a text selection is invisible
                 // to SwiftUI). It only ever delays an update; it never blocks one.
@@ -881,16 +1022,37 @@ struct FullWindowView: View {
                 // disk stays byte-identical (原則6); only its on-screen appearance is
                 // enriched. Typography/colours live inside the NSTextView, so the measure
                 // cap and margins are all that's left here.
-                MarkdownTextEditor(text: $editorContent)
-                    // Fresh editor per file: switching notes rebuilds the NSTextView, so
-                    // content swaps can never fight a live editing session (and the undo
-                    // stack no longer bleeds across files).
-                    .id(file.path)
-                    .frame(maxWidth: DS.readMeasure)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, DS.readMargin)
-                    .padding(.top, DS.lg)
-                    .onChange(of: editorContent) { _, _ in editorChanged() }
+                // Sized from the room available, never from the length of the note.
+                //
+                // An NSScrollView holding an `isVerticallyResizable` NSTextView answers
+                // "how big would you like to be?" with the full laid-out height of the
+                // text, and that answer used to travel all the way up: the VStack took
+                // it, and so did the whole NavigationSplitView. Measured on a 914pt
+                // window — a 1610pt split view whose top sat 374pt above the title bar,
+                // carrying *both* columns up out of view. The sidebar's search field,
+                // "Copy context", Home/Calendar/Live/Chat and the Files header were all
+                // off the top of the screen, the traffic lights ended up drawn over the
+                // file list, and the note's own header row was gone. Selecting a long
+                // enough note was all it took; the read-only files, which render through
+                // a SwiftUI ScrollView instead, were never affected.
+                //
+                // A GeometryReader is what breaks the chain: it always takes the size it
+                // is offered and never reports a child's appetite upward. `maxHeight:
+                // .infinity` and the representable's own `sizeThatFits` were both tried
+                // first and neither held — the ideal size still escaped.
+                GeometryReader { room in
+                    MarkdownTextEditor(text: $editorContent, sourcePath: vaultRelativePath(of: file))
+                        // Fresh editor per file: switching notes rebuilds the NSTextView,
+                        // so content swaps can never fight a live editing session (and
+                        // the undo stack no longer bleeds across files).
+                        .id(file.path)
+                        .frame(width: min(room.size.width, DS.readMeasure),
+                               height: room.size.height)
+                        .frame(width: room.size.width, alignment: .center)
+                }
+                .padding(.horizontal, DS.readMargin)
+                .padding(.top, DS.lg)
+                .onChange(of: editorContent) { _, _ in editorChanged() }
             }
         }
         .background(DS.canvas)
@@ -922,6 +1084,22 @@ struct FullWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
             flushPendingEdit()
         }
+    }
+
+    /// Word · character count for the open buffer, shown in the editor toolbar.
+    /// Words are ICU word segments (`.byWords`), so Japanese text — which has no
+    /// spaces for a naive split to find — counts correctly. Above a size no real
+    /// mull note reaches, the per-keystroke enumeration is dropped and only the
+    /// character count remains.
+    private var editorStats: String {
+        let chars = editorContent.count
+        guard chars <= 100_000 else { return "\(chars.formatted()) chars" }
+        var words = 0
+        editorContent.enumerateSubstrings(in: editorContent.startIndex...,
+                                          options: [.byWords, .substringNotRequired]) { _, _, _, _ in
+            words += 1
+        }
+        return "\(words.formatted()) words · \(chars.formatted()) chars"
     }
 
     /// Write the buffer to the file it was loaded from, if it has unsaved changes.
@@ -1112,7 +1290,7 @@ struct FullWindowView: View {
 
         default:
             if file.isAutoGenerated {
-                Text("mull keeps this file current, so it can't be edited here. Copy it, move it, open it in anything — it's plain markdown either way.")
+                Text("Copy it, move it, open it in anything — it's plain markdown either way.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1150,6 +1328,20 @@ struct FullWindowView: View {
                 return
             }
         }
+        // Nothing to load when the buffer already *is* this file and holds words
+        // that are not on disk. Reading the file back here would destroy them, and
+        // every route into that is a route this view takes on its own:
+        //
+        //   - the refusal above assigns `selection`, which re-fires
+        //     .onChange(of: selection) and calls straight back in with the file
+        //     whose save just failed. The flush guard cannot catch it (`previous ==
+        //     file`), so the next line would overwrite exactly the text it had just
+        //     refused to navigate away from;
+        //   - leaving for Home and coming back does the same thing a slower way,
+        //     because the flush on the way out is allowed to fail quietly.
+        //
+        // Both used to end with the conflict banner gone and the edits with it.
+        if isDirty, loadedFile == file { return }
         editorContent = displayContent(of: file)
         savedContent = editorContent   // baseline: a freshly loaded file is never dirty
         loadedFile = file
@@ -1182,6 +1374,25 @@ struct FullWindowView: View {
             // belongs to even if the user has since selected another note.
             saveFile(file)
         }
+    }
+
+    /// A file's path relative to the vault root, which is the frame every link in
+    /// these documents is written in. Nil for anything outside ~/mull.
+    private func vaultRelativePath(of file: mullFile) -> String? {
+        let root = mullDir.standardizedFileURL.path + "/"
+        let path = file.url.standardizedFileURL.path
+        guard path.hasPrefix(root) else { return nil }
+        return String(path.dropFirst(root.count))
+    }
+
+    /// Follow a link into another vault file: select it in the sidebar and open it,
+    /// exactly as clicking it there would. `MEMORY.md` is an index of these, and an
+    /// index whose entries send you to Finder is not an index.
+    private func openVaultFile(_ relativePath: String) {
+        let url = MullDirectory.url(for: relativePath).standardizedFileURL
+        guard url.path.hasPrefix(mullDir.standardizedFileURL.path + "/"),
+              let file = makeFile(url: url, autoGenerated: isAutoGenerated(url)) else { return }
+        selection = .file(file)
     }
 
     /// Content to show in the editor. Auto-generated files (me.md, MEMORY.md, …)
@@ -1400,8 +1611,8 @@ struct FullWindowView: View {
 
     @ViewBuilder
     private func fileContextMenu(file: mullFile) -> some View {
-        Button("Open in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
-        Button("Copy Content") {
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
+        Button("Copy content") {
             if let content = try? String(contentsOf: file.url, encoding: .utf8) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(content, forType: .string)
@@ -1420,7 +1631,15 @@ struct FullWindowView: View {
         do {
             try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
         } catch {
-            saveError = "Couldn't move \(file.name) to the Trash: \(error.localizedDescription)"
+            // Not `saveError`: that renders as the "Not saved" badge in the *open*
+            // file's header, so a failed trash either accused a different, perfectly
+            // saved note of being unwritten, or — with no file open — was reported
+            // nowhere at all, which is the silent no-op this method exists to end.
+            appState.postNotice(
+                "Couldn't move \(file.name) to the Trash",
+                detail: error.localizedDescription,
+                isProblem: true
+            )
             return
         }
         if case .file(let open) = selection, open == file { selection = .home }
@@ -1429,24 +1648,47 @@ struct FullWindowView: View {
 
     // MARK: - File Discovery
 
+    /// Lay down `me.pinned.md` if it isn't there yet, so the sidebar has something to
+    /// list. Once per window, on appear — the file is the user's, and deciding whether
+    /// to write it is not something to do again every time the sidebar draws.
+    private func scaffoldPinnedFile() {
+        _ = Curator.pinnedFacts()
+    }
+
+    /// The root files the sidebar pins above the vault tree — in the order it shows
+    /// them, and who writes each one.
+    ///
+    /// One table, because this list used to be spelled out by hand in three places and
+    /// one of them spelled it short: `buildTree`'s skip set named me.md, now.md and
+    /// MEMORY.md but not `me.pinned.md`, so that file was drawn **twice** — once in the
+    /// pinned section and again down among the root files of the tree. Both rows carry
+    /// the same `.tag`, so selecting it highlighted two rows for one file and the List
+    /// scrolled off to the second one, which is what "the sidebar moves" looked like.
+    /// A list that three call sites have to agree about is a list that belongs in one
+    /// place.
+    private static let pinnedRootFiles: [(name: String, autoGenerated: Bool)] = [
+        ("me.md", true),                    // mull's reading of you — read-only
+        (Curator.pinnedFileName, false),    // yours; mull reads it and never writes it
+        ("now.md", true),
+        ("MEMORY.md", true),
+    ]
+
+    /// The same names as a set, for "is this row already drawn above?" questions.
+    private static let pinnedRootNames = Set(pinnedRootFiles.map(\.name))
+
     private var contextFiles: [mullFile] {
         // me.md is mull's read-only guess. me.pinned.md sits right under it and IS
         // editable — it's how you correct/lock facts mull got wrong. mull places its
         // non-comment lines at the top of me.md and never overwrites them.
-        _ = Curator.pinnedFacts()   // scaffold me.pinned.md on first run so it's findable
-        var files: [mullFile] = []
-        if let me = makeFile(url: mullDir.appendingPathComponent("me.md"), autoGenerated: true) {
-            files.append(me)
+        // The scaffolding this used to do lives in `scaffoldPinnedFile()` now. It is
+        // a *write* — `Curator.readPinned()` lays the template down when the file is
+        // missing or still untouched — and this property is read from inside `body`,
+        // which re-runs on AppState's 3s republish and on every search keystroke.
+        // Disk reads and a conditional file write, on the main thread, as a side
+        // effect of drawing a sidebar.
+        Self.pinnedRootFiles.compactMap {
+            makeFile(url: mullDir.appendingPathComponent($0.name), autoGenerated: $0.autoGenerated)
         }
-        if let pinned = makeFile(url: mullDir.appendingPathComponent(Curator.pinnedFileName), autoGenerated: false) {
-            files.append(pinned)
-        }
-        for name in ["now.md", "MEMORY.md"] {
-            if let f = makeFile(url: mullDir.appendingPathComponent(name), autoGenerated: true) {
-                files.append(f)
-            }
-        }
-        return files
     }
 
     private func makeFile(url: URL, autoGenerated: Bool) -> mullFile? {
@@ -1461,9 +1703,25 @@ struct FullWindowView: View {
         )
     }
 
-    private func refreshFileTree() {
+    /// Rebuild the sidebar from disk — but only when the vault's *shape* actually
+    /// moved, unless the user asked for it by hand (⌘R).
+    ///
+    /// Rebuilding unconditionally is not free: `buildTree` sorts every folder's notes
+    /// by modification date, and mull rewrites its own files all day (now.md and me.md
+    /// on the 60s pass, the daily file, memory/…). So a rebuild that found no new note
+    /// still handed the List a *differently ordered* array — rows moved under the
+    /// pointer and the table scrolled to keep the selection in view.
+    ///
+    /// The worst possible moment for that is the window becoming key, because the click
+    /// that activates mull from another app is the same click that is about to land on
+    /// a row: the list re-sorted between the mouse going down and the row being chosen.
+    /// The signature guard is the one the tree watch already applies (see
+    /// `vaultSignature`); this path used to be the hole in it.
+    private func refreshFileTree(force: Bool = false) {
+        let signature = Self.vaultSignature(root: mullDir)
+        guard force || signature != treeSignature else { return }
         fileTree = buildTree(mullDir, isRoot: true)
-        treeSignature = Self.vaultSignature(root: mullDir)
+        treeSignature = signature
     }
 
     /// Walk the vault recursively: folders (with their nested children) then md
@@ -1477,7 +1735,7 @@ struct FullWindowView: View {
 
         var folders: [mullFileNode] = []
         var files: [mullFileNode] = []
-        let pinned: Set<String> = ["me.md", "now.md", "MEMORY.md"]
+        let pinned = Self.pinnedRootNames
         for url in entries {
             let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             if isDir {
@@ -1492,7 +1750,20 @@ struct FullWindowView: View {
             }
         }
         folders.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        files.sort { ($0.file?.modified ?? .distantPast) > ($1.file?.modified ?? .distantPast) }
+        // By NAME, never by modification date. Date order meant that writing in a note
+        // moved it: the row you were working in jumped to the top of its folder the
+        // next time the tree was rebuilt, and everything below it slid down. A sidebar
+        // is a place you learn where things are — a note has to stay where you left it,
+        // and the one you are editing least of all should move.
+        //
+        // `daily/` is the exception that keeps its sense of time, and gets it for free:
+        // its files are named yyyy-MM-dd, so descending by name IS newest-first, and it
+        // is stable because a name only changes when the file does.
+        let newestFirst = dir.lastPathComponent == "daily"
+        files.sort {
+            let order = $0.name.localizedStandardCompare($1.name)
+            return newestFirst ? order == .orderedDescending : order == .orderedAscending
+        }
         return folders + files
     }
 
@@ -1740,9 +2011,18 @@ struct LiveTab: View {
     /// fetching every event since midnight (text and all) just to keep the last
     /// 150 got heavier with every hour of the day.
     private func loadEvents() {
+        // Off the main thread. This is a synchronous `dbPool.read` fired by a 1.5s
+        // timer, so a slow one — a large table, contention with a WAL checkpoint —
+        // stuttered the whole window on every tick, for the length of the visit.
+        let database = appState.database
         let start = Calendar.current.startOfDay(for: Date())
-        let newest = appState.database.fetchCandidates(query: "", since: start, useFTS: false, limit: 150)
-        liveEvents = newest.reversed()   // fetched newest-first; the stream reads oldest→newest
+        Task {
+            let newest = await Task.detached(priority: .userInitiated) {
+                database.fetchCandidates(query: "", since: start, useFTS: false, limit: 150)
+            }.value
+            guard !Task.isCancelled else { return }
+            liveEvents = newest.reversed()   // fetched newest-first; the stream reads oldest→newest
+        }
     }
 
     // MARK: - Nothing kept yet
@@ -1756,6 +2036,10 @@ struct LiveTab: View {
     /// it speaks.
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: DS.sm) {
+            StippleRings.roundel()
+                .frame(width: 48, height: 48)
+                .opacity(0.5)
+                .padding(.bottom, DS.xs)
             Text(emptyTitle)
                 .font(DS.titleFont)
                 .foregroundStyle(DS.ink)
@@ -1813,10 +2097,18 @@ struct LiveEventRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: DS.sm) {
+            // A clock reading is one word. 48pt fits `HH:mm:ss` at the base text
+            // size, but `microFont` scales with Dynamic Type, and at the larger
+            // sizes the string outgrew the column and SwiftUI broke it across two
+            // lines — a time cut in half mid-value. `lineLimit(1)` + `fixedSize`
+            // says it never wraps and never truncates; the 48pt becomes a floor,
+            // so the column widens with the type instead of chopping it.
             Text(timeStr)
                 .font(DS.microFont)
                 .foregroundStyle(DS.inkFaint)
-                .frame(width: 48, alignment: .trailing)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 48, alignment: .trailing)
 
             Circle()
                 .fill(typeColor)
@@ -1827,11 +2119,14 @@ struct LiveEventRow: View {
                 // sitting somewhere else on the page. Say the kind here.
                 .accessibilityLabel(typeName)
 
-            // A fixed height, whatever the row contains. Hover used to expand the text
-            // from one line to five, so every row below the pointer shifted down as
-            // the mouse crossed the list — the thing you were reaching for moved
-            // before you got to it. The full text is still available, in a tooltip,
-            // which costs the layout nothing.
+            // A stable height, whatever the row contains. Hover used to expand the
+            // text from one line to five, so every row below the pointer shifted
+            // down as the mouse crossed the list — the thing you were reaching for
+            // moved before you got to it. The full text is still available, in a
+            // tooltip, which costs the layout nothing. A *minimum*, not a fixed
+            // height: both lines are already pinned to one line each, so the only
+            // thing a hard 28pt did was shave the descenders off at larger system
+            // text sizes.
             VStack(alignment: .leading, spacing: 0) {
                 if let app = event.appName {
                     Text(app)
@@ -1845,7 +2140,7 @@ struct LiveEventRow: View {
                     .lineLimit(1)
                     .textSelection(.enabled)
             }
-            .frame(height: 28, alignment: .top)
+            .frame(minHeight: 28, alignment: .top)
 
             Spacer()
         }

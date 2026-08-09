@@ -8,7 +8,9 @@ private struct FakeConnector: IngestionConnector {
 }
 
 /// Tests for Phase B ingestion: RawStore dedup + IngestionService landing/digest.
-/// Each test uses a unique connector id and cleans up its `~/mull` artifacts.
+/// Each test uses a unique connector id and cleans up after itself. The vault it
+/// writes into is `MullDirectory.root`, which is a throwaway temp directory under
+/// XCTest — the real `~/mull` is never touched.
 final class IngestionTests: XCTestCase {
 
     private var createdConnectors: [String] = []

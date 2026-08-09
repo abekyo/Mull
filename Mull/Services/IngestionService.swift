@@ -20,6 +20,18 @@ final class IngestionService {
         let error: String?
     }
 
+    /// Called when a source that was working starts failing. Set by AppState.
+    ///
+    /// The scheduled pull used to throw its `[Outcome]` away, so a source that
+    /// broke (an expired token, a command that no longer exists) went on failing
+    /// every 30 minutes in silence — visible only to someone who opened Settings
+    /// and pressed "Pull now" by hand.
+    @MainActor var onFailure: ((_ connector: String, _ error: String) -> Void)?
+
+    /// Connectors whose most recent pull failed, so the same breakage is
+    /// announced once rather than on every tick.
+    @MainActor private var failingConnectors: Set<String> = []
+
     init(connectors: [IngestionConnector]) {
         self.connectors = connectors
     }
@@ -66,15 +78,31 @@ final class IngestionService {
         return outcomes
     }
 
+    /// Announce newly-broken sources, and forget the ones that recovered.
+    @MainActor
+    private func report(_ outcomes: [Outcome]) {
+        for outcome in outcomes {
+            guard let error = outcome.error else {
+                failingConnectors.remove(outcome.connector)
+                continue
+            }
+            guard failingConnectors.insert(outcome.connector).inserted else { continue }
+            onFailure?(outcome.connector, error)
+        }
+    }
+
     /// Periodically pull in the background. No-op if no connectors configured.
     func schedule(every interval: TimeInterval) {
         guard hasConnectors else { return }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { await self?.runOnce() }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.report(self.runOnce())
+            }
         }
         // Kick off an immediate first pull.
-        Task { await runOnce() }
+        Task { await report(runOnce()) }
     }
 
     func stop() {
@@ -98,10 +126,16 @@ final class IngestionService {
             return "- **\(item.title)**\(when)\(summary)"
         }
 
-        let body = lines.isEmpty ? "_(nothing ingested yet)_"
-            : "## Recent from \(connector)\n\n" + lines.joined(separator: "\n")
+        // "Freshly ingested, awaiting synthesis" was pipeline vocabulary leaking
+        // into a user-facing file; say what the folder IS in the reader's language.
+        let ja = UserLanguage.isJapanese
+        let empty = ja ? "_（まだ何も取り込まれていません）_" : "_(nothing here yet)_"
+        let heading = ja ? "## \(connector) の新着" : "## Recent from \(connector)"
+        let body = lines.isEmpty ? empty : heading + "\n\n" + lines.joined(separator: "\n")
 
-        let header = "# 09 Inbox — \(connector)\n\n_Freshly ingested, awaiting synthesis._"
+        let header = ja
+            ? "# 09 インボックス — \(connector)\n\n_取り込んだばかりのデータ。ここから各フォルダに整理されます。_"
+            : "# 09 Inbox — \(connector)\n\n_Newly captured items — mull sorts them into the right folders from here._"
         let block = ContextBlock(id: "recent", source: .agent, content: body, agentHash: nil)
         _ = Curator.curate(relativePath: "09_inbox/\(connector).md",
                            header: header, pinnedContent: nil, agentBlocks: [block])

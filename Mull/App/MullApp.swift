@@ -165,7 +165,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - Main Window
 
     func showMainWindow() {
-        if let existing = mainWindow, existing.isVisible {
+        // A closed window is still this window: `isReleasedWhenClosed` is false, so
+        // it survives being closed and can simply be ordered back to the front.
+        // Gating on `isVisible` meant every reopen built a whole second window and
+        // threw the first one away — the tab you were on, the note you had open and
+        // the scroll position all went with it.
+        if let existing = mainWindow {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return

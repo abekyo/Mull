@@ -9,7 +9,7 @@ import AppKit
 /// knowledge of the others — and ProactiveEngine and ProactiveLoop both fired on a
 /// project switch from the SAME 3-second tick, so one app switch could produce two
 /// banners saying nearly the same thing. ProactiveLoop is now the only project-switch
-/// path, but the sources that remain (briefing, meetings, clipboard hand-off) still
+/// path, but the sources that remain (meetings, clipboard hand-off) still
 /// fire independently, so routing everything through here keeps one rate limit for
 /// the app instead of one per subsystem.
 @MainActor
@@ -27,17 +27,50 @@ final class Notifier {
     private var lastSentAt: Date = .distantPast
     private var announcedProjects: [String: Date] = [:]
 
+    /// Whether macOS is currently refusing to show mull's notifications, as last
+    /// observed. `nil` until the first answer comes back.
+    ///
+    /// This exists because `send` used to return `true` the instant it had asked
+    /// for authorization — before the answer arrived — so every caller believed
+    /// a banner had gone out. For someone who had said no to notifications, a
+    /// meeting reminder was marked "already reminded" and never retried, and the
+    /// "Summary failed" alert was posted into nothing.
+    private(set) var deliveryBlocked: Bool?
+
     /// Deliver a notification unless another one just went out. Returns whether it
     /// was actually enqueued, so callers can avoid marking state as "notified" for
     /// something the user never saw.
+    ///
+    /// Authorization resolves asynchronously, so "enqueued" cannot always be known
+    /// by the time this returns: when the answer is already in and it was no, the
+    /// refusal is immediate; when it isn't, `onUndelivered` fires afterwards so the
+    /// caller can undo whatever it marked. Callers that keep "already notified"
+    /// state must handle both.
     @discardableResult
-    func send(id: String, title: String, body: String, userInfo: [String: Any] = [:]) -> Bool {
+    func send(id: String, title: String, body: String,
+              userInfo: [String: Any] = [:],
+              onUndelivered: (() -> Void)? = nil) -> Bool {
+        // A known refusal is not worth a rate-limit slot: burning the floor on a
+        // banner nobody can receive would suppress the next one that might.
+        if deliveryBlocked == true {
+            onUndelivered?()
+            return false
+        }
         guard Date().timeIntervalSince(lastSentAt) >= globalFloor else { return false }
+        let previousSendAt = lastSentAt
         lastSentAt = Date()
 
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
+            let fail: () -> Void = {
+                Task { @MainActor in
+                    self.deliveryBlocked = true
+                    // Give the slot back — nothing was shown in it.
+                    self.lastSentAt = previousSendAt
+                    onUndelivered?()
+                }
+            }
+            guard granted else { return fail() }
 
             let content = UNMutableNotificationContent()
             content.title = title
@@ -45,15 +78,32 @@ final class Notifier {
             content.sound = .default
             if !userInfo.isEmpty { content.userInfo = userInfo }
 
-            center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+            center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
+                if error != nil { return fail() }
+                Task { @MainActor in self.deliveryBlocked = false }
+            }
         }
         return true
     }
 
+    /// Re-read the system's answer without prompting, so a Settings row can say
+    /// whether notifications are actually getting through.
+    func refreshDeliveryState(then report: ((Bool) -> Void)? = nil) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let blocked = settings.authorizationStatus == .denied
+            Task { @MainActor in
+                self.deliveryBlocked = blocked
+                report?(blocked)
+            }
+        }
+    }
+
     /// Claim the right to announce a return to `project`. A project announced inside
     /// the cooldown is not announced again, so hopping away and back — or a second
-    /// caller appearing later — cannot re-brief the same project.
-    func claimProjectAnnouncement(_ project: String, cooldown: TimeInterval = 900) -> Bool {
+    /// caller appearing later — cannot re-brief the same project. An hour: the brief
+    /// exists for a genuine resumption, and within an hour you still remember what
+    /// you were doing.
+    func claimProjectAnnouncement(_ project: String, cooldown: TimeInterval = 3600) -> Bool {
         let key = project.lowercased()
         if let last = announcedProjects[key], Date().timeIntervalSince(last) < cooldown {
             return false
@@ -65,11 +115,17 @@ final class Notifier {
 
 /// mull comes to you. Not the other way around.
 ///
-/// Three interventions, each triggered by existing data:
+/// Two interventions, each triggered by existing data:
 ///
 ///   1. AI auto-copy — user opens claude.ai or chatgpt.com → context copied to clipboard
-///   2. Morning briefing — first activity of the day → notification with top action
-///   3. Pre-meeting — 15 minutes before a calendar event → notification
+///   2. Pre-meeting — 15 minutes before a calendar event → notification
+///
+/// The morning briefing was removed (2026-08): its content was either a
+/// productivity lecture ("Block 2 hours right now"), a stalled-project nag built
+/// inline — bypassing the `autoSurfaceable` epistemic filter it was supposed to
+/// pass through — or an empty banner ("No meetings. Full focus today."). All
+/// three are the rushing DESIGN-NORTHSTAR forbids. If a morning orientation
+/// earns a place, it belongs in Home when the user opens it, not in a banner.
 ///
 /// Project resumption used to be a fourth intervention here, keyed off a raw
 /// window-title diff against a 14-day `projectSnapshots` cache. ProactiveLoop now
@@ -88,8 +144,7 @@ final class ProactiveEngine: NSObject {
     private let analytics: AnalyticsEngine
 
     // State tracking to avoid duplicate triggers
-    private var hasSentMorningBriefing = false
-    private var lastMorningBriefingDate: Date = .distantPast
+    private var lastDailyResetDate: Date = .distantPast
     private var notifiedMeetings: Set<String> = []
 
     // Upcoming calendar events, cached. `upcomingEvents` is a full EventKit
@@ -120,20 +175,20 @@ final class ProactiveEngine: NSObject {
 
     /// Called every 3 seconds from AppState.refreshStats().
     ///
-    /// `currentApp` and `currentWindow` are no longer read: the only thing that used
-    /// them was the project-resumption diff, now owned by ProactiveLoop. They stay in
-    /// the signature so AppState's call site is untouched, and because the eventual
+    /// `todayEventCount`, `currentApp` and `currentWindow` are no longer read: the
+    /// count only gated the removed morning briefing, and the window pair fed the
+    /// project-resumption diff, now owned by ProactiveLoop. They stay in the
+    /// signature so AppState's call site is untouched, and because the eventual
     /// window-anchored interventions belong here rather than in the loop.
     func tick(todayEventCount: Int, currentApp: String?, currentWindow: String?, browserURL: String?) {
         let today = Calendar.current.startOfDay(for: Date())
 
         // Reset daily state at midnight
-        if today != Calendar.current.startOfDay(for: lastMorningBriefingDate) {
-            hasSentMorningBriefing = false
+        if today != Calendar.current.startOfDay(for: lastDailyResetDate) {
             notifiedMeetings.removeAll()
             lastCopiedForAIURL = ""
             lastAICopyDate = .distantPast
-            lastMorningBriefingDate = today
+            lastDailyResetDate = today
         }
 
         // 1. AI auto-copy — highest priority, zero friction
@@ -141,13 +196,7 @@ final class ProactiveEngine: NSObject {
             checkAISiteAndCopy(url: url)
         }
 
-        // 2. Morning briefing
-        if !hasSentMorningBriefing && todayEventCount > 5 {
-            hasSentMorningBriefing = true
-            sendMorningBriefing()
-        }
-
-        // 3. Pre-meeting
+        // 2. Pre-meeting
         checkUpcomingMeetings()
     }
 
@@ -162,8 +211,11 @@ final class ProactiveEngine: NSObject {
         // Don't re-copy for the same URL
         guard url != lastCopiedForAIURL else { return }
 
-        // Don't copy more than once per 5 minutes (avoid spamming on tab switches)
-        guard Date().timeIntervalSince(lastAICopyDate) > 300 else { return }
+        // Once per half hour at most. Every new conversation on claude.ai/chatgpt is
+        // a new URL, so at the old 5-minute floor a heavy AI user got a banner (and a
+        // clobbered clipboard) up to 12 times an hour. One hand-off per sitting is
+        // the feature; the rest was noise.
+        guard Date().timeIntervalSince(lastAICopyDate) > 1800 else { return }
 
         lastCopiedForAIURL = url
         lastAICopyDate = Date()
@@ -220,65 +272,7 @@ final class ProactiveEngine: NSObject {
         }
     }
 
-    // MARK: - 2. Morning Briefing
-
-    private func sendMorningBriefing() {
-        let db = database
-        let cal = calendar
-        Task.detached { [weak self] in
-            // Heavy DB work off main thread
-            let engine = TimeBlockEngine(database: db)
-            let cache = engine.projectSnapshots(days: 14)
-            // Only push observations, never interpretations/judgments (DIRECTION.md 付録A "Epistemics").
-            let patterns = BehaviorPatternEngine(database: db).detectPatterns()
-                .filter { $0.autoSurfaceable }
-            let upcoming = cal.upcomingEvents(limit: 1)
-
-            await MainActor.run { [weak self] in
-                var title = "Good morning"
-                var lines: [String] = []
-                var action: NotificationAction?
-
-                if let topPattern = patterns.first {
-                    title = topPattern.title
-                    lines.append(topPattern.insight)
-                    lines.append(topPattern.action)
-
-                    if let project = topPattern.project {
-                        let matchingProject = cache.first { $0.name == project }
-                        if let proj = matchingProject {
-                            action = .openApp(proj.primaryApp)
-                        }
-                    }
-                } else {
-                    let stalled = cache.filter { $0.daysSinceActive >= 3 }
-                    if let top = stalled.first {
-                        title = "\(top.name) is waiting"
-                        lines.append("\(top.name): \(top.daysSinceActive) days stalled")
-                        action = .openApp(top.primaryApp)
-                    }
-                }
-
-                if let next = upcoming.first {
-                    let hours = next.minutesUntil / 60
-                    let mins = next.minutesUntil % 60
-                    let timeStr = hours > 0 ? "\(hours)h\(mins > 0 ? " \(mins)m" : "")" : "\(mins)m"
-                    lines.append("Next: \(next.title) in \(timeStr)")
-                } else if lines.isEmpty {
-                    lines.append("No meetings. Full focus today.")
-                }
-
-                self?.sendNotification(
-                    id: "morning-briefing",
-                    title: title,
-                    body: lines.joined(separator: "\n"),
-                    action: action
-                )
-            }
-        }
-    }
-
-    // MARK: - 3. Pre-Meeting
+    // MARK: - 2. Pre-Meeting
 
     private func checkUpcomingMeetings() {
         refreshUpcomingCacheIfNeeded()
@@ -296,8 +290,7 @@ final class ProactiveEngine: NSObject {
 
             guard let twoHoursAgo = Calendar.current.date(byAdding: .hour, value: -2, to: now) else { continue }
 
-            // The 2-hour fetch + grouping is a DB read; keep it off the main thread
-            // (same precedent as the BehaviorPatternEngine hops above).
+            // The 2-hour fetch + grouping is a DB read; keep it off the main thread.
             let db = database
             let title = event.title
             Task.detached { [weak self] in
@@ -311,8 +304,14 @@ final class ProactiveEngine: NSObject {
                     ?? "\(title) in \(minutesUntil) minutes"
 
                 await MainActor.run { [weak self] in
-                    self?.sendNotification(id: "meeting-\(key)", title: "Meeting soon",
-                                           body: body, action: nil)
+                    guard let self else { return }
+                    // Un-mark on either failure path — rate-limited away now, or
+                    // refused by macOS a moment later — so the next tick inside
+                    // the 13–15 min window retries instead of losing the reminder.
+                    let delivered = self.sendNotification(
+                        id: "meeting-\(key)", title: "Meeting soon", body: body, action: nil,
+                        onUndelivered: { [weak self] in self?.notifiedMeetings.remove(key) })
+                    if !delivered { self.notifiedMeetings.remove(key) }
                 }
             }
         }
@@ -345,17 +344,28 @@ final class ProactiveEngine: NSObject {
 
     /// All delivery goes through the shared Notifier, so this engine and
     /// ProactiveLoop share one rate limit instead of two independent ones.
-    private func sendNotification(id: String, title: String, body: String, action: NotificationAction?) {
+    /// Returns whether the banner was actually enqueued (see `Notifier.send`).
+    @discardableResult
+    private func sendNotification(id: String, title: String, body: String,
+                                  action: NotificationAction?,
+                                  onUndelivered: (() -> Void)? = nil) -> Bool {
         // Register the action BEFORE delivery — the tap handler looks it up by id.
         if let action { pendingActions[id] = action }
 
         let delivered = Notifier.shared.send(
             id: id, title: title, body: body,
-            userInfo: action != nil ? ["actionID": id] : [:])
+            userInfo: action != nil ? ["actionID": id] : [:],
+            // Authorization can refuse after this call has already returned true,
+            // so the same cleanup has to be reachable from both paths.
+            onUndelivered: { [weak self] in
+                self?.pendingActions.removeValue(forKey: id)
+                onUndelivered?()
+            })
 
         // Rate-limited away: drop the action so `pendingActions` doesn't accumulate
         // entries for banners the user never got.
         if !delivered { pendingActions.removeValue(forKey: id) }
+        return delivered
     }
 
     // MARK: - Notification Delegate Setup

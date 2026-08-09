@@ -19,6 +19,15 @@ import SwiftUI
 //   3. What mull holds is correctable in place. The right to correct is an
 //      action on this screen, not a sentence about one.
 //
+// The page reads top to bottom in three layers, by who wrote each line:
+//   what you told mull   — the setup answers, edited here (they used to live
+//                          behind a section in General *also* called "Profile",
+//                          so the word pointed at two different places)
+//   what mull observed   — read-only; it changes as you work, not by hand
+//   what mull wrote      — the nightly notes, correctable line by line
+// Every section says which layer it is in, in the title row, so "can I change
+// this?" is answered where the eye already is.
+//
 // One screen, one name. This was `InsightsTab` in code, "Profile" on its tab and
 // "Your portrait" in its heading — three names for one place, so a bug report and
 // the code that fixes it had no word in common. "Profile" wins because that is
@@ -58,39 +67,74 @@ struct ProfileTab: View {
     @State private var phase: LoadPhase = .idle
     @State private var loadedAt: Date?
 
-    // Correction state for "Held for you".
+    // Correction state for "Notes mull keeps".
     @State private var editingID: Int64?
     @State private var draftName = ""
     @State private var draftDescription = ""
     @State private var draftContent = ""
     @State private var pendingDeletion: MemoryEntry?
+    /// A forget that didn't happen. The row stays on screen; this says why.
+    @State private var forgetProblem: String?
+
+    // The setup answers, edited on this tab because this is the tab named
+    // "Profile" — see the header comment.
+    @State private var showAnswersEditor = false
+    @State private var showResetConfirm = false
+    @State private var answersResetDone = false
+    /// Clears the "cleared" confirmation. A success message that never leaves
+    /// stops being a confirmation and becomes a permanent label.
+    @State private var resetNoticeTask: Task<Void, Never>?
 
     private enum LoadPhase { case idle, loading, loaded }
+
+    /// The answer to "can I change this line?", carried in every section's
+    /// title row. Read-only stays faint; the two markers that name an action
+    /// you can take here (or in your own file) carry the accent.
+    private enum Access {
+        case yours        // your words — edit them whenever you like
+        case observed     // measurements; they follow what you do, not a pencil
+        case correctable  // mull's words about you, correctable line by line
+
+        var label: String {
+            switch self {
+            case .yours:       "yours to edit"
+            case .observed:    "observed · read-only"
+            case .correctable: "mull's words · correctable"
+            }
+        }
+
+        var tint: Color { self == .observed ? DS.inkFaint : DS.moon }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.xxl) {
                 header
 
+                // Layer one — your own words — needs no database read, so it is
+                // never behind the loading state.
+                answersSection
+
                 if phase == .idle || (phase == .loading && loadedAt == nil) {
                     loadingBlock
                 } else {
+                    // Beside the answers, not below the portrait: these are also
+                    // your words, and pinned junk on a fresh install is exactly
+                    // the case where the portrait is empty and the user most
+                    // needs to be told why.
+                    withheldPinnedSection
                     if isPortraitEmpty {
                         emptyBlock
                     } else {
                         todaySection
                         summarySection
-                        characterSection
+                        factsSection
                         rhythmSection
                         attentionSection
                         languageSection
                         wordsSection
                     }
-                    // Outside the empty/portrait branch on purpose: pinned junk on
-                    // a fresh install is exactly the case where the portrait is
-                    // empty and the user most needs to be told why.
-                    withheldPinnedSection
-                    heldForYouSection
+                    notesSection
                 }
             }
             .frame(maxWidth: DS.readMeasure, alignment: .leading)
@@ -100,6 +144,16 @@ struct ProfileTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { await refreshIfStale() }
+        .sheet(isPresented: $showAnswersEditor) {
+            ProfileAnswersEditor { answers in
+                OnboardingProfile.save(answers)
+                appState.regenerateContextNow()
+                // The withheld-lines section reads me.pinned.md, which this
+                // just rewrote; re-read rather than showing the old file.
+                Task { await refresh() }
+            }
+        }
+        .onDisappear { resetNoticeTask?.cancel() }
         .confirmationDialog(
             "Forget this?",
             isPresented: Binding(
@@ -112,6 +166,15 @@ struct ProfileTab: View {
             Button("Keep", role: .cancel) { pendingDeletion = nil }
         } message: { _ in
             Text("The note leaves mull's memory and its file is removed from ~/mull/memory. Your recorded events are untouched.")
+        }
+        .alert(
+            "Couldn't forget that",
+            isPresented: Binding(get: { forgetProblem != nil },
+                                 set: { if !$0 { forgetProblem = nil } })
+        ) {
+            Button("OK", role: .cancel) { forgetProblem = nil }
+        } message: {
+            Text(forgetProblem ?? "")
         }
     }
 
@@ -126,7 +189,10 @@ struct ProfileTab: View {
                 refreshButton
             }
 
-            Text("Everything below is drawn from the \(Self.windowLabel) of recording, and from nothing else. Where a line is wrong, correct it — mull holds this for you, it does not own it.")
+            // The three kinds of line used to be spelled out here as well as on every
+            // section's title row. The markers do that job in place; this says only
+            // the thing none of them says.
+            Text("Every section says whose lines it holds. mull holds all of it for you — it owns none of it.")
                 .font(DS.bodyFont)
                 .foregroundStyle(DS.inkDim)
                 .fixedSize(horizontal: false, vertical: true)
@@ -169,6 +235,68 @@ struct ProfileTab: View {
         "\(appState.todayCaptureLabel) kept today — keystroke lines, copies, window and app changes."
     }
 
+    // MARK: - What you told mull
+
+    /// The setup answers — moved here from a section in General that was also
+    /// called "Profile", so that the tab named for you is where you are edited.
+    /// Editing opens a sheet, not the setup wizard: no step counter, and closing
+    /// it lands back on this tab.
+    private var answersSection: some View {
+        section("What you told mull", period: nil, access: .yours) {
+            Text("Your answers from setup sit at the top of me.md via me.pinned.md, and capture never overwrites them — clear one and mull goes back to inferring it from what you do.")
+                .font(DS.bodyFont)
+                .foregroundStyle(DS.inkDim)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: DS.md) {
+                Button("Edit answers…") { showAnswersEditor = true }
+                    .buttonStyle(.plain)
+                    .font(DS.captionMedium)
+                    .foregroundStyle(DS.moon)
+
+                Button("Reset answers") { showResetConfirm = true }
+                    .buttonStyle(.plain)
+                    .font(DS.captionMedium)
+                    .foregroundStyle(OnboardingProfile.hasAnswers ? DS.error : DS.inkFaint)
+                    .disabled(!OnboardingProfile.hasAnswers)
+
+                Spacer(minLength: DS.sm)
+
+                if answersResetDone {
+                    Label("Cleared from me.pinned.md", systemImage: "checkmark.circle.fill")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.recording)
+                        .transition(.opacity)
+                }
+            }
+            .padding(.top, DS.xs)
+            .animation(.easeInOut(duration: 0.2), value: answersResetDone)
+            .confirmationDialog(
+                "Clear your profile answers?",
+                isPresented: $showResetConfirm
+            ) {
+                Button("Clear answers", role: .destructive) { resetAnswers() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Everything you told mull at setup — your role, working language, what you're building, how you want AI to answer — is removed from me.pinned.md. Anything you wrote in that file by hand is kept. mull will go back to inferring these from what you do.")
+            }
+        }
+    }
+
+    private func resetAnswers() {
+        OnboardingProfile.reset()
+        appState.regenerateContextNow()
+        answersResetDone = true
+        resetNoticeTask?.cancel()
+        resetNoticeTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            answersResetDone = false
+        }
+        // The withheld-lines section reads the file this just rewrote.
+        Task { await refresh() }
+    }
+
     // MARK: - Loading and emptiness
 
     private var loadingBlock: some View {
@@ -198,6 +326,10 @@ struct ProfileTab: View {
 
     private var emptyBlock: some View {
         VStack(alignment: .leading, spacing: DS.sm) {
+            StippleRings.roundel()
+                .frame(width: 56, height: 56)
+                .opacity(0.5)
+                .padding(.bottom, DS.xs)
             Text("Nothing has taken shape yet")
                 .font(DS.readH2Font)
             Text(emptyReason)
@@ -220,7 +352,10 @@ struct ProfileTab: View {
             return "Recording is paused. Nothing is being kept, and nothing new will appear here until you resume."
         }
         if appState.isRecordingDegraded {
-            return "Keystroke capture has stopped — Accessibility permission was most likely revoked in System Settings › Privacy & Security. Clipboard and window titles are still being kept, but the words and the rhythm below are read from keystrokes."
+            // Named precisely: `isRecordingDegraded` is set by the CGEvent tap's
+            // own health check, which is Input Monitoring. Blaming Accessibility
+            // here sent people to a pane where the switch was already on.
+            return "Keystroke capture has stopped — Input Monitoring was most likely turned off for mull in System Settings › Privacy & Security. Clipboard and window titles are still being kept, but the words and the rhythm below are read from keystrokes."
         }
         return "Recording is on, but the \(Self.windowLabel) hold too little to say anything honest. A few hours of ordinary work is usually enough."
     }
@@ -232,7 +367,7 @@ struct ProfileTab: View {
         let scheduleLines = todaySchedule.map(Self.parseSchedule) ?? []
 
         if dayShape != nil || !scheduleLines.isEmpty {
-            section("Today", period: "today") {
+            section("Today", period: "today", access: .observed) {
                 if let shape = dayShape {
                     Text(shape)
                         .font(DS.readFont)
@@ -283,7 +418,7 @@ struct ProfileTab: View {
             // The model's processing duration ("43s") used to sit in this header.
             // That is a measurement of mull's night, not of your day; it belongs
             // in the log, not on the page.
-            section("Today's summary", period: "today") {
+            section("Today's summary", period: "today", access: .observed) {
                 SummaryContent(summary: summary)
             }
         }
@@ -300,7 +435,10 @@ struct ProfileTab: View {
     @ViewBuilder
     private var withheldPinnedSection: some View {
         if !withheldPinned.isEmpty {
-            section("Not published from me.pinned.md", period: nil) {
+            // "Not published from me.pinned.md" led with a filename; the reader's
+            // question is "why isn't my line showing up?", so the title now
+            // answers in terms of the file they actually hand to an AI.
+            section("Left out of me.md", period: nil, access: .yours) {
                 VStack(alignment: .leading, spacing: DS.xs) {
                     Text(withheldPinned.count == 1
                          ? "One line carries no information, so it is being left out of me.md. Your file is unchanged — edit it to replace this."
@@ -320,9 +458,13 @@ struct ProfileTab: View {
     }
 
     @ViewBuilder
-    private var characterSection: some View {
+    private var factsSection: some View {
         if !facts.isEmpty {
-            section("What mull reads in you", period: Self.windowLabel) {
+            // Titled for what the extractor actually emits — observed facts —
+            // not "What mull reads in you", which promised an interpretation
+            // this screen deliberately does not make (FactExtractor is
+            // observation-only; the inferences were deleted in 2026-07).
+            section("Facts", period: Self.windowLabel, access: .observed) {
                 VStack(alignment: .leading, spacing: DS.md) {
                     ForEach(FactCategory.allCases, id: \.self) { category in
                         let lines = facts.filter { $0.category == category }
@@ -357,7 +499,7 @@ struct ProfileTab: View {
     // MARK: - Rhythm
 
     private var rhythmSection: some View {
-        section("Rhythm", period: Self.windowLabel) {
+        section("Rhythm", period: Self.windowLabel, access: .observed) {
             let lines = [
                 InsightPhrases.activityInsight(hourly: hourly),
                 // Passed explicitly, though it currently equals the parameter's
@@ -368,7 +510,7 @@ struct ProfileTab: View {
             ].compactMap { $0 }
 
             if lines.isEmpty {
-                quiet("Not enough was recorded across the \(Self.windowLabel) to describe a rhythm. It takes several days with activity before a shape is real rather than an accident of when mull happened to be running.")
+                quiet("Not enough was recorded to describe a rhythm. It takes several days with activity before a shape is real rather than an accident of when mull happened to be running.")
             } else {
                 prose(lines)
             }
@@ -378,9 +520,9 @@ struct ProfileTab: View {
     // MARK: - Attention
 
     private var attentionSection: some View {
-        section("Where your attention went", period: Self.windowLabel) {
+        section("Where your attention went", period: Self.windowLabel, access: .observed) {
             if appUsage.isEmpty {
-                quiet("No application switches were recorded in the \(Self.windowLabel), so there is nothing to apportion.")
+                quiet("No application switches were recorded, so there is nothing to apportion.")
             } else {
                 if let line = InsightPhrases.appUsageInsight(apps: appUsage) {
                     prose([line])
@@ -393,6 +535,7 @@ struct ProfileTab: View {
                                 .font(DS.bodyFont)
                                 .foregroundStyle(DS.inkDim)
                                 .lineLimit(1)
+                                .help(app.appName)
                             Spacer(minLength: DS.md)
                             Text("\(Int(app.percentage.rounded()))%")
                                 .font(DS.captionFont)
@@ -409,10 +552,10 @@ struct ProfileTab: View {
     // MARK: - Language
 
     private var languageSection: some View {
-        section("Language", period: Self.windowLabel) {
+        section("Language", period: Self.windowLabel, access: .observed) {
             let total = langMix.japanesePercent + langMix.englishPercent + langMix.codePercent
             if total <= 0 {
-                quiet("Nothing was copied in the \(Self.windowLabel), and the language mix is read from what you copy.")
+                quiet("Nothing was copied, and the language mix is read from what you copy.")
             } else {
                 if let line = InsightPhrases.languageInsight(mix: langMix) {
                     prose([line])
@@ -436,9 +579,9 @@ struct ProfileTab: View {
     // MARK: - Words
 
     private var wordsSection: some View {
-        section("Words", period: Self.windowLabel) {
+        section("Words", period: Self.windowLabel, access: .observed) {
             if keywords.isEmpty {
-                quiet("No recurring words yet. This is read from keystrokes and copies in the \(Self.windowLabel), and there aren't enough of them to call anything frequent.")
+                quiet("No recurring words yet. This is read from keystrokes and copies, and there aren't enough of them to call anything frequent.")
             } else {
                 // A running line of type, not a weighted cloud. Frequencies stay
                 // out of it: the ordering is the claim, and printing "haptics 41"
@@ -459,11 +602,13 @@ struct ProfileTab: View {
         }
     }
 
-    // MARK: - Held for you
+    // MARK: - Notes mull keeps
 
-    private var heldForYouSection: some View {
-        section("Held for you", period: nil) {
-            Text("Notes mull has written and kept about you. They are yours: change the wording, or have mull forget one entirely.")
+    private var notesSection: some View {
+        // "Held for you" named the sentiment and not the thing; a reader scanning
+        // for "where are the AI-written notes?" had no word to catch on.
+        section("Notes mull keeps", period: nil, access: .correctable) {
+            Text("Written during the nightly summary. They are about you and therefore yours.")
                 .font(DS.bodyFont)
                 .foregroundStyle(DS.inkDim)
                 .fixedSize(horizontal: false, vertical: true)
@@ -603,25 +748,37 @@ struct ProfileTab: View {
         updated.content = draftContent
         updated.updatedAt = Date()
 
-        HeldMemoryStore.save(updated, database: appState.database)
+        if !HeldMemoryStore.save(updated, database: appState.database) {
+            forgetProblem = "“\(updated.name)” was corrected in mull's memory, but its file "
+                + "in ~/mull/memory could not be written — that copy still has the old wording."
+        }
         memories[index] = updated
         editingID = nil
     }
 
     private func forget(_ memory: MemoryEntry) {
-        HeldMemoryStore.forget(memory, database: appState.database)
+        pendingDeletion = nil
+        guard HeldMemoryStore.forget(memory, database: appState.database) else {
+            // The memory stays in the list because it is, in fact, still there.
+            forgetProblem = "“\(memory.name)” could not be removed — its file in ~/mull/memory is still in place."
+            return
+        }
         memories.removeAll { $0.id == memory.id }
         if editingID == memory.id { editingID = nil }
-        pendingDeletion = nil
     }
 
     // MARK: - Composition
 
     /// An editorial section: a letterspaced label carrying its own period, a
     /// hairline rule, then prose. No card, no grid, no frame.
+    ///
+    /// `access` is required, not defaulted: every section must answer "can I
+    /// change this?" in its title row, because mixing editable and read-only
+    /// prose with no marking is what made this screen hard to trust.
     private func section<Content: View>(
         _ title: String,
         period: String?,
+        access: Access,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: DS.sm) {
@@ -634,6 +791,10 @@ struct ProfileTab: View {
                         .font(DS.captionFont)
                         .foregroundStyle(DS.inkFaint)
                 }
+                Spacer(minLength: DS.sm)
+                Text(access.label)
+                    .font(DS.captionFont)
+                    .foregroundStyle(access.tint)
             }
 
             Rectangle()
@@ -762,7 +923,16 @@ struct ProfileTab: View {
             )
         }.value
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            // Leaving the tab cancels the `.task` driving this, but a TabView keeps
+            // the tab's `@State` — so bailing without putting the phase back left it
+            // on `.loading` forever. `refreshIfStale` then refused to run (it bails
+            // on `.loading`) and "Read again" was disabled with it, and the tab
+            // showed the loading block until the Settings window was closed and
+            // opened again.
+            phase = .idle
+            return
+        }
         keywords = loaded.keywords
         appUsage = loaded.appUsage
         hourly = loaded.hourly
@@ -790,6 +960,91 @@ struct ProfileTab: View {
     }
 }
 
+// MARK: - Profile Answers Editor
+//
+// The same questions the setup wizard asks, edited in place. It is explicitly
+// *not* the wizard: no step counter (there are no steps), no "Save & Continue"
+// leading somewhere else, and closing it returns to the Profile tab — because
+// that is where the user was. Answers are the user's stated priors; nothing is
+// required. (Lives here because this tab is its only presenter; it used to sit
+// in SettingsView beside a General-tab section that duplicated this surface.)
+
+struct ProfileAnswersEditor: View {
+    /// Called with the edited answers when the user commits.
+    let onSave: ([String: String]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var answers: [String: String] = [:]
+    @State private var original: [String: String] = [:]
+    @State private var showDiscardConfirm = false
+
+    private var isDirty: Bool {
+        OnboardingProfile.questions.contains { q in
+            (answers[q.id] ?? "") != (original[q.id] ?? "")
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.md) {
+            VStack(alignment: .leading, spacing: DS.xs) {
+                Text("Your profile answers")
+                    .font(DS.titleFont)
+                    .foregroundStyle(DS.ink)
+                Text("Change anything; clear a field to drop that fact. Every one is optional, and capture keeps refining the rest.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.lg) {
+                    ForEach(OnboardingProfile.questions) { q in
+                        VStack(alignment: .leading, spacing: DS.xs) {
+                            Text(q.prompt).font(DS.bodyMedium).foregroundStyle(DS.ink)
+                            Text(q.hint).font(DS.captionFont).foregroundStyle(DS.inkFaint)
+                            TextField(q.placeholder, text: Binding(
+                                get: { answers[q.id] ?? "" },
+                                set: { answers[q.id] = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                }
+                .padding(.vertical, DS.xs)
+                .padding(.trailing, DS.sm)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    if isDirty { showDiscardConfirm = true } else { dismiss() }
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Save answers") {
+                    onSave(answers)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(DS.xl)
+        .frame(width: 460, height: 520)
+        .background(DS.canvas)
+        .onAppear {
+            answers = OnboardingProfile.answers
+            original = answers
+        }
+        .confirmationDialog("Discard your changes?", isPresented: $showDiscardConfirm) {
+            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Keep editing", role: .cancel) {}
+        } message: {
+            Text("The edits you just made to your answers won't be saved.")
+        }
+    }
+}
+
 // MARK: - Writing back to what mull holds
 
 /// Correction and deletion for the notes shown in "Held for you".
@@ -802,20 +1057,36 @@ struct ProfileTab: View {
 /// database.
 private enum HeldMemoryStore {
 
-    static func save(_ entry: MemoryEntry, database: DatabaseService) {
+    /// Returns whether the file half landed too. `forget` in this same type is
+    /// careful to report a half-done deletion; this used to discard the write error
+    /// with `try?`, so an unwritable vault left the row corrected in the database and
+    /// on screen while `~/mull/memory/` kept mull's old wording — under a caption
+    /// promising the correction had reached both.
+    @discardableResult
+    static func save(_ entry: MemoryEntry, database: DatabaseService) -> Bool {
         database.updateMemory(entry)
-        try? body(for: entry).write(
-            to: MullDirectory.url(for: entry.filePath),
-            atomically: true,
-            encoding: .utf8
-        )
+        do {
+            try body(for: entry).write(
+                to: MullDirectory.url(for: entry.filePath),
+                atomically: true,
+                encoding: .utf8
+            )
+            return true
+        } catch {
+            return false
+        }
     }
 
-    static func forget(_ entry: MemoryEntry, database: DatabaseService) {
+    /// File first, row second, and the row only if the file went: a row without
+    /// a file is an orphan the UI can't show, but a file without a row is
+    /// forgotten text still sitting in the vault — the worse failure for a
+    /// forget control. Returns whether both halves happened, so the caller can
+    /// keep showing the memory instead of pretending it's gone.
+    static func forget(_ entry: MemoryEntry, database: DatabaseService) -> Bool {
         // Keyed by filePath, not by name: two notes can share a name, and
         // deleting by name would wipe both rows while removing only one file.
-        try? FileManager.default.removeItem(at: MullDirectory.url(for: entry.filePath))
-        database.deleteMemory(entry)
+        guard MullDirectory.delete(entry.filePath) else { return false }
+        return database.deleteMemory(entry)
     }
 
     /// The same front matter MullEngine writes, so the file never drifts from the row.

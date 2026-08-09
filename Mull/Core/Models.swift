@@ -64,10 +64,22 @@ struct DailySummary: Codable, FetchableRecord, PersistableRecord, Identifiable {
     }
 
     /// One-line preview for collapsed card display.
+    ///
+    /// The list marker is stripped. A summary's first content line is usually
+    /// already a bullet, and every caller puts the preview inside something —
+    /// a card, or `- **2026-06-10** — …` in now.md, which is where it rendered as
+    /// `— - Opened and edited…`. A preview is a fragment; whoever displays it owns
+    /// its presentation.
     var preview: String {
         let lines = content.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.hasPrefix("#") }
-        return lines.first ?? "No activity recorded"
+        guard let first = lines.first?.trimmingCharacters(in: .whitespaces) else {
+            return "No activity recorded"
+        }
+        for marker in ["- [ ] ", "- [x] ", "- ", "* ", "+ "] where first.hasPrefix(marker) {
+            return String(first.dropFirst(marker.count))
+        }
+        return first
     }
 
     var dateFormatted: String {
@@ -80,6 +92,28 @@ struct DailySummary: Codable, FetchableRecord, PersistableRecord, Identifiable {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: date)
+    }
+}
+
+extension Collection where Element == DailySummary {
+
+    /// Split summaries into the ones recent enough to head a "recent days"
+    /// section and, when there are none, the newest one that exists anyway.
+    ///
+    /// A section called "Recent days" listing 2026-06-10 on 2026-08-09 is not a
+    /// small cosmetic problem: it is the file's own answer to "when did anything
+    /// last happen", and both the user and every AI reading now.md take it at face
+    /// value. The date was accurate — `daily_summaries` genuinely held one row from
+    /// June, because the nightly consolidation needs an LLM provider and had not
+    /// run since. What was wrong was the framing. Two months of silence is
+    /// information, and it belongs in the file as itself rather than disguised as
+    /// the most recent thing the user did.
+    func splitByRecency(days: Int = 7, now: Date = Date())
+        -> (recent: [DailySummary], newestStale: DailySummary?) {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
+        let recent = filter { $0.date >= cutoff }
+        guard recent.isEmpty else { return (recent, nil) }
+        return ([], self.max(by: { $0.date < $1.date }))
     }
 }
 

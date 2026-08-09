@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import IOKit.hidsystem
 
 /// Monitors Accessibility and Input Monitoring permission status.
 ///
@@ -167,8 +168,26 @@ final class PermissionService: ObservableObject {
     /// register the app and show its prompt. This creates exactly one, never enables
     /// it, and invalidates it immediately — no keystroke ever reaches the callback.
     ///
+    /// Whether macOS still has an Input Monitoring dialog left to show.
+    ///
+    /// TCC shows each prompt once and then keeps the answer, so "not granted" and
+    /// "asking will do nothing visible" are different states, and the caller wants
+    /// opposite things on screen for each: a dialog to answer, or the Settings pane
+    /// to go and find the switch in. Only `unknown` — never asked — still prompts.
+    ///
+    /// `requestInputMonitoring()` below can't answer this. It reports whether the
+    /// tap was created, and on a first run the tap fails *while* raising the very
+    /// dialog whose absence its failure was being read as proof of.
+    ///
+    /// Must be read before asking: immediately afterwards the user has not answered
+    /// yet, so the state is still `unknown` and says nothing about what happened.
+    var inputMonitoringPromptAvailable: Bool {
+        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeUnknown
+    }
+
     /// Returns true when the tap succeeded, i.e. permission is already granted and
-    /// no prompt will appear; the caller can then fall back to opening Settings.
+    /// no prompt will appear. When it returns false a prompt may or may not have
+    /// appeared — ask `inputMonitoringPromptAvailable` first to tell those apart.
     @discardableResult
     func requestInputMonitoring() -> Bool {
         let tap = CGEvent.tapCreate(

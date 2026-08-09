@@ -1,435 +1,319 @@
 # mull — Product Specification
 
-> **文書の序列**（2026-07 整理）: 哲学と見え方は `DESIGN-NORTHSTAR.md`、作り方と
-> 判断の根拠は `DIRECTION.md`、製品仕様（＝この文書）はその2つに従属する。
-> 衝突したら **DESIGN-NORTHSTAR > DIRECTION > CLAUDE.md**。
-> `PRODUCT.md` と `ONBOARDING.md` は削除した（理由は DIRECTION.md 付録B）。
+> **文書の序列**（2026-08 改訂）
+>
+> | 文書 | 何を決めるか | 序列 |
+> |---|---|---|
+> | STRATEGY-2026-08.md（非公開の内部文書） | **事業の線**（誰に何を出すか） | 事業については**最上位** |
+> | MARKET-2026-08.md（非公開の内部文書） | STRATEGY が依拠する外部データ（証拠台帳） | 参照 |
+> | [DIRECTION.md](DIRECTION.md) | **作り方**と判断の根拠 | 技術については最上位 |
+> | [SELECTION-LAYER.md](SELECTION-LAYER.md) | 中核IP（選択層）の具体設計 | DIRECTION の従属 |
+> | [MAP-ARCHITECTURE.md](MAP-ARCHITECTURE.md) | データ層の構造（領土/地図/モード） | DIRECTION の従属 |
+> | [HARNESS.md](HARNESS.md) | **生成すべきハーネスの仕様と、訂正ループの実装**（§7.3 の実装仕様） | DIRECTION の従属 |
+> | **CLAUDE.md（本書）** | 製品仕様 | 上記に従属 |
+> | [DESIGN-NORTHSTAR.md](DESIGN-NORTHSTAR.md) / [DESIGN.md](DESIGN.md) | 見え方 | **当面凍結**（§9） |
+>
+> 衝突したら **STRATEGY（事業） > DIRECTION（技術） > CLAUDE.md（仕様）**。
+> UI/意匠の話に限っては DESIGN-NORTHSTAR が最上位のまま（ただし凍結中）。
+
+---
 
 ## 1. Identity
 
 - **App Name**: mull
-- **Subtitle**: Know what you did.
-- **Tagline**: Stop explaining yourself to AI.
-- **Category**: Productivity / Second Brain
+- **Subtitle**: Behavioral memory for coding agents.
+- **Tagline**: **Your agent knows what you told it. mull knows what you did.**
+- **Category**: Developer tool / Agent memory (旧: Productivity / Second Brain)
 - **Platform**: macOS (Apple Silicon)
+- **License**: **MIT**（2026-08-09 決定。FSL-1.1-MIT を一度採ったが公開前に撤回——STRATEGY §5-4）
+- **配布**: OSS。MCP サーバー単体バイナリ（`MullMCP`）が主、GUI は従（§9）
 
 ---
 
-## 2. Vision
+## 2. 立ち位置 — なぜこれが要るか
 
-### The Problem
+### 2.1 唯一の非対称性
 
-AIに仕事を頼むたびに、自分のことを一から説明している:
+2026年時点で、AI のメモリはどれも**「言われたこと」**しか持っていない。
 
-```
-「私はSwift開発者で、PantryAppというヘルスケアアプリを作っていて、
- 今Storyboardのリファクタリングをしていて、Phase 5まで進んでいて、
- あとUIKitベースなんだけど、角丸が12〜20でバラバラで...」
-```
+| 誰 | 何を覚えているか | 何を見ていないか |
+|---|---|---|
+| ChatGPT (Dreaming V3) | ChatGPT での**発言** | あなたのマシンの上で起きたこと |
+| Claude memory | Claude での**発言** | 同上 |
+| GitHub Copilot Memory | リポジトリの**成果物**（コミット文体・PR構造） | 書く前の試行、コピーしたエラー、詰まった時間 |
+| Gemini Personal Intelligence | Gmail / Photos＝**Google の面** | あなたの Xcode |
+| Mem0 / Zep / Letta | アプリが**渡した**もの（＝多くは会話） | OS レベルの行動 |
 
-1回2-3分。1日10回AIに聞くなら、1日30分。月10時間。**年120時間をAIへの自己説明に使っている。**
+> **誰も、あなたのマシンの上で実際に起きたことを持っていない。**
+> **mull が持っているのはそれだけであり、それが全てである。**
 
-### What mull Does
+エージェントが「今日の午後ずっと何をしていたか」「15時にコピーしたエラーは何か」
+「先週この判断をした時、何を見ていたか」を知る手段は、現状 mull しかない。
 
-**その120時間をゼロにする。**
+### 2.2 「アクセスできる」と「今の必要に対して正しく選べる」は別
 
-mullはバックグラウンドであなたの作業を記録し、AIが読める形に構造化する。AIはmullを読んで、あなたのことを最初から知っている。
+Claude Code も computer-use も PC 全体にアクセスできる。しかし毎回探索する。
+10万ファイルの中から今日の文脈を探すのは遅く、高く、ノイジー。
 
-```
-Before mull:
-  あなた: 「私はSwift開発者で...（2分の説明）...このバグ直して」
-  AI:    「了解しました。まず確認ですが...」
+**必要なのはアクセス権ではなく、今の問いに対して"ちょうど正しい最小スライス"を返す層**
+（＝ DIRECTION §5 / SELECTION-LAYER）。**そこが製品であり、堀である。**
 
-After mull:
-  あなた: 「このバグ直して」
-  AI:    「PantryAppのStoryboard改修中ですね。Phase 5の
-          RegisterAccountTutorialVCの件ですか？15:00からFXの
-          ミーティングがあるので、先に小さい修正から始めましょう。」
-  あなた: 「......なんでそこまで知ってるの？」
-```
+### 2.3 反証への態度
 
-**この「なんで知ってるの？」の瞬間がmullの価値。**
+ETH Zurich, arXiv 2602.11988（2026-02）は
+*"providing context files does not generally improve task success rates,
+while increasing inference cost by over 20%"* と報告している。
 
-### How mull Changes Your Life
+**これは正しい。ただし *詰め込んだ* 場合の話である。**
+mull の主張は「文脈を渡せば良くなる」ではなく
+**「現在状態にアンカーを打って必要分だけ選ぶと良くなる。測れる」**。
+測る道具は [`eval/selection_eval.swift`](eval/selection_eval.swift)（20ケース、precision/recall/MRR）。
 
-```
-AIとの会話:   毎回2-3分の説明 → ゼロ。即座に的確な回答
-月曜の朝:     「先週何やった...」→ 30秒で全把握
-評価面談:     「成果は...えーと...」→ 3ヶ月分の記録が全部ある
-転職:         「経歴書に何書こう」→ me.md + 6ヶ月分のTimeline
-```
-
-日記としても機能する。ただし目的は「日記を書く」ことではなく「AIとの意思伝達コストをゼロにして生産性を上げる」こと。日記は手段。自動で書かれる。読み返す必要すらない。AIが読んでくれる。
-
-### mull vs ChatGPT Memory — 根本的に違うもの
-
-ChatGPTにもメモリ機能がある。「この人はSwift開発者」「東京在住」と覚えてくれる。では何が違うのか。
-
-```
-ChatGPT Memory = あなたが「言った」ことを覚えている
-  → "I'm a Swift developer" と言ったから知っている
-  → 言わなかったことは知らない
-  → 今日何をしたかは知らない
-  → 15:00にミーティングがあることは知らない
-  → 静的。月に1回更新されるプロフィール。
-
-mull = あなたが「やった」ことを知っている
-  → 言わなくても、Xcodeを毎日使っているから開発者だとわかる
-  → 今日2.5時間PantryAppに使ったことを知っている
-  → 15:00からFXのCSがあることをカレンダーから知っている
-  → さっきコピーしたエラーメッセージを知っている
-  → 動的。60秒ごとに更新される今日の全行動記録。
-```
-
-ChatGPTのメモリは「プロフィール」。mullは「今日の行動ログ + 蓄積された理解」。
-
-ChatGPTは「あなたは誰か」を知っている。mullは「あなたは今、何をしているか」を知っている。両者は競合しない。共存する。mullのデータをChatGPTやClaudeに渡すことで、「誰か」と「今何してるか」の両方をAIが持つ。
-
-### First Goal: AIがあなたを知っている状態を自動で作る
-
-> **「あなた」をAIに渡せるファイルにする。**
-
-- インストールして放置するだけで、AIがあなたを知っている状態が勝手に作られる
-- キーストローク、クリップボード、ウィンドウタイトル、カレンダー、メール — 全て自動取得
-- me.md / now.md / full.md が60秒ごとに自動更新される
-- MCPサーバー経由でAIが自分からmullにアクセスする
-- ユーザーは何もしない。AIが勝手に知っている。**「なんでこんなこと知ってるの？」**の瞬間が起きる
-
-### Ultimate Goal: 第二の脳を作る
-
-散らばった情報を一つの場所に集約する。境界を設けない。
-
-- **自動で入ってくるもの** — キーストローク、クリップボード、ウィンドウ、メール、カレンダー、ブラウザ履歴、Git、ファイル変更
-- **手動で入れるもの** — メモ、PDF、画像、ファイル、ブックマーク、何でも
-- **AIが書き込むもの** — 会話で学んだこと、判断の記録、生成したドキュメント
-
-この3つが全て **`~/mull/`** フォルダに入る。
-
-```
-~/mull/ = あなたのデジタル人格
-
-  ├── me.md          ← AIがあなたを理解するためのプロフィール
-  ├── now.md         ← 今何をしているか
-  ├── full.md        ← 全コンテキスト
-  ├── daily/         ← 日次サマリー（自動生成）
-  ├── memory/        ← AIが学んだトピック別メモリ
-  ├── notes/         ← ユーザーが自分で書くメモ
-  ├── files/         ← ドラッグ&ドロップしたPDF、画像、ドキュメント
-  └── clips/         ← Webクリップ、ブックマーク
-
-誰でもアクセスできる:
-  - mull アプリ（閲覧・編集）
-  - AI（MCPサーバー経由で読み書き）
-  - 他のツール（ただのフォルダ。git, iCloud, Obsidian互換）
-```
-
-NotionとObsidianとRewindとClaude Codeのメモリを全部足して、それをフォルダ1つに圧縮したもの。それがmull。
-
-### Final Goal: 実行する分身（The Understudy）
-
-第二の脳は到達点ではない。**通過点**である。
-
-mullはあなたの行動を1年間見てきたカバン持ちだ。カバン持ちの最終形は「知っている」ことではなく、**「あなたとして動ける」**こと——あなたが繰り返しやっている仕事を、あなたの流儀で仕上げて差し出す**分身**になることだ。
-
-```
-価値の階層:
-  1. 記録する      （あなたを捕える）        ← 実装済み
-  2. 肖像にする    （あなたを知る = 整形は創造）← 実装済み・mullの現在の堀
-  3. 先回りする    （見ていたから、先に用意する）
-  4. バーチャル自分（あなたの反復行動のプレイブック集）
-  5. 代わりに実行  （あなたとして仕上げ、差し出す）← 最終形
-```
-
-分身の差別化軸は **capability（賢さ）ではなく fidelity（忠実さ＝you-shaped）**。汎用エージェントは有能だが、あなたではない。mullの分身は有能である必要はない——**あなたに似ていればいい**。それを可能にするのは、mullだけが持つ「あなたがどうやるかの行動ログ」と「あなたの訂正の履歴」である。
-
-最初の分身の仕事（V1・実装済み）: **「Today, in your words」**——今日の活動を、あなたの文体で日報に仕上げて差し出す。あなたの編集が翌日の文体サンプルになる（fidelityループ）。
-
-> 「これ、私が書いたやつだ」——この瞬間が分身の価値。
-> （第一段階の「なんでそこまで知ってるの？」に続く、第二の魔法）
+**この主張が eval で否定されたら、位置づけごと考え直す**（STRATEGY §6 撤回基準）。
 
 ---
 
-## 3. Core Values
+## 3. 何を売らないか（Non-goals）
 
-1. **Invisible（存在を忘れる）** — インストールした瞬間から記録が始まる。設定不要。操作不要。
-2. **Accumulative（勝手に育つ）** — 使えば使うほど第二の脳が豊かになる。自動取得 + 手動投入 + AI書き込み。
-3. **Boundaryless（境界がない）** — どんな情報でも入る。テキスト、画像、PDF、URL。拒まない。
-4. **AI-native（AIのために存在する）** — 全データはAIが読める形で構造化される。MCPで直接アクセス。コピペ不要。
+2026-08 の市場調査（MARKET-2026-08.md）を受けて、**明示的に降りたもの**:
 
----
+| 降りたもの | 理由 |
+|---|---|
+| **消費者向け「第二の脳」アプリ** | Rewind（$33M調達）は 2025-12-19 に製品ごと停止。"second brain" Show HN 236件の中央値 3pt。個人が買い手の側で公開検証できる年商$3M超の例がゼロ |
+| **「AIへの自己説明を年120時間ゼロに」という訴求** | 痛みとして感じられておらず、ETH論文が直接の反証になる。訴求は「時間削減」ではなく**選択の質** |
+| **日報/タイムシートの自動生成を主商品にすること** | 10社以上が出荷済み（Timely / ManicTime / Timing / Rize / Dayflow …）。ManicTime は $7/user/月 で mull とほぼ同一の機構を持つ。Dayflow と myloggy は**無料**でやっている |
+| **消費者サブスクの価格設計** | Screenpipe の順序（公開 → star → 商用化）に従う。価格は star の後 |
+| **日本市場を一次市場にすること** | 個人が買える製品が最低人数の壁で構造的に存在せず、PC活動ログ＝監視として認知が固定。**公開してGitHubに置くことがこの問題を丸ごと迂回する** |
+| **雇用主向け監視（ActivTrak / Hubstaff 型）** | 金はそこにある（$33–50M ARR）が、DESIGN-NORTHSTAR の dignity と同居できない。**採らない** |
 
-## 3.5 Positioning: Why Not Just Give AI Full PC Access?
+### 3.1 引き続きやらないこと（技術的な非機能）
 
-Claude Code、openClaw、Computer Use — これらはPCを丸ごと操作・解析できる。しかし「アクセスできる」と「理解している」は全く違う。
+| やらない | 理由 |
+|---|---|
+| 画面OCR / スクリーンショット | Screenpipe の領域。CPU/ストレージが重い。打鍵＋クリップボード＋ウィンドウで十分に軽く、構造化しやすい |
+| 音声録音・書き起こし | Omi/Granola/Plaud の領域。第三者の録音同意という社会的摩擦を背負わない |
+| タスク管理 / メール送信 | 記録と管理は別の関心事。mull は読み取りのみ |
+| カレンダーの高度な編集（繰り返し / 出席者 / 通知 / カレンダー作成） | Calendar.app の領域。ただし**予定の作成・時刻変更・削除は GUI で可能**（2026-08 に「カレンダー編集はやらない」を撤回。§3.3） |
+| クラウド同期 | プライバシーの根幹。iCloud/git は自分でやればいい |
+| iOS / Android | macOS Accessibility API に依存 |
+| 汎用チャットボット | Claude/ChatGPT の領域 |
+| プラグインマーケットプレイス | 複雑さが指数関数的に増える |
 
-```
-Claude Code:      PC全体にアクセス可能
-                  → でも毎回ファイルを探索する
-                  → 100万ファイルの中から関連情報を探す
-                  → 遅い。トークンを浪費する。ノイジー。
+### 3.3 カレンダーへの書き込みについて（2026-08 撤回）
 
-mull:            事前に構造化済み
-                  → me.md を読むだけで「誰か」がわかる
-                  → now.md を読むだけで「今何してるか」がわかる
-                  → 瞬時。安い。的確。
-```
+「カレンダー編集はやらない」は撤回した。理由は、予定の穴を見つけるのは **mull のグリッドを見ている最中**だからで、
+そこから別アプリに送り返すのは「あなたの1日が住んでいる場所」であることをやめる瞬間だった。
+加えて、Mac ユーザーが最初に試すジェスチャ（空きスロットのダブルクリック）が無反応で、理由も言わなかった。
 
-**AIに必要なのは「アクセス権」ではなく「整理された文脈」。**
+越えない線は4つ:
 
-PCを丸ごと読めても、10万ファイルの中から今日のミーティング情報を探すのは非効率。mullが先に「この人は3つの事業を同時に回していて、15:00からFX事業のCSミーティングがあって、午前中はPantryAppのStoryboard改修をPhase 5まで進めた」と構造化しておけば、AIは即座に的確な応答ができる。
+1. **mull はコピーを持たない** — EventKit に書いて EventKit から読み直す。DB には一切入れない
+2. **行き先はユーザーが既に選んだカレンダーだけ** — 既定カレンダーが初期値。mull はカレンダーを作らない
+3. **明示的な操作なしには1バイトも書かない** — ダブルクリック → タイトル入力 → Return
+4. **すべて取り消せる** — create / edit / delete はすべて `UndoManager` に逆操作を登録する（⌘Z）
 
-### mullの3つの差別化
+繰り返し予定は `.thisEvent` のみ。購読カレンダーは読み取り専用のまま。
 
-**1. 事前構造化（Pre-structured Context）**
+> **注（未解決）**: §1 の位置づけ変更（製品の実体 = MCP サーフェス、GUI は従）と、
+> GUI のカレンダー編集に投じた労力は緊張関係にある。§5 の MCP `calendar` ツールは読み取りのみで、
+> 書き込みはエージェントには開いていない。この線引きが正しいかは STRATEGY 側で決める。
 
-生データを即座に構造化する。AIが毎回解析する必要がない。
+### 3.2 原則
 
-```
-生データ:    4,235 events / day
-  ↓ AnalyticsEngine + FactExtractor + TimeBlockEngine
-構造化:     me.md (~200 tokens) + now.md (~500 tokens)
-  ↓
-AIが読む:   0.1秒で「あなた」を理解
-```
+**mull は記憶であって頭脳ではない。**
 
-**2. 可視化（Visible Intelligence）**
+mull の仕事は2つ:
+1. **広く正確に捕える** — 今しか取れないものを、ロスなく（MAP-ARCHITECTURE 法則①）
+2. **今の必要に対して正しく選ぶ** — need-scoped context assembly（DIRECTION §5）
 
-mullが何を知っているかをユーザーが確認・修正できる。
-
-- Insights tab: 「あなた」がどう解析されているかが見える
-- Files tab: me.md を直接編集して「AIの理解」を修正できる
-- Timeline: 「メインでやったこと」の推論結果を確認できる
-
-ブラックボックスではない。ユーザーが信頼できる透明性。
-
-**3. 選択的コンテキスト（Right-sized Context）**
-
-全てを渡すのではなく、必要な分だけ渡す。
-
-```
-Profile (~200 tokens):  身元だけ。常に安全。
-Standard (~700 tokens): 身元 + 今の作業。通常はこれで十分。
-Full (~1,500+ tokens):  全て。新しいタスクの開始時だけ。
-```
-
-100万トークンのコンテキストウィンドウがあっても、無駄に埋めるべきではない。必要な文脈を最小トークンで渡すことで、AIの精度を最大化する。
+**選択の知能はエージェント、素材の質と索引の質は mull。**
+賢さで勝負しない。「何でもできる」は Claude/Cursor の領域。
 
 ---
 
-## 3.6 Non-Features（意図的にやらないこと）
+## 4. Core Values
 
-可能性があるからこそ、やらないことを決める。人間の脳は多機能を使いこなせるようにできていない。
-
-| やらないこと | 理由 |
-|------------|------|
-| **画面OCR / スクリーンショット** | Screenpipeの領域。CPU/ストレージが重い。キーストローク+クリップボードで十分 |
-| **音声録音・書き起こし** | Omi/Granola/Plaudの領域。ハードウェアが必要。mullはテキストに集中 |
-| **タスク管理** | Things/Todoist/Linearの領域。記録と管理は別の関心事 |
-| **カレンダー編集** | Calendar.appの領域。mullは読み取りのみ |
-| **メール送信・返信** | Mail.appの領域。mullは読み取りのみ |
-| **WYSIWYG エディタ** | Notionの領域。mullはプレーンマークダウン。シンプルさが価値 |
-| **リアルタイム共同編集** | Google Docs/Notionの領域。mullは個人の脳 |
-| **汎用チャットボット** | ChatGPT/Claudeの領域。雑談・一般質問はやらない。ただし「自分の記録について聞く」スコープ付きチャットは可（下記注を参照） |
-| **プラグインマーケットプレイス** | 複雑さが指数関数的に増える。コア体験がぼやける |
-| **クラウド同期** | プライバシーの根幹を揺るがす。iCloud/gitは自分でやればいい |
-| **iOS / Android版** | macOS Accessibility APIに依存。モバイルでは同等の記録ができない |
-| **ブラウザ拡張** | インストール摩擦。AppleScript + History.dbで十分 |
-| **カスタムプロンプト編集** | ユーザーにプロンプトを触らせない。「何も考えなくていい」の原則 |
-| **ダッシュボードのカスタマイズ** | ウィジェット配置を考える時間 = 無駄。mullが最適配置を決める |
-
-### 原則
-
-**mullは分身であり、汎用エージェントではない。**（旧「mullはデータ層であり、AIの頭脳ではない」を改訂）
-
-mullの仕事は2つ:
-1. **記憶を整形する** — AIに渡す「あなた」を構造化する（custode / カバン持ちの基本職務）
-2. **あなたとして下書きする** — 観察した反復行動を、あなたの流儀で仕上げて差し出す（分身の職務）
-
-汎用的な賢さで勝負しない。「何でもできる」はClaude/ChatGPT/Cursorの領域。mullの分身は**あなたがやっているのを観察した行動だけ**をやる。賢いからではなく、あなたを千回見たから書ける——それが堀。
-
-#### 分身の憲法（dignity 3制約 — 破ったらBは監視に堕ちる）
-
-1. **発火は常に主** — 分身は下書きまで。送信・実行・公開はあなたがワンタップで承認する。自動発火はしない
-2. **根拠を見せる** — 「先週あなたがこう書いたから」と、何から学んだかを開示する
-3. **訂正が分身を育てる** — あなたの編集はいつでも可能で、編集そのものが翌日の文体サンプルになる（fidelityループ）。記録も分身も、所有されず預かられる
-
-> **スコープ付きチャットについて（v2）**: mull内のチャットは「汎用チャットボット」ではない。あなたの記録（me/now/projects）に根拠を置いて「自分について」答え、記録の再整理を指示する窓口。雑談や一般質問が来たら断ってClaude/ChatGPTに誘導する。重い汎用思考はMCP経由でmullを読むClaude/ChatGPTがやる。分身の「実行」はこれと別物で、上の憲法に従う。
-
-**1つの画面で1つのことしかしない。**
-
-- Home = 全体の把握
-- Live = 記録の確認
-- Calendar = 1日/1週間の振り返り（旧Timeline）
-- Chat = 自分の記録に問いかける
-- Files = 情報の編集
-- （Insights/パターン確認は Settings の Profile タブ）
-
-メインのピンは少数に保つ。新しいピンを足したくなったら、既存のどれかが肥大化している証拠。
+1. **Local-first（外に出ない）** — 全データはユーザーの Mac 内。mull のサーバーは存在しない。LLM は既定 Off
+2. **Portable（持ち出せる）** — 出力はプレーン md。DB/API ロックインなし。git/Obsidian 互換
+3. **Correctable（人間が上書きできる）** — 自動層は人間の編集を絶対に壊さない（Curator / provenance）
+4. **Measurable（測れる）** — 選択の質は eval で測る。vibes で「良くなった」と言わない
+5. **Open（読める）** — キーストロークを扱う製品が信頼を得る唯一の手段はコードが読めること（§8.3）
 
 ---
 
-## 4. Design Language
+## 5. 製品の実体 — MCP サーフェス
 
-### Color Scheme
+**mull の製品は GUI ではなく、エージェントが叩く 12 のツールである。**
 
-> 詳細は `DESIGN-NORTHSTAR.md`（Cucinelli / custode の哲学）が正。衝突したらそちらが優先。
+```bash
+claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
+```
 
-- **Base**: 温かいニュートラル（アイボリー `#F2EDE1` のキャンバス、紙の質感。冷たいテックグレー禁止）
-- **Ink**: エスプレッソ `#393127`（真っ黒を使わない）
-- **Accent**: タバコブラウン `#945F32`（DS.moon）。**`Color.accentColor` を直接使わない**——システム設定のアクセントに上書きされ青が混入する。必ず DS トークンを通し、ネイティブコントロールにはルートで `.tint(DS.moon)`
-- **Cards**: 温かい紙の面 + ヘアライン。`.ultraThinMaterial`（冷たいガラス）は人間に向く面で禁止
-- **App Colors**: 既知アプリはキュレーション色、未知アプリはハッシュベースの自動色生成
+| ツール | 役割 |
+|---|---|
+| `whats_active_now` | **現在状態アンカー**。今のアプリ/entity/セッション/直近の高salience行動 |
+| `search` | now-anchored ranked retrieval（recency + entity + FTS + salience の融合） |
+| `get_user_context` | 3層コンテキスト（profile / standard / full） |
+| `get_relevant` | ファセット絞り込みの選択 |
+| `get_projects` | entity 一覧と状態 |
+| `get_knowledge` | 抽出された決定とその理由 |
+| `search_history` | 生イベント検索 |
+| `calendar` | 予定（EventKit）と実績（観測活動）の並置 |
+| `list_files` / `read_file` | vault の閲覧 |
+| `write_note` | エージェントが vault にメモを書く |
+| `curate` | 既存ファイルにブロック単位でマージ（**人間の編集は保護される**） |
 
-### Typography
+### 5.1 選択パイプライン（`search` 1回の中身）
 
-Design Tokens（`DS`）で統一:
-- Hero: 28pt bold
-- Title: 15pt semibold
-- Body: 13pt regular
-- Caption: 11pt regular
-- Micro: 10pt monospaced
+1. **アンカー** — entity/since が無ければ `whats_active_now()` で補完
+2. **候補検索（高再現率）** — `w1·recency + w2·entity一致 + w3·FTS(BM25) + w4·salience` で top-K
+3. **絞り込み（高精度）** — token 予算内に圧縮。include / summarize / drop を per-item 判定
+4. **組み立て** — **出典付き**で返す（time / entity / source）。可視性＝信頼
+5. **使用ログ** — 何が使われ、何が人間に直されたかを salience に還流
 
-### Spacing
+詳細は [SELECTION-LAYER.md](SELECTION-LAYER.md)。
 
-4px grid: xs(4) / sm(8) / md(12) / lg(16) / xl(24) / xxl(32)
+### 5.2 廃止予定のツール
 
-### UI Philosophy
-
-- Bear風ミニマリズム: テキストに集中できる。UIは存在を消す
-- Raycastのキーボードファースト: ⌘A, ⌘C, Escで閉じる
-- Apple純正に溶け込む: 独自デザインシステムは最小限
-
----
-
-## 5. App Structure
-
-### Menu Bar (Quick Access)
-
-メニューバーの☽アイコン。クリックでドロップダウンパネル。
-- 検索バー（自動フォーカス、Esc=クリア→閉じる）
-- 今日のカード（イベント数 + 直近3キャプチャ + ミニインサイト）
-- アクションバー（Copy / Copy to AI / Export）
-- 過去のサマリー（折りたたみ式）
-- プライバシーステータス + キーボードヒント
-
-### Main Window (Apple Notes風サイドバー + コンテンツ)
-
-左サイドバーは「ピン留めビュー + ファイルツリー」。Pinned に **Home / Calendar / Live / Chat**、その下に Context（me/now/full/MEMORY）/ Daily / Memory / Notes / projects のファイル群。
-
-**Home** — AIパスポートのコントロールセンター
-- プロフィール + ファクト + 直近の活動 + 検索
-
-**Calendar** — Apple Calendar風の週ビュー（旧「Timeline」相当）
-- 横=曜日 / 縦=時間。TimeBlockEngineから自動充填、手入力なし
-- カレンダー予定（EventKit）+ 活動ブロックを並列表示
-
-**Live** — リアルタイムイベントストリーム
-- 録音状態 + イベント数 + ストレージ
-- 色分けされたイベント（🔵keyboard 🟠clipboard 🟢window 🟣app）
-
-**Chat** — 自分の記録についてのスコープ付きチャット（v2、§3.6注参照）
-- me/now/projects を根拠に「自分について」答える。汎用ボットではない
-
-**Files**（サイドバーのファイルツリー＝Bear風mdエディタ）
-- コアファイル（me/now/full/MEMORY）+ フォルダ + projects/
-- 新規作成・名前変更・削除・auto-generatedバッジ
-- 自動生成ファイルは読み取り専用、ユーザーノートは編集可
-
-### Settings (4 Tabs)
-
-- **General**: mull時刻、起動設定、出力サイズ、エクスポート先
-- **AI**: LLMプロバイダー（**既定=Off／**Gemini / Ollama / Claude / OpenAI）+ 接続テスト。既定オフ=外部送信なし
-- **Data**: 権限状態、データソース（メール等）、ストレージ、保持期間、クリーンアップ、プライバシー声明
-- **Profile**（=Insights）: 「あなた」の可視化。プロフィール + ファクトタグ + 分析グリッド + キーワード + What mull Knows
-
-> 注: 「Insights」はメインウィンドウのタブではなく Settings の Profile タブに在る。メインの4ピンは Home/Calendar/Live/Chat。
+`get_behavior_patterns` / `get_week_comparison` / `get_patterns` / `get_briefing` —
+「事前消化を吐くだけ」のもの（DIRECTION §4）。段階的に落とす。
 
 ---
 
 ## 6. Data Capture
 
-### 自動取得（常時稼働）
+**収集は広く・最大に。ここは絞らない**（DIRECTION §3）。捕捉の忠実度だけが「今しか取れない」資産。
 
 | ソース | 方法 | 取得内容 |
 |--------|------|---------|
-| キーストローク | CGEvent tap | 全入力（ローマ字含む）、1秒バッファ |
-| クリップボード | NSPasteboard 0.5秒ポーリング | コピーした全テキスト |
+| キーストローク | CGEvent tap | 全入力（ローマ字含む）、3秒フラッシュ |
+| クリップボード | NSPasteboard 0.5秒ポーリング | コピーした全テキスト（40,000字まで） |
 | ウィンドウタイトル | Accessibility API 5秒ポーリング | ファイル名/ページ名 |
+| ウィンドウ本文 | Accessibility API 30秒ポーリング | 作業の中身（タイトルではなく） |
 | ブラウザURL | AppleScript | Safari/Chrome/Arc/Brave/Edge |
-| アプリ切り替え | NSWorkspace通知 | アプリ名 + 滞在時間 |
+| アプリ切り替え | NSWorkspace 通知 | アプリ名 + 滞在時間 |
 | カレンダー | EventKit | 今日のスケジュール |
 | メール | AppleScript（オプトイン） | 件名 + 送信者のみ（本文は読まない） |
 
-### 手動投入（Files tab）
+### 6.1 捕捉時の軽い索引（要約ではない）
 
-- mdファイルの作成・編集
-- フォルダ整理
-- ドラッグ&ドロップ（将来）
+各イベントに検索の"取っ手"を付ける。**内容は消さない。**
 
-### AI書き込み（MCPサーバー）
+| フィールド | 由来 | 用途 |
+|---|---|---|
+| `entity` | window title の先頭セグメント、git リポ名、clipboard 内のパス | entity で引く（最強の軸） |
+| `contentType` | note / error / decision / code / web / file … | type で絞る |
+| `salience` | 0–1。自分宛メモ・コピーしたエラー・commit = 高、ランダム打鍵片 = 低 | 並べ替え・予算配分 |
+| `session` | 直前イベントとの間隔 < N分 で同セッション | 「この作業の塊」で引く |
+| `mode` | produce / consume / decide / think / research / communicate | 意味づけ（MAP-ARCHITECTURE） |
 
-- `write_note`: AIが会話中にメモを保存
-- `get_user_context`: AIがmullを読む
-- `search_history`: AIが過去のイベントを検索
-- `list_files`: AIがファイル構造を確認
+> **要約は捨てる（損失）、構造化は残す（検索の取っ手）。**
 
 ---
 
-## 7. Data Processing
+## 7. 出力 — 3-Layer Context と Curator
 
-### ルールベース（LLM不要、常時稼働）
+| ファイル | サイズ | 内容 |
+|---------|-------|------|
+| `~/mull/me.md` | ~200 tokens | 「誰か」— **観測できたことだけ**（§7.1） |
+| `~/mull/now.md` | ~500 tokens | 「今何をしているか」 |
+| `~/mull/full.md` | ~1,500+ tokens | 全て |
+| `~/mull/me.pinned.md` | — | **人間のもの。mull は絶対に上書きしない** |
 
-| エンジン | 機能 |
-|---------|------|
-| AnalyticsEngine | キーワード頻度、アプリ使用比率、時間帯パターン、曜日パターン、言語比率 |
-| ProjectNames | 「この断片はプロジェクト名か」の**唯一の判定**。形（長さ/ファイル名/URL/文）と証拠（あるブラウザの全タイトルに出る断片＝クローム）で判定する。語彙ブロックリストは持たない |
-| FactExtractor | **観測のみ**: 言語比率・実測ツール・プロジェクト名。人物についての推測（役割・技術スタック・ドメイン）は2026-07に削除 |
-| TimeBlockEngine | イベント→時間ブロック集約、「メインでやったこと」推論 |
-| CurrentState | 「今」のアンカー（active entity/app + 直近の高salience信号）。now.md と MCP `whats_active_now` の両方がこれを出す |
-| LiveContextGenerator | me.md / now.md / full.md を60秒ごと自動生成 |
+### 7.1 出力していいものの境界
 
-> **原則**: ここが出力していいのは、ユーザーに「この行はこの記録から来た」と示せるものだけ。
+> ここが出力していいのは、ユーザーに**「この行はこの記録から来た」と示せるもの**だけ。
 > アプリ一覧から職業を、クリップボードの部分一致から技術スタックを名乗るのは
-> 「観測」ではなく「主張」であり、me.md の先頭に置いてよいものではない（DIRECTION §4/§9.1）。
+> 「観測」ではなく「主張」であり、me.md の先頭に置いてよいものではない。
 
-### LLM統合（オプション、夜間）
+2026-07 に、人物についての推測（役割・技術スタック・ドメイン）は削除済み。
+残っているのは言語比率・実測ツール・プロジェクト名などの**観測**のみ。
 
-| フェーズ | 処理 |
-|---------|------|
-| 3-Gate Trigger | Time(24h) → Data(50+イベント) → Lock(PID) |
-| Phase 1: Orient | 既存メモリ読み込み |
-| Phase 2: Gather | 24時間のイベント収集 + 時間帯グルーピング |
-| Phase 3: Consolidate | LLMで要約生成 + メモリ更新（失敗時ルールベースフォールバック） |
-| Phase 4: Prune | MEMORY.md を200行/25KB以内に維持 |
+### 7.2 Curator こそが核
+
+自動層が人間の編集を壊さないこと（provenance: agent / human / pinned）が**メンテ性の本体**。
+DB に閉じた自動生成物は触れず、メンテ不能。**folder-of-MD は必然**（DIRECTION §6）。
+
+**そして Curator は同時に、mull の唯一の学習信号でもある**（§7.3）。
+
+### 7.3 訂正ループ ＝ 無料の relevance ラベル（**堀の本体**）
+
+```
+mull が選んで出す  →  人間が Curator で直す / 消す
+                              ↓
+                    「これは要らなかった」「これが正しい」
+                              ↓
+                    salience と重み w に還流
+```
+
+**エージェントが使ったスライス＝弱い正ラベル。人間が直した/消した＝最高品質の relevance ラベル（無料）。**
+
+Screenpipe も ManicTime も Timing も、この信号を持っていない。捕捉の広さでは差がつかない（皆やっている）。
+**mull の不当な強みは「個人のライブ文脈 × 人間の修正ループ」の一点だけ。**
+
+> **旧「分身 / fidelity ループ」の再定義**: 「あなたの文体で日報を書く」という枠組みは、
+> 日報自動生成が10社以上でコモディティ化したため主商品から降ろした（§3）。
+> **しかし機構は死んでいない。** 編集距離の計測（`EditDistance.swift` / `ReportWriter.fidelitySeries`）は
+> **「人間の訂正を定量化する装置」**として生き残る——文体の忠実さではなく、
+> **選択の正しさを測るラベル生成器**として。無編集承認がサンプルに入らない設計（provenance による遮断）も
+> そのまま正しい。
 
 ---
 
-## 8. 3-Layer Context System
+## 8. Privacy
 
-| ファイル | サイズ | 内容 | 用途 |
-|---------|-------|------|------|
-| `me.md` | ~200 tokens | 「誰か」— 身元、スキル、好み | 常に安全。CLAUDE.mdに入れていい |
-| `now.md` | ~500 tokens | 「今何してるか」— プロジェクト、今日の活動、スケジュール、パターン | タスク関連の会話に |
-| `full.md` | ~1,500+ tokens | 全て — me + now + 生データ | 新しい大きなタスクの開始時 |
+### 8.1 大原則: ローカル完結
 
----
-
-## 9. Privacy
-
-### 大原則: ローカル完結
-
-- 全データはユーザーのMac内に保存。mull社のサーバーは存在しない
-- LLMは既定で**Off**。クラウドプロバイダ（Gemini/Claude/OpenAI）を明示的に選んだ時だけ外部送信。送信前にクリップボード/打鍵の機密（メール/APIキー/カード番号等）は除外
-- クラウドLLM使用時: ユーザー自身のAPIキーで直接通信。中間サーバーなし
+- 全データはユーザーの Mac 内。mull 社のサーバーは存在しない
+- **LLM は既定で Off。** クラウドを明示的に選んだ時だけ外部送信。送信前に機密は除外
+- クラウド利用時はユーザー自身の API キーで直接通信。中間サーバーなし
 - 使用統計の収集・送信は一切なし（トグルも持たない）
 
-### データ保護
+### 8.2 データ保護
 
 - パスワードフィールド自動スキップ（`IsSecureEventInputEnabled`）
-- アプリ除外リスト（1Password, Keychain等はデフォルト除外）
-- mull自身のイベントは記録しない
+- アプリ除外リスト（1Password, Keychain 等はデフォルト除外）
+- mull 自身のイベントは記録しない
 - メール: 件名+送信者のみ。パスワードリセット・銀行通知は自動除外
-- APIキー: macOS Keychain保存（平文なし）
+- API キーは macOS Keychain
+
+### 8.3 なぜ「読めること」が privacy の要件なのか
+
+市場調査で見つかった、動かせない事実:
+
+> **内容を保持したまま受け入れられた製品は1件も無い。**
+> 信頼されている打鍵近傍アプリ（TextExpander / Espanso / ActivityWatch）は
+> **全て「保持しない」ことで**信頼を得ている。
+> 内容保持を宣言した2製品——Rewind（$33M調達）と Microsoft Recall（Windows の流通力）——は
+> **両方とも跳ね返された**（Recall は GA 後も明示オプトイン、有効化率10%未満）。
+
+mull は内容を保持する。ならば**コードが読めることが唯一の説得手段**である。
+Bartender の事例（所有者交代 → 解析を無断追加 → HN 252pt 炎上 → 無料OSS の Ice に市場を奪われる）は、
+**権限を持つクローズドアプリの信頼が、いつでも崩れうる**ことを示している。
+
+**OSS は流通戦略であると同時に、privacy 要件でもある。**
+
+> **なぜ FSL ではなく MIT か（2026-08-09）。**
+> privacy 要件そのものは「**読めること・自分でビルドできること**」なので FSL でも満たされる。
+> 分かれたのは**流通**のほう——homebrew-core は DFSG 適合ライセンスを明文で要求しており、
+> FSL では `brew install` の経路が塞がる。privacy 要件は同点、流通は MIT の勝ち。
+> 経緯と判断の全文は STRATEGY §5-4。
+
+---
+
+## 9. アプリ UI — 当面凍結
+
+GUI（メニューバー ☽ / Home / Calendar / Live / Chat / Files / Settings）は**動く状態のまま維持するが、
+新規投資はしない**。
+
+理由: Screenpipe は UI 投資ゼロで 20.8k★。Mac App Store は81日で収益$21。
+**デーモンには UI が要らず、star は UI では取れない。**
+
+- **凍結するもの**: 4ピンの拡張、Bear風エディタの磨き込み、DESIGN-NORTHSTAR / DESIGN.md の意匠適用
+- **凍結しないもの**: Curator / provenance / 編集可能 md（これは UI ではなく**堀**）、
+  権限セットアップ（捕捉が死ぬと全部死ぬ）
+
+**DESIGN-NORTHSTAR.md と DESIGN.md は中身を温存する。** UI 作業を再開する日に、そのまま有効。
 
 ---
 
@@ -438,69 +322,52 @@ Design Tokens（`DS`）で統一:
 | レイヤー | 技術 |
 |---------|------|
 | Language | Swift |
-| UI | SwiftUI |
+| UI | SwiftUI（凍結中） |
 | Database | SQLite via GRDB.swift (WAL + FTS5 + DatabasePool) |
 | Keystrokes | CGEvent tap (Quartz Event Services) |
 | Calendar | EventKit |
-| Browser | AppleScript |
-| Email | AppleScript (Mail.app) |
+| Browser / Email | AppleScript |
 | API Keys | macOS Keychain Services |
-| LLM | Ollama / Anthropic API / OpenAI API |
-| AI Protocol | MCP (Model Context Protocol) via stdio |
-| Design System | DS tokens (typography, spacing, radius, colors, gradients) |
+| LLM | Off（既定） / Ollama / Gemini / Anthropic / OpenAI |
+| AI Protocol | **MCP (Model Context Protocol) via stdio** — `MullMCP` 単体バイナリ |
+| Project generation | XcodeGen (`project.yml`) |
+
+コード配置は [README.md](README.md)、データ層の構造は [MAP-ARCHITECTURE.md](MAP-ARCHITECTURE.md)。
 
 ---
 
 ## 11. Competitive Positioning
 
-| | Screenpipe | Pieces | Mem0 | **mull** |
-|--|-----------|--------|------|----------|
-| データ取得 | 画面OCR + 音声 | 画面OCR | 会話からのみ | **キーストローク + クリップボード + ウィンドウ + カレンダー + メール** |
-| 出力形式 | SQLite | API | API | **mdファイル（ポータブル、人間もAIも読める）** |
-| MCP | あり | あり | あり | **あり（読み書き両方）** |
-| LLM依存 | なし | あり | あり | **なし（ルールベースで基本動作）** |
-| ファイル管理 | なし | なし | なし | **あり（Bear風エディタ）** |
-| 設計思想 | 記録インフラ | 開発者ツール | AIメモリ層 | **第二の脳** |
+| | ChatGPT/Claude memory | Mem0 / Zep / Letta | Screenpipe | ManicTime / Timing | **mull** |
+|--|---|---|---|---|---|
+| データ源 | 会話 | アプリが渡したもの | **画面OCR + 音声** | ウィンドウ/文書/URL | **打鍵 + クリップボード + ウィンドウ本文 + 予定** |
+| 出力 | 内部状態 | API | SQLite/API | タイムシート | **md（可搬・人間もAIも読める）** |
+| MCP | — | — | あり | あり | **あり（12ツール・読み書き）** |
+| **人間の訂正ループ** | — | — | **無し** | **無し** | **あり（Curator / provenance）** |
+| **選択品質の eval** | — | — | 未公開 | — | **あり（20ケース、precision/recall/MRR）** |
+| LLM依存 | 必須 | 必須 | あり | あり | **なし（ルールベースで基本動作）** |
 
-mullだけがやっていること:
-1. キーストローク+クリップボードの直接取得（OCRではない）
-2. ポータブルなmdファイル出力（DB/APIではない）
-3. ファイル管理UI（Bear風エディタ）
-4. LLM不要で基本動作（ルールベース分析 + ファクト抽出）
+**mull だけがやっていること**:
+1. OS レベルの行動を、OCR ではなく**構造化しやすい信号**で捕える
+2. **人間の訂正が選択の質に還流する**ループを持つ
+3. **選択の質を測って公開する**
 
 ---
 
 ## 12. Roadmap
 
-ロードマップの軸は機能の追加ではなく、**価値の階層（§2 Final Goal）を一段ずつ登ること**。衛星機能（Calendar/Search/Chatの磨き込み）は壊れていない限り優先しない。
+**ロードマップの軸は機能追加ではなく、STRATEGY-2026-08 の初手を通すこと。**
+詳細は [ROADMAP.md](ROADMAP.md)。
 
-### Now (v1) — 記録と肖像【実装済み】
-- キーストローク、クリップボード、ウィンドウ、カレンダー、メール件名、ブラウザURL
-- me.md / now.md / full.md 自動生成（60秒ごと、Curator による編集保護）
-- MCPサーバー（12ツール、読み書き、Claude Code / Claude Desktop / Cursor 自動設定）
-- 「メインでやったこと」推論（TimeBlockEngine、dominantアプリ判定）
-- Bear風ライブ装飾エディタ（conceal/reveal、生mdバイト不変）
-- 統合検索（タイプ/コピー/予定の時系列タイムライン + フィルタ + ⌘K）
+```
+1. eval を回して数字を出す            ← 唯一の主張の裏付け
+2. UIなしのデーモン経路を整える        ← brew install できる形
+3. リポジトリを public にする          ← 唯一の不可逆な一手
+4. 記事を出す                          ← "context files don't help — unless you select"
+```
 
-### Next (v1.x) — 分身の最初の仕事【進行中】
-- ✅ 「Today, in your words」: あなたの文体の日報下書き（ReportWriter）
-- ✅ fidelityの実測: 草稿と承認稿の編集距離を承認時に計測・日次で保存（EditDistance / ReportWriter.fidelitySeries）。**無編集承認は文体サンプルに入らない**（provenance記録で構造的に遮断）
-- 先回り: 夕方に自動で下書きが用意されている（開いたらもうある）
-- 根拠の開示: 「この文体は◯◯から学んだ」をカードに表示
-- ストリーミング応答（Chat / 日報生成の体感品質）
-- Home の肖像化（計器盤からの脱却、NORTHSTAR チェックリスト準拠）
-
-### Future (v2) — 分身のレパートリー拡張
-- 「AIへの自己説明の代行」: Copy to AI を分身の所作へ（先に入って文脈を渡し、確認質問まで添える）
-- 再開ブリーフ: 中断点から「次の一手」を下書き
-- MCP還流の強化: 外のAIとの会話で学んだことが me.md に書き戻る
-- データ源の拡充: ブラウザ履歴全取得、Git活動、メール本文（オプトイン）
-
-### Ultimate (v3) — 実行する分身
-- あなたの反復行動のプレイブック集（バーチャル自分）が育つ
-- 観察した行動を、憲法（§3.6）の範囲で代行する
-- mull = 巣立たないカバン持ち。卒業レベルの能力のまま、一生あなたの分身でいる
+**衛星機能（Calendar / Chat / Files の磨き込み）は、壊れていない限り触らない。**
 
 ---
 
-*Remember everything. Explain nothing. ——そして、いつか代わりに書く。*
+*Your agent knows what you told it. mull knows what you did.*

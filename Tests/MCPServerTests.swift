@@ -9,13 +9,12 @@ import XCTest
 /// pins the protocol shape itself (id presence, isError, tool inventory) as
 /// hard as it pins the tool payloads.
 ///
-/// SAFETY: these tests must never touch the user's real vault. `MCPServer.mullDir`
-/// is `MullDirectory.root` (~/mull) and there is no injection seam for it, so the
-/// success paths of `write_note` and `curate` are deliberately NOT exercised —
-/// only their refusal paths, each of which returns before any filesystem write
-/// (see `writeNote`: resolveVaultPath / writeRefusal both `return` ahead of the
-/// `content.write`). Read-only paths (`read_file`, `list_files`, resources) touch
-/// the real vault harmlessly and are asserted only on shape, never on content.
+/// SAFETY: these tests never touch the user's real vault. `MCPServer.mullDir` is
+/// `MullDirectory.root`, which redirects to a throwaway per-PID directory under
+/// XCTest (see `MullDirectory.isRunningTests`), so writes here land in a temp
+/// vault and are discarded with it. Read paths (`read_file`, `list_files`,
+/// resources) see that same empty temp vault, which is why they are asserted on
+/// response *shape* rather than on content — there is no real content to expect.
 final class MCPServerTests: XCTestCase {
 
     private var db: DatabaseService!
@@ -422,8 +421,16 @@ final class MCPServerTests: XCTestCase {
 
         let (text, isError) = callTool("whats_active_now")
         XCTAssertFalse(isError)
-        XCTAssertTrue(text.contains("App: Xcode"), text)
-        XCTAssertTrue(text.contains("Active:"), text)
+        // A markdown list, so the anchor can be embedded under any heading the
+        // reader supplies — `now.md` puts it under `## Right now`, the tool hands
+        // it back on its own. The bare `Active:` / `App:` label lines it replaced
+        // were prose to every renderer and carried no level to nest at.
+        XCTAssertTrue(text.contains("- **App:** Xcode"), text)
+        XCTAssertTrue(text.contains("- **Active:**"), text)
+        for line in text.components(separatedBy: "\n") where !line.isEmpty {
+            XCTAssertTrue(line.trimmingCharacters(in: .whitespaces).hasPrefix("- "),
+                          "not a list item: \(line)")
+        }
     }
 
     func testWhatsActiveNowOnEmptyDatabaseSaysSoInsteadOfFailing() {

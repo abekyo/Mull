@@ -73,7 +73,7 @@ struct SearchResultsView<ProjectCard: View>: View {
             if matchingProjects.isEmpty && hits.isEmpty && summaries.isEmpty && isRunning {
                 HStack(spacing: DS.sm) {
                     ProgressView().controlSize(.small)
-                    Text("Searching your record…")
+                    Text("Searching your records…")
                         .font(DS.captionFont)
                         .foregroundStyle(DS.inkFaint)
                 }
@@ -84,15 +84,12 @@ struct SearchResultsView<ProjectCard: View>: View {
                     Image(systemName: "magnifyingglass")
                         .font(DS.heroFont)
                         .foregroundStyle(DS.inkGhost)
+                    // When filters are what emptied this, the bar above already says so
+                    // and carries the way out; repeating it here only spends the reader's
+                    // attention on the same sentence twice.
                     Text("No results for \"\(query)\"")
                         .font(DS.bodyFont)
                         .foregroundStyle(DS.inkDim)
-                    if filtersActive {
-                        Text("Filters from an earlier search are still on.")
-                            .font(DS.captionFont)
-                            .foregroundStyle(DS.inkFaint)
-                        resetFiltersButton
-                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 48)
@@ -139,6 +136,10 @@ struct SearchResultsView<ProjectCard: View>: View {
         let id: Date
         let label: String
         let rows: [Row]
+        /// Matches on this day that the per-day cap kept off screen. Counted so the
+        /// timeline can say so: a silent truncation in the one view whose job is
+        /// showing what the record contains reads as "the record doesn't have it".
+        let hidden: Int
     }
 
     private struct Digest {
@@ -150,6 +151,13 @@ struct SearchResultsView<ProjectCard: View>: View {
         var inPeriod = 0
     }
 
+    /// How many matches one day shows before the rest are summarised. A cap keeps the
+    /// timeline scannable; not saying there was one is what made it a lie.
+    ///
+    /// Computed, not stored: this type is generic over ProjectCard, and Swift allows
+    /// no stored static properties in a generic type.
+    private static var rowsPerDay: Int { 8 }
+
     private static func build(_ i: Inputs) -> Digest {
         let ranged = SearchService.inRange(i.hits, range: i.range)
         let shown = ranged.filter {
@@ -158,9 +166,9 @@ struct SearchResultsView<ProjectCard: View>: View {
 
         let grouped = Dictionary(grouping: shown) { Calendar.current.startOfDay(for: $0.date) }
         let days = grouped.keys.sorted(by: >).map { day -> DayGroup in
-            let rows = (grouped[day] ?? [])
-                .sorted { $0.date > $1.date }
-                .prefix(8)
+            let all = (grouped[day] ?? []).sorted { $0.date > $1.date }
+            let rows = all
+                .prefix(Self.rowsPerDay)
                 .map { hit in
                     Row(id: hit.id,
                         date: hit.date,
@@ -172,7 +180,9 @@ struct SearchResultsView<ProjectCard: View>: View {
                             : SearchService.highlighted(hit.text, query: i.query),
                         plain: hit.text)
                 }
-            return DayGroup(id: day, label: SearchService.dayLabel(day), rows: Array(rows))
+            return DayGroup(id: day, label: SearchService.dayLabel(day),
+                            rows: Array(rows),
+                            hidden: max(all.count - Self.rowsPerDay, 0))
         }
 
         return Digest(counts: SearchService.kindCountMap(ranged),
@@ -279,7 +289,7 @@ struct SearchResultsView<ProjectCard: View>: View {
     private var activeFilterNotice: some View {
         HStack(spacing: DS.xs) {
             Image(systemName: "line.3.horizontal.decrease")
-                .font(.system(size: 9))
+                .font(DS.iconMini)
             Text(narrowingSummary)
                 .font(DS.miniFont)
             Spacer(minLength: 0)
@@ -296,18 +306,20 @@ struct SearchResultsView<ProjectCard: View>: View {
         }
         if !selectedApps.isEmpty { clauses.append(selectedApps.sorted().joined(separator: ", ")) }
         let scope = clauses.isEmpty ? "" : " — \(clauses.joined(separator: " · "))"
-        return "Filters are narrowing this search: showing \(digest.shown) of \(digest.inPeriod)\(scope)"
+        // "matched", not "showing": this counts what the filters let through, and the
+        // timeline lists at most `rowsPerDay` of them per day. Calling that a count of
+        // what is on screen was simply false whenever a day ran long — and the days
+        // that run long say so themselves now.
+        return "Filters are narrowing this search: \(digest.shown) of \(digest.inPeriod) matched\(scope)"
     }
 
     /// The dead end made walkable — the way out sits inside the empty state itself.
+    /// The count and the cause are on the notice directly above, so this says neither.
     private var noMatchesWithFilters: some View {
         VStack(spacing: DS.sm) {
-            Text("No matches with these filters")
+            Text("Nothing matches inside these filters.")
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkFaint)
-            Text("\(hits.count) \(hits.count == 1 ? "match is" : "matches are") waiting behind them.")
-                .font(DS.miniFont)
-                .foregroundStyle(DS.inkGhost)
             resetFiltersButton
         }
         .frame(maxWidth: .infinity)
@@ -321,8 +333,10 @@ struct SearchResultsView<ProjectCard: View>: View {
                 if on { selectedApps.remove(app) } else { selectedApps.insert(app) }
             }
         } label: {
-            HStack(spacing: DS.hair) {
-                Image(systemName: "app.dashed").font(.system(size: 8))
+            HStack(spacing: DS.xs) {
+                // A single dot of the icon's stipple, in place of a stock glyph:
+                // the chip's colour already says on/off, the label says which app.
+                Circle().frame(width: 4, height: 4)
                 Text(app).font(DS.miniMedium)
                 Text("\(count)").font(DS.miniFont)
                     .foregroundStyle(on ? DS.moon.opacity(0.7) : DS.inkFaint)
@@ -349,8 +363,8 @@ struct SearchResultsView<ProjectCard: View>: View {
                 if on { enabledKinds.remove(kind) } else { enabledKinds.insert(kind) }
             }
         } label: {
-            HStack(spacing: DS.hair) {
-                Image(systemName: kind.icon).font(.system(size: 8))
+            HStack(spacing: DS.xs) {
+                Circle().frame(width: 4, height: 4)
                 Text(kind.label).font(DS.miniMedium)
                 Text("\(count)").font(DS.miniFont)
                     .foregroundStyle(on ? kind.color.opacity(0.7) : DS.inkFaint)
@@ -383,6 +397,17 @@ struct SearchResultsView<ProjectCard: View>: View {
 
                     ForEach(day.rows) { row in
                         timelineRow(row)
+                    }
+
+                    if day.hidden > 0 {
+                        Button { onOpenDay(day.id) } label: {
+                            Text("\(day.hidden) more on this day — open it")
+                                .font(DS.miniFont)
+                                .foregroundStyle(DS.moon)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, DS.xs)
+                        .help("This day has more matches than the timeline lists")
                     }
                 }
                 .mullCard()
@@ -419,7 +444,7 @@ struct SearchResultsView<ProjectCard: View>: View {
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 8))
+                    .font(DS.iconMini)
                     .foregroundStyle(DS.inkGhost)
             }
             .contentShape(Rectangle())
@@ -438,8 +463,8 @@ struct SearchResultsView<ProjectCard: View>: View {
 
     /// A small coloured pill naming the kind of hit (Typed / Copied / Window / Schedule…).
     private func kindBadge(_ kind: SearchHit.Kind) -> some View {
-        HStack(spacing: DS.hair) {
-            Image(systemName: kind.icon).font(.system(size: 8))
+        HStack(spacing: DS.xs) {
+            Circle().frame(width: 4, height: 4)
             Text(kind.label).font(DS.miniMedium)
         }
         .foregroundStyle(kind.color)

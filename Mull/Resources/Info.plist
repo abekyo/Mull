@@ -23,7 +23,7 @@
 	<key>NSAccessibilityUsageDescription</key>
 	<string>Mull uses Accessibility to read on-screen text and record your activity for daily summaries.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Mull reads browser URLs to understand what pages you are viewing.</string>
+	<string>Mull asks your browser for the address of the page you are viewing, and Mail for the subject and sender of recent messages. It never reads message bodies.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Mull reads your calendar to give AI context about your schedule.</string>
 	<key>NSCalendarsUsageDescription</key>

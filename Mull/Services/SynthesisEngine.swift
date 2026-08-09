@@ -141,14 +141,14 @@ final class SynthesisEngine {
             // Only fill slugs that belong to this folder's template.
             guard let title = titleBySlug[slug] else { return nil }
             return ContextBlock(id: "section:\(slug)", source: .agent,
-                                content: "## \(title)\n\n\(content)", agentHash: nil)
+                                content: "## \(FolderOntology.sectionHeading(title))\n\n\(content)", agentHash: nil)
         }
         guard !blocks.isEmpty else { return }
 
         // Preserve the existing header (and any user prose at the top).
         let existing = MullDirectory.read(folder.indexPath) ?? ""
         let (header, _) = ContextBlockFile.parse(existing)
-        let hdr = header.isEmpty ? "# \(folder.number) \(folder.title)" : header
+        let hdr = header.isEmpty ? "# \(folder.number) \(folder.displayTitle)" : header
 
         _ = Curator.curate(relativePath: folder.indexPath, header: hdr,
                            pinnedContent: nil, agentBlocks: blocks)

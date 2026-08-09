@@ -196,7 +196,7 @@ struct HomeDossierView: View {
                 .frame(height: 1)
                 .alignmentGuide(.firstTextBaseline) { d in d[.bottom] + 5 }
             Text(trailing)
-                .font(.system(size: 13, design: .serif))
+                .font(DS.serif(13))
                 .foregroundStyle(emphasis ? DS.tobacco : DS.umberDim)
                 .monospacedDigit()
         }
@@ -259,9 +259,12 @@ struct HomeDossierView: View {
     // A quiet section rule: a small-caps serif title over a faint hairline.
     private func sectionRule(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: DS.md) {
-            Text(title.uppercased())
-                .font(DS.miniMedium).tracking(3.0)
-                .foregroundStyle(DS.tobaccoDim)
+            HStack(alignment: .firstTextBaseline, spacing: DS.sm) {
+                StippleMark(color: DS.tobaccoDim, dot: 2.5)
+                Text(title.uppercased())
+                    .font(DS.miniMedium).tracking(3.0)
+                    .foregroundStyle(DS.tobaccoDim)
+            }
             Rectangle().fill(DS.paperRule).frame(height: 1)
         }
     }
@@ -299,18 +302,20 @@ struct Dossier {
     let resume: String?
     let particulars: [Particular]
 
+    /// An invented person, deliberately. This is preview fixture text that ships
+    /// in a public repository, so it must not describe anyone real.
     static let sample = Dossier(
-        name: "Stanford Oport",
-        standing: "Swift developer · three ventures held at once · Tokyo",
+        name: "A. Kestrel",
+        standing: "Swift developer · two projects held at once · Tokyo",
         keptSince: "Apr 2026",
         dateline: "Tuesday, 9 June",
         lede: "Most of today was given to mull — shaping how a second brain should "
             + "carry a person with dignity. The morning ran deep and unbroken; the "
-            + "afternoon turns to the FX venture, where a client review waits at three.",
+            + "afternoon turns to the client work, where a review waits at three.",
         chapters: [
             .init(title: "mull", detail: "Design language · the dossier", duration: "2h 40m"),
-            .init(title: "PantryApp", detail: "Storyboard refactor · Phase 5", duration: "1h 05m"),
-            .init(title: "FX venture", detail: "Client review prep", duration: "35m"),
+            .init(title: "Ledger", detail: "Storyboard refactor · Phase 5", duration: "1h 05m"),
+            .init(title: "Client work", detail: "Review prep", duration: "35m"),
         ],
         resume: "DesignTokens.swift — the custode palette",
         particulars: [

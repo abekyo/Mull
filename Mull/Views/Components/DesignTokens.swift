@@ -28,8 +28,8 @@ enum DS {
     //
     // There is no tier below 9pt. An 8pt tier existed (`tinyFont`) and it carried
     // real content — sparkline labels, filter chips — at a size that is under the
-    // floor of what most people can read. It is gone; `tinyFont` is kept only as an
-    // alias onto the 9pt tier so no call site had to change to stop being 8pt.
+    // floor of what most people can read. It is gone; its last call sites now use
+    // `miniFont`.
 
     // MARK: Dynamic Type
     //
@@ -107,9 +107,20 @@ enum DS {
     /// A keycap or a literal command, set at body size in the mono face.
     static let codeFont = scaledMono(13, .body, bold: true)
 
-    /// Retired 8pt tier, now an alias onto the 9pt tier. Kept so existing call
-    /// sites keep compiling; prefer `miniFont` in new code.
-    static let tinyFont = miniFont
+    // MARK: Icon tiers
+    //
+    // An SF Symbol takes its size and weight from the font it is drawn with, and
+    // every bare `Image(systemName:)` used to pick that size inline — the same
+    // kind of inline glyph was 8pt in one file and 10pt in the next, and none of
+    // them scaled with the text beside them. Five tiers, built by the same scaling
+    // factory as the text tokens, so an icon keeps its ratio to its neighbouring
+    // text at any system text size. Weight stays at the call site:
+    // `DS.iconMini.weight(.semibold)`.
+    static let iconMini = scaled(9, .caption2)      // inline glyph beside mini/caption text
+    static let iconSmall = scaled(12, .callout)     // small control glyphs, header marks
+    static let iconBody = scaled(16, .body)         // row status marks, toolbar buttons
+    static let iconAction = scaled(26, .title)      // the primary action (send / stop)
+    static let iconHero = scaled(32, .largeTitle)   // empty-state and welcome emblems
 
     static let labelFont = scaled(11, .subheadline, .medium)
     static let labelTracking: CGFloat = 0.5

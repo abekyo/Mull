@@ -24,7 +24,9 @@ enum LiveContextGenerator {
 
         let memories = database.fetchAllMemories()
         let summaries = database.fetchRecentSummaries(limit: 7)
-        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
+        let timestamp = Curator.timestamp()
+
+        expireStaleNightlyBlocks()
 
         try generateMe(memories: memories, analytics: analytics, database: database, timestamp: timestamp)
         try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendar, email: email, timestamp: timestamp)
@@ -35,6 +37,25 @@ enum LiveContextGenerator {
         // NOTE: Claude Code integration is manual. User runs:
         //   claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
         // We don't auto-write to ~/.claude.json or ~/.claude/CLAUDE.md — that's invasive.
+    }
+
+    // MARK: - Staleness sweep
+    //
+    // The 60s pass is the only thing in mull guaranteed to keep running, so it is
+    // where the expiry of OTHER passes' output has to live. `nightly:` blocks come
+    // from the LLM consolidation; with no provider configured that pass never runs
+    // again, and its last output stays in now.md and full.md under the heading
+    // "From last night's consolidation" indefinitely — in the shipped vault, for
+    // two months. Nothing else could catch it: `curate` only prunes for the pass
+    // that is currently running, and that is precisely the pass that stopped.
+
+    /// How long a nightly block may keep claiming to be last night's.
+    static let nightlyMaxAge: TimeInterval = 7 * 86_400
+
+    private static func expireStaleNightlyBlocks() {
+        for file in ["now.md", "full.md"] {
+            Curator.expire(relativePath: file, idPrefixes: ["nightly:"], maxAge: nightlyMaxAge)
+        }
     }
 
     // MARK: - mull.md — the front door (read me first)
@@ -48,20 +69,22 @@ enum LiveContextGenerator {
 
     private static func generateFrontDoor(timestamp: String) {
         var l: [String] = []
-        l.append("# mull — start here")
+        l.append(MarkdownDoc.header(
+            title: "mull — start here",
+            meta: [("updated", timestamp),
+                   ("scope", "the mull record of one person — local, automatically kept"),
+                   ("ownership", "kept on the user's Mac; lent to you, not owned by you")]))
         l.append("")
         l.append("This is the mull record of one person: an automatically-kept, local context")
         l.append("vault. Read it to understand who they are and what they are doing, so you can")
         l.append("help without them explaining themselves from scratch.")
-        l.append("")
-        l.append("_Auto-updated \(timestamp). Kept locally on the user's Mac — lent to you, not owned by you._")
         l.append("")
         l.append("## Read in this order")
         l.append("1. **me.md** — who they are: identity, skills, preferences (~200 tokens, always safe).")
         l.append("2. **now.md** — what they're working on right now (~500 tokens).")
         l.append("3. For anything live or specific, call the tools instead of guessing:")
         l.append("   - `whats_active_now` — current app / project / recent actions. Call this FIRST.")
-        l.append("   - `search` — relevance-ranked retrieval, scoped to the current project.")
+        l.append("   - `search` — relevance-ranked retrieval across projects, ranked toward the current one.")
         l.append("   - `get_projects` — where they left off on each project.")
         l.append("4. **full.md** — me.md + now.md + recent activity in one file. Only when starting a big task.")
         l.append("")
@@ -170,14 +193,15 @@ enum LiveContextGenerator {
                 source: .agent, content: "- \(mem.description)", agentHash: nil))
         }
 
-        let header = """
-        About the user (auto-updated: \(timestamp)).
-        Durable facts only — pinned (you) + memories (mull's nightly consolidation). Pinned/edited blocks are authoritative; edit in place or in me.pinned.md.
-        For live/current work, the AI should call the `whats_active_now` and `search` MCP tools rather than expect it here.
-        """
+        // me.md was the one contract file with no title at all: it opened with three
+        // lines of prose addressed to an AI, so the human it is about met a paragraph
+        // of housekeeping before a single fact. Same header as the nightly pass now,
+        // via Curator — both passes write this file, and a header they disagree on is
+        // a header each rewrites over the other's every minute.
+        //
         // Keep `fact:` in the managed prefixes so any rule-based facts written by
         // earlier versions get pruned out of me.md (we no longer emit them).
-        Curator.curate(relativePath: "me.md", header: header,
+        Curator.curate(relativePath: "me.md", header: Curator.meHeader(timestamp: timestamp),
                        pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks,
                        managedPrefixes: ["fact:", "mem:", "pref:"])
     }
@@ -198,7 +222,7 @@ enum LiveContextGenerator {
         email: EmailService?,
         timestamp: String
     ) throws {
-        var lines: [String] = []
+        var sections: [String?] = []
 
         // What the user is doing right now.
         //
@@ -217,35 +241,38 @@ enum LiveContextGenerator {
         // rows and regenerated every 60s. Writing it down loses nothing that
         // calling the tool would return; it only removes the requirement to have a
         // tool.
+        // Each of these was a `Label:` line with its items under it — prose, as far
+        // as markdown is concerned, in the same file whose nightly half used real
+        // `##`. They are `##` sections now, and a section with nothing in it is not
+        // written at all (MarkdownDoc rule 5), so the trailing-blank bookkeeping
+        // this function used to do between every block is gone with it.
         let state = CurrentState.current(database: database)
         let activity = state.summary()
-        if activity != "(no recent activity)" {
-            lines.append(activity)
-            lines.append("")
-            lines.append("_Fresher and deeper than this: call `whats_active_now` / `search`._")
-            lines.append("")
-        }
+        sections.append(MarkdownDoc.section("Right now", activity == "(no recent activity)" ? nil :
+            activity + "\n\n_Fresher and deeper than this: call `whats_active_now` / `search`._"))
 
         // Active projects from memories
-        let projects = memories.filter { $0.memoryType == .project }
-        if !projects.isEmpty {
-            lines.append("Projects:")
-            for p in projects {
-                lines.append("- \(p.name): \(p.description)")
-            }
-            lines.append("")
-        }
+        sections.append(MarkdownDoc.section("Projects", items:
+            memories.filter { $0.memoryType == .project }
+                .map { "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))" }))
 
         // Email metadata
         if let emailSummary = email?.recentEmailSummary(hours: 24) {
-            lines.append(emailSummary)
-            lines.append("")
+            sections.append(MarkdownDoc.section("Inbox", emailSummary))
+        } else if let problem = EmailService.lastProblem {
+            sections.append(MarkdownDoc.section("Inbox", "Unavailable — \(problem.message)"))
         }
 
         // Calendar events
+        //
+        // A blocked calendar and a genuinely clear day both produce nothing here,
+        // and omitting the block let every AI reading this file conclude the day
+        // was free. Naming the blind spot is the same rule ColdReadService follows.
         if let schedule = calendar?.todaySchedule() {
-            lines.append(schedule)
-            lines.append("")
+            sections.append(MarkdownDoc.section("Today's schedule", schedule))
+        } else if let calendar, calendar.accessState != .granted {
+            sections.append(MarkdownDoc.section("Today's schedule",
+                "Unavailable — mull has not been granted calendar access, so today's events are unknown (not absent)."))
         }
 
         // NOTE: "Today's files/pages" (rule-based digest of window titles) was
@@ -253,14 +280,15 @@ enum LiveContextGenerator {
         // `search` return on demand, anchored on the current entity. Pre-baking it
         // here is the duplicate, stale "事前消化" DIRECTION §4 calls to cut.
 
-        // Recent summaries (if mull has run before)
-        if !summaries.isEmpty {
-            lines.append("Recent days:")
-            for s in summaries.prefix(5) {
-                lines.append("- \(s.dateShort): \(s.preview)")
-            }
-            lines.append("")
-        }
+        // Recent summaries (if mull has run before). A summary older than a week is
+        // reported as the gap it is, not as a "recent day" — see `splitByRecency`.
+        let (recentDays, staleDay) = summaries.splitByRecency()
+        sections.append(MarkdownDoc.section("Recent days", items:
+            recentDays.isEmpty
+                ? (staleDay.map { ["- No day has been consolidated since **\($0.dateShort)**. "
+                                   + "Nightly consolidation needs an LLM provider; the days since are "
+                                   + "in the event record but have not been summarised."] } ?? [])
+                : recentDays.prefix(5).map { "- **\($0.dateShort)** — \(MarkdownDoc.inline($0.preview))" }))
 
         // NOTE: the day "narrative" ("A focused day…"), the keyword/topic cloud,
         // and behavior-pattern insights were removed from now.md. They are vague
@@ -269,21 +297,15 @@ enum LiveContextGenerator {
         // Those belong in the Insights UI, not the AI context.
 
         // References
-        let refs = memories.filter { $0.memoryType == .reference }
-        if !refs.isEmpty {
-            lines.append("")
-            lines.append("Key references:")
-            for r in refs.prefix(5) {
-                lines.append("- \(r.name): \(r.description)")
-            }
-        }
+        sections.append(MarkdownDoc.section("Key references", items:
+            memories.filter { $0.memoryType == .reference }.prefix(5)
+                .map { "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))" }))
 
         Curator.curate(relativePath: "now.md", header: Curator.nowHeader(timestamp: timestamp),
                        pinnedContent: nil,
                        agentBlocks: [ContextBlock(
                            id: "now:live", source: .agent,
-                           content: lines.joined(separator: "\n")
-                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           content: MarkdownDoc.join(sections),
                            agentHash: nil)],
                        managedPrefixes: ["now:"])
     }
@@ -298,12 +320,25 @@ enum LiveContextGenerator {
     // two-writer fix as now.md above.
 
     private static func generateFull(database: DatabaseService, analytics: AnalyticsEngine, timestamp: String) throws {
-        var parts: [String] = []
+        var sections: [String?] = []
 
-        // me.md + now.md — strip Curator provenance markers; full.md is read by
-        // humans and AIs, not round-tripped by the Curator.
-        if let me = MullDirectory.read("me.md") { parts.append(ContextBlockFile.stripMarkers(me)) }
-        if let now = MullDirectory.read("now.md") { parts.append(ContextBlockFile.stripMarkers(now)) }
+        // me.md + now.md, embedded properly.
+        //
+        // These used to be appended whole — front matter, `# ` title, orientation
+        // note and all — which is why the shipped full.md contained two H1s and
+        // three timestamps, the second of them announcing "# now.md — what I'm
+        // working on" from the middle of a different document. `body(of:)` drops
+        // each file's own chrome and `demoteHeadings` pushes its `##`s to `###`,
+        // so they sit under full.md's headings instead of competing with them.
+        //
+        // Provenance markers still go: full.md is read as prose, not round-tripped.
+        func embed(_ path: String) -> String? {
+            guard let raw = MullDirectory.read(path) else { return nil }
+            let body = MarkdownDoc.body(of: ContextBlockFile.stripMarkers(raw))
+            return body.isEmpty ? nil : MarkdownDoc.demoteHeadings(body, by: 1)
+        }
+        sections.append(MarkdownDoc.section("Who I am", embed("me.md")))
+        sections.append(MarkdownDoc.section("What I'm working on", embed("now.md")))
 
         // Clipboard grouped by project/context — the "pagpag dish"
         let calendar = Calendar.current
@@ -318,18 +353,14 @@ enum LiveContextGenerator {
         let titleEvents = todayEvents.filter { $0.eventType == .screenText }
         let grouped = groupClipboardByContext(clips: clipEvents, titles: titleEvents)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !grouped.isEmpty {
-            parts.append("")
-            parts.append("What you were dealing with today:")
-            parts.append(grouped)
-        }
+        sections.append(MarkdownDoc.section("What you were dealing with today",
+                                            grouped.isEmpty ? nil : grouped))
 
         Curator.curate(relativePath: "full.md", header: Curator.fullHeader(timestamp: timestamp),
                        pinnedContent: nil,
                        agentBlocks: [ContextBlock(
                            id: "full:live", source: .agent,
-                           content: parts.joined(separator: "\n")
-                               .trimmingCharacters(in: .whitespacesAndNewlines),
+                           content: MarkdownDoc.join(sections),
                            agentHash: nil)],
                        managedPrefixes: ["full:"])
     }
@@ -419,16 +450,15 @@ enum LiveContextGenerator {
             .filter { $0.value.count >= 2 }
             .sorted { $0.value.count > $1.value.count }
 
-        var lines: [String] = []
-        for (project, items) in grouped.prefix(5) {
-            lines.append("")
-            lines.append("\(project):")
-            for item in items.prefix(5) {
-                lines.append("  - \"\(item.text)\"")
-            }
-        }
-
-        return lines.joined(separator: "\n")
+        // `Project:` followed by two-space-indented bullets was neither a heading
+        // nor a list — the label rendered as prose and the items hung off it as a
+        // lazy continuation. `###` sits correctly under full.md's `##`, and each
+        // quoted clip goes through `inline` so a multi-line paste cannot end the
+        // list it is part of.
+        return MarkdownDoc.join(grouped.prefix(5).map { project, items in
+            MarkdownDoc.section(project, level: 3, items:
+                items.prefix(5).map { "- \"\(MarkdownDoc.inline($0.text, limit: 160))\"" })
+        })
     }
 
     // MARK: - Auto-install into Claude Code config
@@ -447,12 +477,9 @@ enum LiveContextGenerator {
 
     /// Check if text is noise that shouldn't appear in AI context.
     static func isMullOutput(_ text: String) -> Bool {
-        // mull's own output
-        if text.contains("auto-updated") || text.contains("mull is recording") ||
-           text.contains("mull is still learning") || text.contains("Raw activity data for") ||
-           text.contains("Context about the user") || text.contains("No activity recorded") {
-            return true
-        }
+        // mull's own output — one shared predicate (MarkdownDoc), not a fifth
+        // private copy of the same phrase list.
+        if MarkdownDoc.isGeneratedByMull(text) { return true }
         // Claude Code / AI tool internal output
         if text.contains("tool output (") || text.contains("Grep output (") ||
            text.contains("Bash tool output (") || text.contains("WebSearch tool output (") ||

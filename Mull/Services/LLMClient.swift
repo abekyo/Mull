@@ -137,14 +137,31 @@ final class LLMClient {
     // MARK: - Gemini
 
     /// Call Google Gemini API (free tier).
-    /// Uses the user's own key if set, otherwise falls back to the bundled key.
-    private func callGemini(system: String?, prompt: String, options: Options) async throws -> String {
-        let userKey = KeychainService.loadKey("gemini_api_key") ?? ""
-        let apiKey = userKey.isEmpty ? BundledKeys.gemini : userKey
-
-        guard !apiKey.isEmpty else {
-            throw mullError.missingAPIKey("Gemini")
+    ///
+    /// The user's own key, or nothing. mull used to ship a bundled key here so
+    /// Gemini worked with no setup; that only ever made sense while the binary
+    /// was the only thing distributed, and it billed the author's account for
+    /// every user's traffic. Every provider now works the same way: your key,
+    /// your account, kept in the Keychain.
+    /// Read a provider's key, keeping "never saved" and "the keychain refused"
+    /// apart. Both used to surface as "No API key configured — set it in
+    /// Settings", which sends someone whose keychain is locked to re-enter a key
+    /// that is already there, where it fails again for the same reason.
+    private func apiKey(_ keychainKey: String, provider: String) throws -> String {
+        do {
+            return try KeychainService.readKey(keychainKey)
+        } catch {
+            switch error {
+            case .notFound:
+                throw mullError.missingAPIKey(provider)
+            case .denied(let status):
+                throw mullError.llmFailed("mull couldn't read your \(provider) key from the macOS Keychain (error \(status)). The key may still be there — unlock your keychain, or save it again in Settings → AI.")
+            }
         }
+    }
+
+    private func callGemini(system: String?, prompt: String, options: Options) async throws -> String {
+        let apiKey = try apiKey("gemini_api_key", provider: "Gemini")
 
         guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\(apiKey)") else {
             throw mullError.llmFailed("Invalid Gemini API URL")
@@ -172,11 +189,10 @@ final class LLMClient {
         do {
             data = try await send(request)
         } catch let failure as HTTPFailure {
-            // Rate limits carry different advice depending on whose key is in play.
+            // Only one key can be in play now — the user's own — so there is no
+            // longer a "set your own key for more headroom" case to advise.
             if failure.status == 429 {
-                throw mullError.llmFailed(userKey.isEmpty
-                    ? "Gemini is busy. Set your own API key in Settings for unlimited access."
-                    : "Gemini rate limit reached. Try again later.")
+                throw mullError.llmFailed("Gemini rate limit reached. Try again later.")
             }
             throw mullError.llmFailed("Gemini API: HTTP \(failure.status) \(failure.detail)")
         } catch let error as URLError where error.code == .timedOut {
@@ -315,9 +331,7 @@ final class LLMClient {
     /// Call Anthropic Claude API. With `onToken`, streams via SSE.
     private func callClaude(system: String?, prompt: String, options: Options,
                             onToken: (@Sendable (String) -> Void)? = nil) async throws -> String {
-        guard let apiKey = KeychainService.loadKey("claude_api_key") else {
-            throw mullError.missingAPIKey("Claude")
-        }
+        let apiKey = try apiKey("claude_api_key", provider: "Claude")
 
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
             throw mullError.llmFailed("Invalid Claude API URL")
@@ -442,9 +456,7 @@ final class LLMClient {
     /// Call OpenAI API.
     private func callOpenAI(system: String?, prompt: String, options: Options,
                             onToken: (@Sendable (String) -> Void)? = nil) async throws -> String {
-        guard let apiKey = KeychainService.loadKey("openai_api_key") else {
-            throw mullError.missingAPIKey("OpenAI")
-        }
+        let apiKey = try apiKey("openai_api_key", provider: "OpenAI")
         guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
             throw mullError.llmFailed("Invalid OpenAI API URL")
         }

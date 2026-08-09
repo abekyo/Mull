@@ -101,5 +101,50 @@ final class LiveContextGeneratorTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Daily summaries in now.md
+
+    private func summary(_ date: Date, _ content: String) -> DailySummary {
+        DailySummary(id: nil, date: date, content: content,
+                     morningSection: nil, afternoonSection: nil, eveningSection: nil,
+                     learnings: nil, inProgress: nil, eventCount: 1,
+                     processingSeconds: 0, llmProvider: "test", createdAt: date)
+    }
+
+    /// A summary's first content line is already a bullet, and now.md wraps the
+    /// preview in one of its own — which is how "Recent days" shipped reading
+    /// `- **2026-06-10** — - Opened and edited notes…`.
+    func testPreviewDropsItsOwnListMarker() {
+        let s = summary(Date(), "# Jun 10, 2026\n\n## Morning\n- Opened and edited notes and code")
+        XCTAssertEqual(s.preview, "Opened and edited notes and code")
+    }
+
+    func testPreviewOfProseIsUnchanged() {
+        let s = summary(Date(), "# Aug 8, 2026\n\nコードを長く触った。")
+        XCTAssertEqual(s.preview, "コードを長く触った。")
+    }
+
+    /// "Recent days" listing a two-month-old date is the file's own answer to
+    /// "when did anything last happen", and both the user and every AI reading
+    /// now.md take it at face value. The date was accurate; the framing was not.
+    func testTwoMonthOldSummaryIsNotARecentDay() {
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let old = summary(now.addingTimeInterval(-60 * 86_400), "- a day in June")
+        let split = [old].splitByRecency(days: 7, now: now)
+
+        XCTAssertTrue(split.recent.isEmpty)
+        XCTAssertEqual(split.newestStale?.dateShort, old.dateShort,
+                       "the gap must be reportable, not merely hidden")
+    }
+
+    func testSummariesInsideTheWindowAreRecent() {
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let yesterday = summary(now.addingTimeInterval(-86_400), "- yesterday")
+        let june = summary(now.addingTimeInterval(-60 * 86_400), "- a day in June")
+        let split = [yesterday, june].splitByRecency(days: 7, now: now)
+
+        XCTAssertEqual(split.recent.count, 1)
+        XCTAssertNil(split.newestStale)
+    }
 }
 

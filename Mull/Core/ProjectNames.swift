@@ -120,7 +120,11 @@ enum ProjectNames {
     static func isFileName(_ s: String) -> Bool {
         let parts = s.split(separator: ".")
         guard parts.count >= 2, let ext = parts.last else { return false }
-        return ext.count <= 5 && ext.allSatisfy(\.isLetter)
+        // Letters plus optional digits: "swift", but also "mp4", "3gp", "m4a".
+        // At least one letter, so "2.0" stays a version number, not a file.
+        return ext.count <= 5
+            && ext.allSatisfy { $0.isLetter || $0.isNumber }
+            && ext.contains(where: \.isLetter)
     }
 
     /// Sentence detection, for the two writing systems that reach a window title

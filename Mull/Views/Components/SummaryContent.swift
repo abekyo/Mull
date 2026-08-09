@@ -16,6 +16,9 @@ struct SummaryContent: View {
     /// a deadband so a summary sitting near the threshold doesn't flip its headings
     /// between 午前 and Morning while the user is reading it (see `SectionLabels`).
     @State private var labels: SectionLabels
+    /// Which day `labels` was decided for. The deadband is only meaningful within
+    /// one summary; see the `onChange` below.
+    @State private var labelledDay: Date
 
     init(summary: DailySummary) {
         self.summary = summary
@@ -24,6 +27,7 @@ struct SummaryContent: View {
         // Decided in the initialiser, not in `body`: starting from a placeholder and
         // correcting it in .onAppear would show one frame of the wrong language.
         _labels = State(initialValue: SectionLabels.matching(body, previous: nil))
+        _labelledDay = State(initialValue: summary.date)
     }
 
     private var sections: [(title: String, content: String)] {
@@ -56,7 +60,16 @@ struct SummaryContent: View {
         // The text can change under a live view (a re-run, a rewritten report).
         // Re-decide then, carrying the previous choice so the deadband applies.
         .onChange(of: joinedBody) { _, new in
-            labels = SectionLabels.matching(new, previous: labels)
+            // A *different* day is a fresh look, not a rewrite. `@State` outlives
+            // this struct wherever the parent reuses the view's identity for the
+            // next summary, so carrying `labels` across unconditionally let one
+            // day's language decide the next one's: step from an English day to a
+            // Japanese one near the threshold and the higher hysteresis bar kept
+            // English headings over Japanese prose — the exact mismatch the deadband
+            // exists to prevent, caused by the deadband.
+            let rewrite = labelledDay == summary.date
+            labels = SectionLabels.matching(new, previous: rewrite ? labels : nil)
+            labelledDay = summary.date
         }
     }
 
@@ -149,16 +162,13 @@ struct SectionLabels: Equatable {
 struct SummarySection: View {
     let title: String
     let content: String
-    var icon: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.xs) {
-            HStack(spacing: DS.xs) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(DS.captionFont)
-                        .foregroundStyle(DS.moon.opacity(0.7))
-                }
+            // The ring-fragment as fleuron. The optional SF Symbol this replaced
+            // was never passed by any caller — dead API pretending to be a design.
+            HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                StippleMark(dot: 2.5)
                 Text(title)
                     .sectionLabel()
             }

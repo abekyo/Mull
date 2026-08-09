@@ -57,6 +57,11 @@ final class MCPServer {
             guard !line.isEmpty else { continue }
             guard let data = line.data(using: .utf8),
                   let msg = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                // A line that isn't JSON used to be dropped without a word, so the
+                // host sat waiting for a reply that was never coming. JSON-RPC has
+                // a code for exactly this; -32700 is a parse error with a null id.
+                send(["jsonrpc": "2.0", "id": NSNull(),
+                      "error": ["code": -32700, "message": "Parse error"]])
                 continue
             }
             handle(msg)
@@ -131,7 +136,7 @@ final class MCPServer {
             ],
             [
                 "name": "search",
-                "description": "Find the few most relevant past events for a need — ranked by relevance, NOT a raw dump. Scope with optional facets. If 'entity' is omitted it is anchored to what the user is working on now. Prefer this over dumping history: ask for exactly what this moment needs.",
+                "description": "Find the few most relevant past events for a need — ranked by relevance, NOT a raw dump. Omit 'entity' for cross-project search: results are ranked toward whatever the user has open now, but other projects are still returned — which is what you want for 'how did I solve this before?'. Pass 'entity' only to restrict to one project. If nothing matches your wording, the reply says so before offering anything else.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -435,25 +440,48 @@ final class MCPServer {
     private func toolSearch(query: String, entity: String?, type: String?, days: Int) -> String {
         let now = Date()
         let since = TimeInterval(max(days, 1) * 86_400)
+        let start = now.addingTimeInterval(-since)
         // FTS narrows ASCII text queries at the index; for a type facet (the query
         // may be the category, e.g. "crash") or a CJK query (the default tokenizer
         // doesn't split it) fall back to a recent window so Selection keeps recall.
         let useFTS = !query.isEmpty && type == nil && query.allSatisfy(\.isASCII)
-        let events = database.fetchCandidates(
-            query: query, since: now.addingTimeInterval(-since),
-            useFTS: useFTS, limit: useFTS ? 80 : 300)
-        // Anchor on what the user is doing now when the caller didn't scope an entity.
-        let anchor = entity ?? CurrentState.current(database: database).activeEntity
-        let results = Selection.rank(events: events, query: query, entity: anchor,
-                                     type: type, now: now, since: since, limit: 8)
-        guard !results.isEmpty else {
-            return "No relevant activity for '\(query)'\(anchor.map { " in \($0)" } ?? "")."
+        var events = database.fetchCandidates(
+            query: query, since: start, useFTS: useFTS, limit: useFTS ? 80 : 300)
+        // FTS returns only rows containing the query's words, so on a vocabulary
+        // miss ("auth broken" for an event that says "login returns 401") the
+        // candidate set is empty and Selection has nothing left to reason over —
+        // its substitution path would never see a single row. Widen once, here,
+        // where the miss is detectable.
+        if useFTS && events.isEmpty {
+            events = database.fetchCandidates(query: query, since: start, useFTS: false, limit: 300)
         }
+
+        // Two different things, kept apart (see Selection.slice): `entity` is what
+        // the caller asked to be scoped to; `anchor` is only what happens to be on
+        // screen. Passing the anchor as a scope is what made the default `search`
+        // unable to see any project but the current one.
+        let anchor = entity ?? CurrentState.current(database: database).activeEntity
+        let slice = Selection.slice(events: events, query: query, entity: entity, anchor: anchor,
+                                    type: type, now: now, since: since, limit: 8)
+        guard !slice.results.isEmpty else {
+            let scope = entity.map { " in \($0)" } ?? ""
+            return "No relevant activity for '\(query)'\(scope)."
+        }
+
         let fmt = DateFormatter()
-        fmt.dateFormat = "MM/dd HH:mm"
-        var lines = ["Relevant to '\(query)'\(anchor.map { " (anchored on \($0))" } ?? "") — \(results.count):", ""]
-        lines.append(contentsOf: results.map { $0.line(fmt) })
-        return lines.joined(separator: "\n")
+        fmt.dateFormat = "yyyy-MM-dd HH:mm"
+        // Say which of the three things happened. An agent handed a substituted
+        // slice with no marking will cite it as if it had matched the query.
+        let header: String
+        if let entity {
+            header = "Relevant to '\(query)' (scoped to \(entity)) — \(slice.results.count):"
+        } else if slice.substituted, let anchor {
+            header = "Nothing matched '\(query)' literally. Recent high-signal activity in \(anchor) instead — \(slice.results.count). Treat as context, not as an answer:"
+        } else {
+            let note = anchor.map { " (ranked toward \($0); other projects included)" } ?? ""
+            header = "Relevant to '\(query)'\(note) — \(slice.results.count):"
+        }
+        return ([header, ""] + slice.results.map { $0.line(fmt) }).joined(separator: "\n")
     }
 
     private func searchHistory(query: String, days: Int) -> String {
@@ -475,7 +503,7 @@ final class MCPServer {
         }
 
         let formatter = DateFormatter()
-        formatter.dateFormat = "MM/dd HH:mm"
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
 
         var lines: [String] = ["Search results for '\(query)' (\(results.count) matches):", ""]
         for event in results {
@@ -670,7 +698,6 @@ final class MCPServer {
         let calendarSvc = CalendarService()
         let engine = TimeBlockEngine(database: database)
         let dayFmt = DateFormatter(); dayFmt.dateFormat = "EEEE, MMM d"
-        let timeFmt = DateFormatter(); timeFmt.dateFormat = "HH:mm"
 
         var out: [String] = []
         for offset in 0..<n {
@@ -683,7 +710,7 @@ final class MCPServer {
             } else {
                 out.append("Scheduled:")
                 for e in events {
-                    out.append("- \(timeFmt.string(from: e.start))–\(timeFmt.string(from: e.end)) \(e.title)")
+                    out.append("- \(TimeFormat.machine(e.start))–\(TimeFormat.machine(e.end)) \(e.title)")
                 }
             }
 
@@ -694,7 +721,9 @@ final class MCPServer {
                 out.append("Activity (what you actually did):")
                 for b in blocks.prefix(20) {
                     let label = b.label.isEmpty ? b.app : b.label
-                    out.append("- \(b.startFormatted)–\(b.endFormatted) \(label) (\(b.durationFormatted))")
+                    // `TimeFormat.machine`, not `b.startFormatted`: the latter follows
+                    // the user's 12/24-hour setting, and this text is read by an AI.
+                    out.append("- \(TimeFormat.machine(b.start))–\(TimeFormat.machine(b.end)) \(label) (\(b.durationFormatted))")
                 }
             }
             out.append("")
@@ -708,6 +737,10 @@ final class MCPServer {
         return lines.joined(separator: "\n")
     }
 
+    /// The tree carries no glyphs: a trailing `/` already separates a directory
+    /// from a file, and DESIGN.md bans emoji from generated text as well as from
+    /// the UI. Indentation and the slash say the same thing in characters an
+    /// agent can match on.
     private func listDir(_ url: URL, prefix: String, lines: inout [String]) {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(
@@ -720,13 +753,13 @@ final class MCPServer {
             let name = item.lastPathComponent
 
             if isDir {
-                lines.append("\(prefix)📁 \(name)/")
+                lines.append("\(prefix)\(name)/")
                 listDir(item, prefix: prefix + "  ", lines: &lines)
             } else if name.hasSuffix(".md") {
                 let size = (try? item.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
                 let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
                 let auto = ["me.md", "now.md", "full.md", "MEMORY.md"].contains(name) ? " (auto)" : ""
-                lines.append("\(prefix)📄 \(name) [\(sizeStr)]\(auto)")
+                lines.append("\(prefix)\(name) [\(sizeStr)]\(auto)")
             }
         }
     }
@@ -748,7 +781,7 @@ final class MCPServer {
             lines.append("## \(project.name)")
             lines.append("App: \(project.primaryApp) | Total: \(project.totalDurationFormatted) | Last active: \(project.lastActiveFormatted)")
             if project.daysSinceActive >= 3 {
-                lines.append("⚠️ STALLED (\(project.daysSinceActive) days)")
+                lines.append("STALLED (\(project.daysSinceActive) days)")
             }
             if let file = project.lastFile {
                 lines.append("Last file: \(file)")
@@ -851,7 +884,7 @@ final class MCPServer {
         if !events.isEmpty {
             lines.append("## Recent Activity")
             let formatter = DateFormatter()
-            formatter.dateFormat = "MM/dd HH:mm"
+            formatter.dateFormat = "yyyy-MM-dd HH:mm"
             for event in events {
                 let time = formatter.string(from: event.timestamp)
                 let app = event.appName ?? ""

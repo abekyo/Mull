@@ -41,6 +41,40 @@ final class SignalTests: XCTestCase {
                                    eventType: .keystroke, windowTitle: nil), "note")
     }
 
+    func testDecisionsAreTheirOwnKind() {
+        // `salience(for:)` scored "decision" at note tier from the start, but
+        // `kind` never returned it — the tier was unreachable, and a decision
+        // typed at the keyboard scored 0.20 as plain activity (ROADMAP §1, B2).
+        XCTAssertEqual(Signal.kind(text: "we'll use GRDB instead of Core Data",
+                                   eventType: .clipboard, windowTitle: nil), "decision")
+        XCTAssertEqual(Signal.kind(text: "その案は却下",
+                                   eventType: .keystroke, windowTitle: nil), "decision")
+    }
+
+    func testDecisionVocabularyIsTradeNeutral() {
+        // The same branch has to fire outside software, or the top salience tiers
+        // belong to one occupation (HARNESS.md 第I部 原理1).
+        XCTAssertEqual(Signal.kind(text: "ロット数を0.5にする",
+                                   eventType: .keystroke, windowTitle: nil), "decision")
+        XCTAssertEqual(Signal.kind(text: "この条項は採用しない方針",
+                                   eventType: .clipboard, windowTitle: nil), "decision")
+        XCTAssertEqual(Signal.kind(text: "配信時間を朝にする",
+                                   eventType: .keystroke, windowTitle: nil), "decision")
+    }
+
+    func testDecisionIsGatedToAuthoredChannels() {
+        // A window title containing 「方針」 is a document being looked at, not a
+        // commitment being made.
+        XCTAssertNotEqual(Signal.kind(text: "2026年の方針.pages",
+                                      eventType: .screenText,
+                                      windowTitle: "2026年の方針.pages"), "decision")
+    }
+
+    func testErrorStillOutranksDecision() {
+        XCTAssertEqual(Signal.kind(text: "decided to fix the fatal error",
+                                   eventType: .clipboard, windowTitle: nil), "error")
+    }
+
     func testCodeShapes() {
         XCTAssertEqual(Signal.kind(text: "func reload() {",
                                    eventType: .clipboard, windowTitle: nil), "code")

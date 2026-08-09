@@ -15,6 +15,13 @@ import AppKit
 enum TextInjector {
 
     /// Paste `text` into the focused text field, then restore the previous clipboard.
+    /// Returns `false` when the paste could not be attempted at all.
+    ///
+    /// Posting a synthetic ⌘V at the HID tap requires Accessibility. Without it
+    /// `CGEvent.post` is a silent no-op — the keystroke simply never arrives — and
+    /// the caller used to go on to tell the user "Your AI context has been pasted"
+    /// over a field where nothing happened. Checking first is the only way to tell
+    /// those apart, because the post itself reports nothing either way.
     ///
     /// Stays on the main actor: it was extracted from a @MainActor method, and the
     /// two nested `asyncAfter` hops carry non-Sendable AppKit values (NSPasteboard)
@@ -22,7 +29,10 @@ enum TextInjector {
     /// settle before ⌘V is posted, and 0.3s lets the receiving app finish reading
     /// it before the original contents go back.
     @MainActor
-    static func inject(_ text: String) {
+    @discardableResult
+    static func inject(_ text: String) -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+
         // 1. Save current clipboard
         let pasteboard = NSPasteboard.general
         let savedItems = pasteboard.pasteboardItems?.compactMap { item -> (String, Data)? in
@@ -59,5 +69,6 @@ enum TextInjector {
                 }
             }
         }
+        return true
     }
 }

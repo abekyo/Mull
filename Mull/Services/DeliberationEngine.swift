@@ -21,7 +21,10 @@ final class DeliberationEngine {
     private let llm: LLMClient
 
     /// The agent-owned block id inside each project file.
-    private let blockID = "deliberation"
+    /// The id every per-project briefing block carries. Shared rather than private
+    /// because `FolderFiller` withdraws these blocks when the project turns out not
+    /// to be one, and a second copy of the literal is a second thing to update.
+    static let blockID = "deliberation"
 
     init(database: DatabaseService, llm: LLMClient = LLMClient()) {
         self.database = database
@@ -126,7 +129,7 @@ final class DeliberationEngine {
         let existing = MullDirectory.read(path) ?? ""
         let (existingHeader, _) = ContextBlockFile.parse(existing)
         let header = existingHeader.isEmpty ? "# \(name)" : existingHeader
-        let block = ContextBlock(id: blockID, source: .agent, content: body, agentHash: nil)
+        let block = ContextBlock(id: Self.blockID, source: .agent, content: body, agentHash: nil)
         return Curator.curate(relativePath: path, header: header,
                               pinnedContent: nil, agentBlocks: [block]) ? path : nil
     }

@@ -4,10 +4,11 @@ import EventKit
 
 /// Settings window — 4 tabs, no redundancy.
 ///
-///   General:  Schedule, startup, output size, export destinations
+///   General:  Schedule, startup, output size
 ///   AI:       LLM provider, API keys, connection test, MCP client setup
 ///   Data:     Permissions, data sources, storage, retention, cleanup
-///   Profile:  What mull knows about you (Insights) — correctable
+///   Profile:  Everything about you — the answers you gave (editable), what
+///             capture observed (read-only), the notes mull wrote (correctable)
 /// `@MainActor` because it holds `SettingsRouter.shared`, which is main-actor
 /// isolated — the annotation keeps that read legal from the view's initialiser.
 @MainActor
@@ -33,7 +34,10 @@ struct SettingsView: View {
 
             AITab()
                 .environmentObject(appState)
-                .tabItem { Label("AI", systemImage: "brain") }
+                // "cpu", not "brain": the tab configures which engine runs the
+                // summaries. A brain glyph is the stock AI-product shorthand and
+                // overclaims besides — nothing here thinks.
+                .tabItem { Label("AI", systemImage: "cpu") }
                 .tag(SettingsTab.ai)
 
             DataTab()
@@ -58,6 +62,7 @@ struct GeneralTab: View {
     @AppStorage("summaryTimeMinute") private var summaryTimeMinute = 0
     @AppStorage("launchAtLogin") private var launchAtLogin = true
     @AppStorage("outputMaxChars") private var outputMaxChars = 50000
+    @AppStorage("proactiveBriefs") private var proactiveBriefs = false
     // `autoExport`, `exportPath` and `obsidianVault` used to live here, behind an
     // "Export Destinations" section and an "Auto-export after each mull" toggle.
     // Nothing in the app ever read any of the three: the user typed a vault path,
@@ -65,12 +70,12 @@ struct GeneralTab: View {
     // trace. A control that does nothing is worse than an absent one, because it
     // spends the user's trust. The vault is already plain markdown on disk, and
     // FullWindowView has a working export, so the honest fix is removal.
-    @State private var profileResetDone = false
-    @State private var showResetConfirm = false
-    @State private var showProfileEditor = false
-    /// Clears the "cleared" confirmation. A success message that never leaves
-    /// stops being a confirmation and becomes a permanent label.
-    @State private var resetNoticeTask: Task<Void, Never>?
+    //
+    // The "Profile" section (Edit answers… / Reset answers) has moved to the
+    // Profile tab. Two things called "Profile" in one Settings window — a section
+    // here and a tab over there, about different data — meant the person looking
+    // for either found the wrong one first. Everything about *you* now lives on
+    // the one tab named for you.
 
     /// What macOS actually says about the login item, as opposed to what the
     /// checkbox claims. Empty when the two agree.
@@ -137,6 +142,16 @@ struct GeneralTab: View {
                 }
             }
 
+            Section("Notifications") {
+                // Default off: the trigger is "the active window's project
+                // changed", which announces ordinary window-hopping, not
+                // genuine resumption (see ProactiveLoop.tick).
+                Toggle("Resume briefs on project switch", isOn: $proactiveBriefs)
+                Text("When you return to a project, mull surfaces its recent threads as a notification and keeps them in proactive.md.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+            }
+
             Section("Output") {
                 Picker("Max size when copying to AI", selection: $outputMaxChars) {
                     ForEach(charOptions, id: \.0) { value, label in
@@ -151,52 +166,9 @@ struct GeneralTab: View {
                 }
             }
 
-            Section("Profile") {
-                Text("The questions you answered at setup. They seed me.pinned.md (placed atop me.md, never overwritten). Capture refines the rest.")
-                    .font(DS.captionFont)
-                    .foregroundStyle(DS.inkDim)
-
-                HStack {
-                    // Editing existing answers is not first-run onboarding, and it
-                    // used to be routed through it: the setup wizard opened on
-                    // "4 of 5", counting steps the user had finished months ago,
-                    // and finished by dropping them in the main window instead of
-                    // back in Settings. A sheet edits them where they are, says
-                    // what it is, and returns them here when it closes.
-                    Button("Edit answers…") { showProfileEditor = true }
-                    Spacer()
-                    Button("Reset answers", role: .destructive) { showResetConfirm = true }
-                        .disabled(!OnboardingProfile.hasAnswers)
-                }
-                .confirmationDialog(
-                    "Clear your profile answers?",
-                    isPresented: $showResetConfirm
-                ) {
-                    Button("Clear answers", role: .destructive) { resetProfile() }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Everything you told mull at setup — your role, working language, what you're building, how you want AI to answer — is removed from me.pinned.md. Anything you wrote in that file by hand is kept. mull will go back to inferring these from what you do.")
-                }
-
-                if profileResetDone {
-                    Label("Profile answers cleared from me.pinned.md", systemImage: "checkmark.circle.fill")
-                        .font(DS.captionFont)
-                        .foregroundStyle(DS.recording)
-                        .transition(.opacity)
-                }
-            }
         }
         .formStyle(.grouped)
         .padding()
-        .animation(.easeInOut(duration: 0.2), value: profileResetDone)
-        .sheet(isPresented: $showProfileEditor) {
-            // A sheet, so dismissing it lands back on this tab rather than in
-            // the main window.
-            ProfileAnswersEditor { answers in
-                OnboardingProfile.save(answers)
-                appState.regenerateContextNow()
-            }
-        }
         .onAppear { reconcileLaunchAtLogin() }
         .onChange(of: summaryTimeHour) { _, h in
             appState.mullEngine.scheduleSummary(at: h, minute: summaryTimeMinute)
@@ -204,7 +176,6 @@ struct GeneralTab: View {
         .onChange(of: summaryTimeMinute) { _, m in
             appState.mullEngine.scheduleSummary(at: summaryTimeHour, minute: m)
         }
-        .onDisappear { resetNoticeTask?.cancel() }
     }
 
     // MARK: - Launch at login
@@ -258,101 +229,6 @@ struct GeneralTab: View {
     private func clearLoginItemNote() {
         loginItemNote = nil
         loginItemIsProblem = false
-    }
-
-    private func resetProfile() {
-        OnboardingProfile.reset()
-        appState.regenerateContextNow()
-        profileResetDone = true
-        resetNoticeTask?.cancel()
-        resetNoticeTask = Task {
-            try? await Task.sleep(for: .seconds(4))
-            guard !Task.isCancelled else { return }
-            profileResetDone = false
-        }
-    }
-}
-
-// MARK: - Profile Answers Editor
-//
-// The same questions the setup wizard asks, edited in place. It is explicitly
-// *not* the wizard: no step counter (there are no steps), no "Save & Continue"
-// leading somewhere else, and closing it returns to Settings — because that is
-// where the user was. Answers are the user's stated priors; nothing is required.
-
-struct ProfileAnswersEditor: View {
-    /// Called with the edited answers when the user commits.
-    let onSave: ([String: String]) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var answers: [String: String] = [:]
-    @State private var original: [String: String] = [:]
-    @State private var showDiscardConfirm = false
-
-    private var isDirty: Bool {
-        OnboardingProfile.questions.contains { q in
-            (answers[q.id] ?? "") != (original[q.id] ?? "")
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.md) {
-            VStack(alignment: .leading, spacing: DS.xs) {
-                Text("Your profile answers")
-                    .font(DS.titleFont)
-                    .foregroundStyle(DS.ink)
-                Text("What you told mull about yourself. Change anything; clear a field to drop that fact. Every one is optional, and capture keeps refining the rest.")
-                    .font(DS.captionFont)
-                    .foregroundStyle(DS.inkDim)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.lg) {
-                    ForEach(OnboardingProfile.questions) { q in
-                        VStack(alignment: .leading, spacing: DS.xs) {
-                            Text(q.prompt).font(DS.bodyMedium).foregroundStyle(DS.ink)
-                            Text(q.hint).font(DS.captionFont).foregroundStyle(DS.inkFaint)
-                            TextField(q.placeholder, text: Binding(
-                                get: { answers[q.id] ?? "" },
-                                set: { answers[q.id] = $0 }
-                            ))
-                            .textFieldStyle(.roundedBorder)
-                        }
-                    }
-                }
-                .padding(.vertical, DS.xs)
-                .padding(.trailing, DS.sm)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    if isDirty { showDiscardConfirm = true } else { dismiss() }
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Button("Save answers") {
-                    onSave(answers)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(DS.xl)
-        .frame(width: 460, height: 520)
-        .background(DS.canvas)
-        .onAppear {
-            answers = OnboardingProfile.answers
-            original = answers
-        }
-        .confirmationDialog("Discard your changes?", isPresented: $showDiscardConfirm) {
-            Button("Discard changes", role: .destructive) { dismiss() }
-            Button("Keep editing", role: .cancel) {}
-        } message: {
-            Text("The edits you just made to your answers won't be saved.")
-        }
     }
 }
 
@@ -527,13 +403,11 @@ struct MCPConnectSheet: View {
                 )
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
-                Image(systemName: "clock.arrow.circlepath").font(DS.miniFont)
-                Text("A timestamped copy of the current file is saved beside it first, as \(AIToolSetup.backupDescription(for: tool)). You can undo this at any time with Disconnect.")
-                    .font(DS.captionFont)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundStyle(DS.inkDim)
+            // A footnote is type, not an icon row — the sentence carries itself.
+            Text("A timestamped copy of the current file is saved beside it first, as \(AIToolSetup.backupDescription(for: tool)). You can undo this at any time with Disconnect.")
+                .font(DS.captionFont)
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(DS.inkDim)
 
             Spacer(minLength: 0)
 
@@ -564,6 +438,9 @@ struct AITab: View {
     @State private var geminiKey = ""
     @State private var claudeKey = ""
     @State private var openaiKey = ""
+    /// Set when the Keychain refused to hand a saved key back, so the empty
+    /// fields above are explained rather than read as "you never entered one".
+    @State private var keyReadProblem: String?
     @State private var testOutcome: TestOutcome = .idle
     @State private var aiTools: [AIToolSetup.AITool] = []
     @State private var setupOutcome: TestOutcome = .idle
@@ -588,7 +465,7 @@ struct AITab: View {
                 .accessibilityLabel("AI provider")
 
                 if provider == "off" {
-                    Text("mull runs fully on-device: rule-based me.md/now.md/full.md keep updating, and nothing is sent anywhere. Pick a provider to enable nightly LLM summaries, per-project deliberation, and Chat — those send data to the chosen service.")
+                    Text("Rule-based me.md/now.md/full.md keep updating, and nothing is sent anywhere. Pick a provider to enable nightly LLM summaries, per-project deliberation, and Chat — those send data to the chosen service.")
                         .font(DS.captionFont)
                         .foregroundStyle(DS.inkDim)
                 } else if LLMProvider(rawValue: provider)?.isCloud == true {
@@ -605,17 +482,13 @@ struct AITab: View {
             Section(providerDetailTitle) {
                 switch provider {
                 case "gemini":
-                    APIKeyField(placeholder: "API Key (optional)", keychainKey: "gemini_api_key",
+                    APIKeyField(placeholder: "API Key (AIza…)", keychainKey: "gemini_api_key",
                                 text: $geminiKey, onSaved: { testConnection() })
                     // Where a key is kept is a privacy fact, not a feature note, so
                     // every provider that takes one says it — Gemini's key was the
                     // one that silently didn't.
-                    if geminiKey.isEmpty && !BundledKeys.gemini.isEmpty {
-                        Text("Requests use mull's built-in key. Enter your own to use your account instead — a key you enter is kept in the macOS Keychain, never in a file.")
-                            .font(DS.captionFont)
-                            .foregroundStyle(DS.inkDim)
-                    } else if geminiKey.isEmpty {
-                        Text("Enter your key from Google AI Studio, or leave empty for built-in access. A key you enter is kept in the macOS Keychain, never in a file.")
+                    if geminiKey.isEmpty {
+                        Text("Enter your key from Google AI Studio. A key you enter is kept in the macOS Keychain, never in a file.")
                             .font(DS.captionFont)
                             .foregroundStyle(DS.inkFaint)
                     } else {
@@ -647,16 +520,27 @@ struct AITab: View {
                     EmptyView()
                 }
 
-                // Not applicable when LLM is off. Named for what it actually
-                // tests — this tab has a second test button further down, and
-                // two controls both reading "Test connection" on one page tell
-                // the user nothing about which connection failed.
+                // Not applicable when LLM is off. The section it sits in is titled
+                // with the provider name, so the button doesn't repeat it; the tab's
+                // other test button says "Test mull's MCP server", which is already
+                // distinct enough to tell the two failures apart.
                 if provider != "off" {
                     ConnectionTest(
-                        label: "Test \(providerDetailTitle) connection",
+                        label: "Test connection",
                         outcome: $testOutcome,
                         run: testConnection
                     )
+                }
+
+                if let keyReadProblem {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(DS.miniFont)
+                        Text(keyReadProblem)
+                            .font(DS.captionFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(DS.error)
                 }
             }
 
@@ -670,14 +554,29 @@ struct AITab: View {
                                 .font(DS.miniFont)
                                 .foregroundStyle(DS.inkGhost)
                                 .lineLimit(1)
+                                // A path's tail is the part that identifies it —
+                                // lose the middle, not the file name, and keep the
+                                // whole of it on hover.
+                                .truncationMode(.middle)
+                                .help(tool.configPath)
                         }
 
                         Spacer()
 
                         if !tool.detected {
-                            Text("Not installed")
-                                .font(DS.captionFont)
-                                .foregroundStyle(DS.inkFaint)
+                            // Detection is a guess from known install locations, so
+                            // it must not be the last word: "Not found" with a way
+                            // through, rather than "Not installed" and a dead row
+                            // for someone who has the app somewhere unusual.
+                            HStack(spacing: DS.sm) {
+                                Text("Not found")
+                                    .font(DS.captionFont)
+                                    .foregroundStyle(DS.inkFaint)
+                                Button("Connect anyway") { beginConnect(tool) }
+                                    .font(DS.captionFont)
+                                    .controlSize(.small)
+                                    .help("Writes mull into \(tool.configPath), creating it if needed")
+                            }
                         } else if tool.configured {
                             HStack(spacing: DS.sm) {
                                 HStack(spacing: DS.xs) {
@@ -742,13 +641,27 @@ struct AITab: View {
             Text("mull's entry is removed from \(pendingDisconnect?.configPath ?? "the config file"). Every other MCP server in that file is left exactly as it is, and a timestamped backup is written beside it first. Your recordings are untouched — \(pendingDisconnect?.name ?? "the tool") just stops being able to read them.")
         }
         .onAppear {
-            geminiKey = KeychainService.load(key: "gemini_api_key") ?? ""
-            claudeKey = KeychainService.load(key: "claude_api_key") ?? ""
-            openaiKey = KeychainService.load(key: "openai_api_key") ?? ""
+            // A refused keychain read is not an empty field. Drawing one over a
+            // key that is really there invites the user to type it again, which
+            // fails the same way — so the reason is kept and shown instead.
+            geminiKey = readStoredKey("gemini_api_key")
+            claudeKey = readStoredKey("claude_api_key")
+            openaiKey = readStoredKey("openai_api_key")
             aiTools = AIToolSetup.detectTools()
         }
         .onChange(of: provider) { _, v in
             appState.llmProvider = LLMProvider(rawValue: v) ?? .off
+        }
+    }
+
+    /// Read a saved key for display. A `.denied` answer leaves the field empty —
+    /// there is nothing to show — but records why, so the UI can say so.
+    private func readStoredKey(_ keychainKey: String) -> String {
+        do {
+            return try KeychainService.read(key: keychainKey)
+        } catch {
+            if case .denied = error { keyReadProblem = error.message }
+            return ""
         }
     }
 
@@ -767,7 +680,7 @@ struct AITab: View {
     private var keyNote: some View {
         HStack(spacing: DS.xs) {
             Image(systemName: "lock.fill")
-                .font(.system(size: 8))
+                .font(DS.iconMini)
             Text("Stored in macOS Keychain")
                 .font(DS.captionFont)
         }
@@ -1028,6 +941,17 @@ struct APIKeyField: View {
             guard !Task.isCancelled else { return }
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed != value { text = trimmed }   // strip pasted junk *visibly*
+            // Nothing to do when the field already holds what the Keychain holds.
+            // The tab seeds this field from the Keychain when it appears, and to
+            // `.onChange` that assignment is indistinguishable from typing: merely
+            // opening Settings → AI re-saved the key, showed "Saved to Keychain"
+            // for a save nobody had made, and — through `onSaved` — put a live,
+            // billed request to the provider. A read that was *refused* rather than
+            // absent tells us nothing to compare against, so it falls through and
+            // saves as before.
+            if let stored = try? KeychainService.read(key: keychainKey), stored == trimmed {
+                return
+            }
             // Report the real outcome: silently claiming success for a key that
             // was never stored resurfaces later as a confusing "missing API key".
             let stored = KeychainService.save(key: keychainKey, value: trimmed)
@@ -1064,6 +988,10 @@ struct DataTab: View {
     @State private var showClearToday = false
     @State private var showClearEvents = false
     @State private var showClearAll = false
+    /// What a cleanup action failed to do. These are privacy actions: reporting
+    /// the failure where the button was pressed is part of the promise — the
+    /// main window's notice bar is a different window the user may never open.
+    @State private var cleanupProblem: String?
 
     /// Live EventKit status, re-read on every appearance so a permission granted
     /// in System Settings shows up here without a relaunch.
@@ -1075,6 +1003,10 @@ struct DataTab: View {
     @State private var showEmailConsent = false
     @State private var emailChecking = false
     @State private var emailProblem: EmailService.AccessProblem?
+    /// Why browser URLs stopped arriving, if they did.
+    @State private var browserProblem: RecordingService.BrowserAccessProblem?
+    /// Whether macOS is refusing to show mull's notifications.
+    @State private var notificationsBlocked = false
 
     /// The picker's own state, so a retention change can be confirmed *before* it
     /// destroys anything. Binding the picker straight to @AppStorage meant selecting
@@ -1110,6 +1042,64 @@ struct DataTab: View {
                         actionLabel: calendarStatus == .notDetermined ? "Grant" : "Open Settings") {
                     requestCalendarAccess()
                 }
+                // Browser Automation had no row at all, and its denial was never
+                // recorded anywhere: mull asked Safari for the address bar during
+                // onboarding, a reflexive Deny answered for good, and URLs simply
+                // never appeared again with nothing on any screen to say why.
+                if let problem = browserProblem {
+                    VStack(alignment: .leading, spacing: DS.xs) {
+                        HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(DS.miniFont)
+                            Text(problem.message)
+                                .font(DS.captionFont)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(DS.error)
+                        if problem.isPermission {
+                            Button("Open Automation settings") {
+                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .font(DS.captionFont)
+                            .controlSize(.small)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Browser pages").font(DS.bodyFont)
+                        Text("Asked of Safari, Chrome, Arc, Brave and Edge the first time you use one. Firefox doesn't offer its address bar to any app.")
+                            .font(DS.captionFont)
+                            .foregroundStyle(DS.inkFaint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                // Notifications carry the one message mull cannot deliver any other
+                // way when its window is closed — a revoked permission, a summary
+                // that failed. Denied, that channel is simply gone, and nothing used
+                // to say so anywhere.
+                if notificationsBlocked {
+                    VStack(alignment: .leading, spacing: DS.xs) {
+                        HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(DS.miniFont)
+                            Text("Notifications are turned off for mull, so briefings, meeting reminders and failure alerts won't reach you. mull still shows them inside its own window.")
+                                .font(DS.captionFont)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(DS.error)
+                        Button("Open Notification settings") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .font(DS.captionFont)
+                        .controlSize(.small)
+                    }
+                }
+
                 // Clipboard needs no macOS permission — it is stated, not granted,
                 // so it gets no button affordance.
                 VStack(alignment: .leading, spacing: 0) {
@@ -1192,7 +1182,7 @@ struct DataTab: View {
             // Per-app exclusion — privacy control. Nothing is captured while an
             // excluded app is frontmost (keystrokes, clipboard, and window titles).
             Section("Don't record in these apps") {
-                Text("While one of these is frontmost, mull captures nothing — no keystrokes, clipboard, or window titles.")
+                Text("Only while one of them is frontmost, and it covers everything — keystrokes, clipboard, window titles.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
 
@@ -1242,6 +1232,35 @@ struct DataTab: View {
                 statRow("Memories", value: memoryCount.formatted())
                 statRow("Database", value: dbSize)
 
+                // The store's health had no surface here at all: this section
+                // showed counts and a size for a database that might be running
+                // from /tmp and about to lose the lot on restart.
+                if let reason = appState.database.fallbackReason {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(DS.miniFont)
+                        Text(reason)
+                            .font(DS.captionFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    .foregroundStyle(DS.error)
+                }
+
+                // Same for the vault: every markdown file mull writes lives there,
+                // and a folder it cannot write to was only ever mentioned on Home.
+                if let vaultIssue = MullDirectory.issueDescription {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(DS.miniFont)
+                        Text(vaultIssue)
+                            .font(DS.captionFont)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    .foregroundStyle(DS.error)
+                }
+
                 HStack {
                     Spacer()
                     Button("Open in Finder") {
@@ -1271,14 +1290,21 @@ struct DataTab: View {
                         dataRetention = v
                         return
                     }
-                    let doomed = eventsOlderThan(days: days)
-                    guard doomed > 0 else {
-                        dataRetention = v
-                        return
-                    }
-                    pendingRetentionCount = doomed
-                    pendingRetention = v
+                    // Counting what the change would destroy is a whole-table scan.
+                    // Run inline it froze the window between the click and the
+                    // dialog — the same freeze the counts at the top of this tab
+                    // used to cause, for the same reason.
                     _ = old
+                    Task {
+                        let doomed = await eventsOlderThan(days: days)
+                        guard !Task.isCancelled else { return }
+                        guard doomed > 0 else {
+                            dataRetention = v
+                            return
+                        }
+                        pendingRetentionCount = doomed
+                        pendingRetention = v
+                    }
                 }
                 .confirmationDialog(
                     "Delete \(pendingRetentionCount.formatted()) recorded \(pendingRetentionCount == 1 ? "event" : "events")?",
@@ -1290,9 +1316,19 @@ struct DataTab: View {
                     Button("Delete and keep \(retentionLabel(pendingRetention))", role: .destructive) {
                         guard let v = pendingRetention, let days = Int(v) else { return }
                         dataRetention = v
-                        try? appState.database.deleteEventsOlderThan(days: days)
+                        // Every other destructive action in this tab routes a failure
+                        // into `cleanupProblem`; this one swallowed it with `try?`, so
+                        // a locked or full database left the setting claiming "7 days"
+                        // over months of events with nothing on screen to say the
+                        // deletion had not happened.
+                        do {
+                            try appState.database.deleteEventsOlderThan(days: days)
+                        } catch {
+                            cleanupProblem = "The setting was changed, but the older events "
+                                + "could not be deleted: \(error.localizedDescription)"
+                        }
                         pendingRetention = nil
-                        refresh()
+                        Task { await refresh() }
                     }
                     Button("Cancel", role: .cancel) {
                         // Snap the picker back to the setting that is actually in force.
@@ -1303,18 +1339,24 @@ struct DataTab: View {
                     Text("Everything older than \(retentionLabel(pendingRetention)) will be permanently removed from your recordings. Summaries and the markdown files in ~/mull are kept. This cannot be undone.")
                 }
 
-                Text("mull keeps raw events for this long, then removes the oldest. Your daily summaries and markdown files are never pruned.")
+                Text("Only the raw events age out. Your daily summaries and markdown files are never pruned.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
             }
 
-            // Cleanup
-            Section("Cleanup") {
+            // Named against "Auto-cleanup" above it: the two sections used to be one
+            // word apart, with nothing in either title saying which was the schedule
+            // and which was the button you press yourself.
+            Section("Clear now") {
                 Button("Clear today's recordings") { showClearToday = true }
                     .confirmationDialog("Clear today?", isPresented: $showClearToday) {
                         Button("Clear Today", role: .destructive) { clearToday() }
                     } message: {
-                        Text("Removes today's \(appState.todayEventCount.formatted()) recorded events. Summaries and your markdown files are kept.")
+                        // The old copy promised only the events and reassured that
+                        // "summaries are kept" — which is exactly backwards for a
+                        // privacy action. Clearing the day now clears what mull
+                        // concluded from the day too; your own writing is what stays.
+                        Text(todayForgetDetail)
                     }
 
                 Button("Clear all events") { showClearEvents = true }
@@ -1328,6 +1370,11 @@ struct DataTab: View {
                     Text("Delete everything")
                 }
                 .confirmationDialog("Delete everything?", isPresented: $showClearAll) {
+                    // The escape hatch its own doc comment promised. `exportVaultCopy`
+                    // was fully written and called from nowhere, so the only thing
+                    // offered beside an irreversible delete was a Finder window and a
+                    // suggestion to copy the folder by hand.
+                    Button("Save a copy of ~/mull first…") { exportVaultCopy() }
                     Button("Show me ~/mull first…") {
                         NSWorkspace.shared.open(MullDirectory.root)
                     }
@@ -1343,6 +1390,17 @@ struct DataTab: View {
                         and every markdown file in ~/mull — me.md, now.md, and all your notes, \
                         projects and reports. Nothing goes to the Trash. This cannot be undone.
                         """)
+                }
+                // One alert for all three actions above — they set the same
+                // state, and only one can have just been pressed.
+                .alert(
+                    "That didn't finish",
+                    isPresented: Binding(get: { cleanupProblem != nil },
+                                         set: { if !$0 { cleanupProblem = nil } })
+                ) {
+                    Button("OK", role: .cancel) { cleanupProblem = nil }
+                } message: {
+                    Text(cleanupProblem ?? "")
                 }
             }
 
@@ -1374,7 +1432,7 @@ struct DataTab: View {
         }
         .formStyle(.grouped)
         .padding()
-        .onAppear { refresh() }
+        .task { await refresh() }
     }
 
     // MARK: - Helpers
@@ -1477,12 +1535,29 @@ struct DataTab: View {
         }
     }
 
-    private func refresh() {
-        eventCount = appState.database.eventCountToday()
-        totalEventCount = appState.database.countEvents(from: .distantPast, to: .distantFuture)
-        summaryCount = appState.database.fetchRecentSummaries(limit: 9999).count
-        memoryCount = appState.database.fetchAllMemories().count
-        dbSize = ByteCountFormatter.string(fromByteCount: appState.database.totalStorageBytes(), countStyle: .file)
+    /// Counts, sizes and permission states for this tab.
+    ///
+    /// The counting half runs off the main thread. It is four whole-table passes —
+    /// one of which materialised every summary row purely to take `.count` of it —
+    /// and on a database holding months of keystroke-grade events, running them
+    /// inline from `.onAppear` froze the Settings window for as long as they took.
+    /// This is the same freeze ProfileTab's own comment says was fixed there.
+    private func refresh() async {
+        let database = appState.database
+        let counts = await Task.detached(priority: .userInitiated) {
+            (today: database.eventCountToday(),
+             total: database.countEvents(from: .distantPast, to: .distantFuture),
+             summaries: database.summaryCount(),
+             memories: database.fetchAllMemories().count,
+             bytes: database.totalStorageBytes())
+        }.value
+
+        guard !Task.isCancelled else { return }
+        eventCount = counts.today
+        totalEventCount = counts.total
+        summaryCount = counts.summaries
+        memoryCount = counts.memories
+        dbSize = ByteCountFormatter.string(fromByteCount: counts.bytes, countStyle: .file)
         // Show what is actually in force, not the @AppStorage default, so a value
         // written by a previous version still displays correctly.
         shownRetention = dataRetention
@@ -1492,13 +1567,20 @@ struct DataTab: View {
         // A failure from the background poll (Automation revoked months after the
         // user agreed) surfaces here rather than staying invisible forever.
         emailProblem = emailCaptureEnabled ? EmailService.lastProblem : nil
+        browserProblem = RecordingService.lastBrowserProblem
+        // Asks the system rather than prompting, so opening this tab never
+        // produces a dialog the user didn't ask for.
+        Notifier.shared.refreshDeliveryState { notificationsBlocked = $0 }
     }
 
     /// How many events a retention change would destroy. Shown in the confirmation
     /// so "7 days" is a decision with a number attached rather than a blind click.
-    private func eventsOlderThan(days: Int) -> Int {
+    private func eventsOlderThan(days: Int) async -> Int {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return 0 }
-        return appState.database.countEvents(from: .distantPast, to: cutoff)
+        let database = appState.database
+        return await Task.detached(priority: .userInitiated) {
+            database.countEvents(from: .distantPast, to: cutoff)
+        }.value
     }
 
     private func retentionLabel(_ value: String?) -> String {
@@ -1513,13 +1595,12 @@ struct DataTab: View {
 
     /// Which cloud vendor, if any, currently receives recorded activity. `nil` means
     /// everything stays local (off, or a local model over localhost).
+    /// Reads through `llmProvider` (not `appState`) so the notice redraws the
+    /// moment the AI tab changes, but the cloud/local judgement itself lives in
+    /// one place — the forget dialog asks the same question and must not be able
+    /// to answer it differently.
     private var cloudProviderName: String? {
-        switch llmProvider {
-        case "claude": "Anthropic"
-        case "openai": "OpenAI"
-        case "gemini": "Google"
-        default: nil   // "off", "ollama", "local" — nothing leaves the machine
-        }
+        AppState.cloudProviderName(for: llmProvider)   // "off"/"ollama"/"local" → nil
     }
 
     /// Zip ~/mull to a location the user picks, then reveal it in Finder.
@@ -1529,7 +1610,7 @@ struct DataTab: View {
     /// carry an escape hatch beside it, not somewhere else in the app.
     private func exportVaultCopy() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "mull-vault.zip"
+        panel.nameFieldStringValue = "mull-folder.zip"
         panel.allowedContentTypes = [.zip]
         guard panel.runModal() == .OK, let dest = panel.url else { return }
         let source = MullDirectory.root
@@ -1578,37 +1659,70 @@ struct DataTab: View {
                 if let failure {
                     appState.postNotice("Export failed", detail: failure, isProblem: true)
                 } else {
-                    appState.postNotice("Vault exported", revealURL: dest)
+                    appState.postNotice("mull folder exported", revealURL: dest)
                     NSWorkspace.shared.activateFileViewerSelecting([dest])
                 }
             }
         }
     }
 
+    private var todayInterval: DateInterval {
+        DateInterval(start: Calendar.current.startOfDay(for: Date()), end: Date())
+    }
+
+    /// Same sentence the menu bar's Forget shows, so the two surfaces cannot
+    /// describe the same action differently.
+    private var todayForgetDetail: String {
+        let plan = appState.forgetPlan(for: todayInterval)
+        return [plan.sentence(label: "today"), plan.warning]
+            .compactMap { $0 }
+            .joined(separator: "\n\n")
+    }
+
+    /// Routed through the forget path, not `deleteEvents` — the events are only
+    /// the input, and deleting them alone left today's summary, the memories
+    /// formed today and the frozen daily snapshot all standing while this dialog
+    /// reported the day cleared. Two surfaces offering the same promise must not
+    /// keep it to different depths.
     private func clearToday() {
-        let start = Calendar.current.startOfDay(for: Date())
-        // Deletion belongs to the database layer, not to a View writing raw SQL
-        // against the pool — the FTS shadow tables have to stay in step with it.
-        try? appState.database.deleteEvents(since: start)
-        appState.todayEventCount = 0
-        refresh()
+        cleanupProblem = appState.forget(appState.forgetPlan(for: todayInterval)).failureMessage
+        Task { await refresh() }
     }
 
     private func clearEvents() {
-        try? appState.database.deleteEvents(since: .distantPast)
+        do {
+            try appState.database.deleteEvents(since: .distantPast)
+            appState.todayEventCount = 0
+        } catch {
+            cleanupProblem = "The recordings could not be deleted: \(error.localizedDescription)"
+        }
         appState.database.vacuum()
-        appState.todayEventCount = 0
-        refresh()
+        Task { await refresh() }
     }
 
+    /// Both halves are attempted even if the first fails — a vault that could
+    /// not be removed is no reason to leave the database standing too — and
+    /// every failure is reported. The counters are re-read from the database
+    /// rather than zeroed: after a failed delete, "0 events" would be the UI
+    /// claiming a success the data can contradict.
     private func deleteAll() {
-        try? appState.database.deleteAllData()
+        var problems: [String] = []
+        do {
+            try appState.database.deleteAllData()
+        } catch {
+            problems.append("The recordings database could not be cleared: \(error.localizedDescription)")
+        }
         appState.database.vacuum()
-        appState.todaySummary = nil
-        appState.todayEventCount = 0
+        do {
+            try MullDirectory.deleteEverything()
+        } catch {
+            problems.append("The ~/mull folder could not be removed: \(error.localizedDescription)")
+        }
+        appState.todayEventCount = appState.database.eventCountToday()
+        appState.loadTodaySummary()
         appState.loadRecentSummaries()
-        try? MullDirectory.deleteEverything()
-        refresh()
+        cleanupProblem = problems.isEmpty ? nil : problems.joined(separator: " ")
+        Task { await refresh() }
     }
 }
 

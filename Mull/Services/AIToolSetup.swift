@@ -30,9 +30,13 @@ struct AIToolSetup {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let fm = FileManager.default
 
+        // Every caller below is asking about a directory — a config folder, or an
+        // .app bundle, which is one. The `isDir` flag was filled in and then never
+        // read, so this was `fileExists` under another name and a stray plain file
+        // named `.cursor` or `Cursor.app` counted as the tool being installed.
         func dirExists(_ url: URL) -> Bool {
             var isDir: ObjCBool = false
-            return fm.fileExists(atPath: url.path, isDirectory: &isDir)
+            return fm.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
         }
 
         // Claude Code — user-scope MCP lives in ~/.claude.json
@@ -40,16 +44,29 @@ struct AIToolSetup {
         let claudeCodeDetected = fm.fileExists(atPath: claudeCode.path)
             || dirExists(home.appendingPathComponent(".claude"))
 
+        /// An app bundle can live somewhere other than /Applications — ~/Applications,
+        /// a Homebrew cask prefix, a second volume. Detection used to check the one
+        /// fixed path, and a miss removed the Connect button entirely, leaving no way
+        /// to set up a tool the user plainly has.
+        /// Kept to plain path checks rather than LaunchServices: this file is also
+        /// compiled into the headless MullMCP binary, which links no AppKit.
+        func appInstalled(named name: String) -> Bool {
+            let roots = ["/Applications", "/System/Applications",
+                         home.appendingPathComponent("Applications").path,
+                         "/opt/homebrew/Caskroom"]
+            return roots.contains { dirExists(URL(fileURLWithPath: $0).appendingPathComponent(name)) }
+        }
+
         // Claude Desktop — ~/Library/Application Support/Claude/claude_desktop_config.json
         let desktopCfg = home.appendingPathComponent(
             "Library/Application Support/Claude/claude_desktop_config.json")
         let desktopDetected = dirExists(desktopCfg.deletingLastPathComponent())
-            || dirExists(URL(fileURLWithPath: "/Applications/Claude.app"))
+            || appInstalled(named: "Claude.app")
 
         // Cursor — ~/.cursor/mcp.json
         let cursorCfg = home.appendingPathComponent(".cursor/mcp.json")
         let cursorDetected = dirExists(home.appendingPathComponent(".cursor"))
-            || dirExists(URL(fileURLWithPath: "/Applications/Cursor.app"))
+            || appInstalled(named: "Cursor.app")
 
         return [
             AITool(id: "claude-code", name: "Claude Code",
@@ -140,7 +157,7 @@ struct AIToolSetup {
         guard let data = try? JSONSerialization.data(
                 withJSONObject: fragment, options: [.prettyPrinted, .sortedKeys]),
               let text = String(data: data, encoding: .utf8) else {
-            return .failure(SetupError.badResponse)
+            return .failure(SetupError.badResponse())
         }
         return .success(text)
     }
@@ -208,7 +225,11 @@ struct AIToolSetup {
         let stdin = Pipe(), stdout = Pipe()
         proc.standardInput = stdin
         proc.standardOutput = stdout
-        proc.standardError = Pipe()   // discard server's stderr log
+        // The server's stderr is where a startup crash says what went wrong. It
+        // used to be discarded, so "cannot open its database" reached the user as
+        // the blank "Server did not respond".
+        let stderr = Pipe()
+        proc.standardError = stderr
 
         do { try proc.run() } catch { return .failure(error) }
 
@@ -237,14 +258,22 @@ struct AIToolSetup {
         proc.terminate()
         proc.waitUntilExit()   // reap the child; terminate() alone leaves a zombie
 
-        if timedOut { return .failure(SetupError.timedOut) }
+        // Whatever the server complained about on its way down, minus the routine
+        // "Server started" line it prints when healthy.
+        let complaint = String(data: stderr.fileHandleForReading.availableData, encoding: .utf8)?
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.contains("Server started") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .last
+
+        if timedOut { return .failure(SetupError.timedOut(detail: complaint)) }
         let received = box.firstLine()
 
         guard let obj = try? JSONSerialization.jsonObject(with: received) as? [String: Any],
               let result = obj["result"] as? [String: Any],
               let info = result["serverInfo"] as? [String: Any],
               (info["name"] as? String) == "mull" else {
-            return .failure(SetupError.badResponse)
+            return .failure(SetupError.badResponse(detail: complaint))
         }
         return .success("Connected to mull's MCP server.")
     }
@@ -307,7 +336,12 @@ struct AIToolSetup {
     }
 
     enum SetupError: LocalizedError {
-        case unsupportedTool, binaryNotFound, timedOut, badResponse
+        case unsupportedTool, binaryNotFound
+        /// `detail` is the server's last stderr line, when it left one. Without it
+        /// a server that died on startup — an unwritable database, a missing
+        /// dependency — reported only that it hadn't answered.
+        case timedOut(detail: String? = nil)
+        case badResponse(detail: String? = nil)
         case configUnreadable(String)
         case backupFailed(String)
         case notConfigured(String)
@@ -315,8 +349,12 @@ struct AIToolSetup {
             switch self {
             case .unsupportedTool: "Unsupported AI tool"
             case .binaryNotFound:  "MullMCP binary not found — build/install it first"
-            case .timedOut:        "Server did not respond"
-            case .badResponse:     "Unexpected response from server"
+            case .timedOut(let detail):
+                detail.map { "Server did not respond. It said: \($0)" }
+                    ?? "Server did not respond"
+            case .badResponse(let detail):
+                detail.map { "Unexpected response from server. It said: \($0)" }
+                    ?? "Unexpected response from server"
             case .notConfigured(let name):
                 "mull isn't in \(name)'s MCP config — nothing to remove."
             case .configUnreadable(let name):

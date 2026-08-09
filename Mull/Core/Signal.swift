@@ -22,6 +22,15 @@ enum Signal {
         if t.contains("error") || t.contains("exception") || t.contains("failed")
             || t.contains("traceback") || t.contains("fatal") { return "error" }
         if t.contains("http://") || t.contains("https://") { return "web" }
+        // A commitment, not a reminder. `salience(for:)` has scored "decision" at
+        // note tier since it was written, but `kind` never returned it — the branch
+        // was unreachable and SELECTION-LAYER §1's "type(決定・エラー・…)" was
+        // aspirational. Gated to authored channels so a window title containing
+        // 「方針」 is not read as an act; placed above the note heuristic because
+        // 「この方針でやってください」 is a decision phrased as an instruction.
+        if eventType == .clipboard || eventType == .keystroke, looksLikeDecision(text) {
+            return "decision"
+        }
         // Self-authored note: a Japanese imperative / instruction to oneself.
         if t.contains("して") || t.contains("ください") || t.contains("したい") { return "note" }
         if t.contains("func ") || t.contains("{") || t.contains("=>") || t.contains("();") { return "code" }
@@ -31,6 +40,22 @@ enum Signal {
         }
         if eventType == .clipboard { return "note" }
         return "activity"
+    }
+
+    /// "A choice was made." The single source for both axes: the content axis
+    /// (`kind` → `"decision"`) and the MODE axis (`Mode.decide`), which used to
+    /// hold a private copy of this vocabulary.
+    ///
+    /// Deliberately narrow and trade-neutral — no tool, framework, or domain
+    /// words — so it fires the same for a position size, a contract clause, and a
+    /// refactor. Growing this list with per-occupation vocabulary is the failure
+    /// mode to avoid (HARNESS.md 第I部 原理1).
+    static func looksLikeDecision(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let en = ["decided", "let's go with", "we'll use", "going with",
+                  "rejected", "instead of"]
+        let ja = ["の方がいい", "にする", "やめる", "採用", "却下", "方針"]
+        return en.contains { lower.contains($0) } || ja.contains { text.contains($0) }
     }
 
     static func salience(for type: String) -> Double {

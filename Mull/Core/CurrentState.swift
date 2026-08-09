@@ -28,9 +28,11 @@ struct CurrentState {
         }
 
         let activeApp = events.last(where: { $0.appName != nil })?.appName
-        let activeTitle = events.last { $0.eventType == .screenText }
-            .flatMap(meaningfulText)
-        let activeEntity = entity(from: activeTitle)
+        let titleEvent = events.last { $0.eventType == .screenText }
+        let activeTitle = titleEvent.flatMap(meaningfulText)
+        // Judge the title against the app that emitted it (not `activeApp`, which
+        // may be a later event): a Finder or browser title is content, not a project.
+        let activeEntity = Entity.from(activeTitle, app: titleEvent?.appName)
 
         return CurrentState(
             activeApp: activeApp,
@@ -41,15 +43,23 @@ struct CurrentState {
         )
     }
 
-    /// One-line text form for an MCP `whats_active_now` response.
+    /// Text form for an MCP `whats_active_now` response and for the `now.md` /
+    /// `01_now` sections that write the same anchor down.
+    ///
+    /// A nested list rather than `Active:` / `Recently:` label lines. Those were
+    /// prose to every markdown reader — indistinguishable from body text in the
+    /// same file whose lower half used real `##` headings — and they carried no
+    /// level, so this fragment could not be embedded anywhere without inventing
+    /// one. A list nests under whatever heading the host supplies and needs none
+    /// of its own.
     func summary() -> String {
         var lines: [String] = []
-        if let entity = activeEntity { lines.append("Active: \(entity)") }
-        else if let title = activeTitle { lines.append("Active: \(title)") }
-        if let app = activeApp { lines.append("App: \(app)") }
+        if let entity = activeEntity { lines.append("- **Active:** \(MarkdownDoc.inline(entity))") }
+        else if let title = activeTitle { lines.append("- **Active:** \(MarkdownDoc.inline(title))") }
+        if let app = activeApp { lines.append("- **App:** \(MarkdownDoc.inline(app))") }
         if !recentActions.isEmpty {
-            lines.append("Recently:")
-            lines.append(contentsOf: recentActions.map { "- \($0)" })
+            lines.append("- **Recently:**")
+            lines.append(contentsOf: recentActions.map { "  - \(MarkdownDoc.inline($0))" })
         }
         return lines.isEmpty ? "(no recent activity)" : lines.joined(separator: "\n")
     }

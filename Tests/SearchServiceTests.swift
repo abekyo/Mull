@@ -10,9 +10,11 @@ import XCTest
 ///
 /// Safety: the one test that touches storage uses `DatabaseService.temporary()` (a
 /// throwaway DB in a unique temp dir). The user's real recorded history is never
-/// opened. `CalendarService` is never constructed — its initialiser asks EventKit
-/// for access — so the calendar half is exercised through `timeline(events:
-/// calendarEvents:)` with hand-built `CalendarEvent`s instead.
+/// opened. `CalendarService` is never constructed — not because construction
+/// prompts (it no longer does; it only reads the existing EventKit status) but
+/// because these tests have no business near the user's real calendar — so the
+/// calendar half is exercised through `timeline(events: calendarEvents:)` with
+/// hand-built `CalendarEvent`s instead.
 ///
 /// Determinism: fixtures use fixed timestamps built from `DateComponents`, so the
 /// results do not depend on the wall clock or the time zone. `SearchRange` is the

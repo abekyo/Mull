@@ -200,14 +200,29 @@ final class AppState: ObservableObject {
                     title: "Tonight's summary is ready ☽",
                     body: summary.preview
                 )
+                // The summary exists either way, so this is not a failure — but a
+                // user who switched a provider on and got the rule-based version
+                // should not have to compare prose styles to find that out.
+                let configured = UserDefaults.standard.string(forKey: "llmProvider") ?? "off"
+                if summary.llmProvider == "rule-based", configured != "off" {
+                    self.postNotice(
+                        "Tonight's summary was written without the model",
+                        detail: "mull couldn't reach \(configured), so it fell back to its own rule-based summary. Settings › AI can test the connection.",
+                        isProblem: true)
+                }
             }
         }
         mullEngine.onSummaryFailed = { [weak self] error in
             Task { @MainActor [weak self] in
-                self?.sendNotification(
+                guard let self else { return }
+                // Both channels: the notification may be refused by macOS, and
+                // this is the one message that explains a missing summary.
+                self.sendNotification(
                     title: "Summary failed",
                     body: error.localizedDescription
                 )
+                self.postNotice("Tonight's summary didn't run",
+                                detail: error.localizedDescription, isProblem: true)
             }
         }
 
@@ -254,6 +269,24 @@ final class AppState: ObservableObject {
     /// first now; these fill in behind it, and each piece already tolerates arriving
     /// a moment late (the views observe @Published state).
     private func startDeferredWork() {
+        // A database running from a temporary file loses everything on restart,
+        // and the only place that said so was the Home tab — which a menu-bar
+        // user may never open. Say it once, in the channel that persists until
+        // dismissed.
+        if let reason = database.fallbackReason {
+            postNotice(database.isFallback ? "Today is being kept somewhere temporary"
+                                           : "mull had trouble opening its store",
+                       detail: reason, isProblem: true)
+        }
+
+        // Mail capture that stops working months after it was switched on used to
+        // be visible only to someone who happened to open Settings › Data.
+        EmailService.onProblemAppeared = { problem in
+            Task { @MainActor [weak self] in
+                self?.postNotice("Email capture stopped", detail: problem.message, isProblem: true)
+            }
+        }
+
         // Scaffold the v3 folder ontology (idempotent, non-destructive) and apply
         // retention — both are file/DB work with no first-frame dependency.
         let db = database
@@ -269,6 +302,9 @@ final class AppState: ObservableObject {
         }
 
         // Pull from configured sources every 30 min (no-op if none configured).
+        ingestion.onFailure = { [weak self] connector, error in
+            self?.postNotice("“\(connector)” stopped pulling", detail: error, isProblem: true)
+        }
         ingestion.schedule(every: 1800)
 
         // Auto-start recording if onboarding is already done.
@@ -326,11 +362,22 @@ final class AppState: ObservableObject {
         Task.detached {
             // Services are passed in, not stashed in LiveContextGenerator statics —
             // those assignments were a retain/release race across detached tasks.
-            try? LiveContextGenerator.generate(analytics: analyticsRef, database: db,
-                                               calendar: calendarRef, email: emailRef)
+            // `lastMeFileUpdate` is the freshness clock the UI shows and the 60s
+            // gate reads. Advancing it after a failed generation claimed the
+            // files had just been refreshed when nothing had been written —
+            // exactly the state (an unwritable ~/mull) where that matters most.
+            var generated = true
+            do {
+                try LiveContextGenerator.generate(analytics: analyticsRef, database: db,
+                                                  calendar: calendarRef, email: emailRef)
+            } catch {
+                generated = false
+            }
+            if MullDirectory.status != .ready { generated = false }
+            let didGenerate = generated
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.lastMeFileUpdate = Date()
+                if didGenerate { self.lastMeFileUpdate = Date() }
                 self.contextGenerationInFlight = false
             }
         }
@@ -398,7 +445,15 @@ final class AppState: ObservableObject {
         // the system dialog instead of silently capturing half-dead — otherwise
         // titles come back nil and the loop has no material. Harmless when already
         // trusted (the dialog only appears when not).
-        if !permissions.accessibilityGranted {
+        //
+        // Once only. Recording starts on every launch, so this fired the system
+        // Accessibility dialog at every launch for anyone who had deliberately
+        // declined — an app that keeps asking after being told no is not asking,
+        // it is nagging. Settings › Data and the menu bar banner both still offer
+        // the grant whenever the user wants it.
+        if !permissions.accessibilityGranted,
+           !UserDefaults.standard.bool(forKey: "askedAccessibilityOnStart") {
+            UserDefaults.standard.set(true, forKey: "askedAccessibilityOnStart")
             permissions.promptAccessibility()
         }
     }
@@ -442,6 +497,84 @@ final class AppState: ObservableObject {
         recorder.resume()
         isPaused = false
         pauseEndsAt = nil
+    }
+
+    // MARK: - Forget (privacy — "that never happened")
+
+    /// The cloud provider currently switched on, in the name a person would
+    /// recognise, or `nil` when nothing leaves this Mac ("off", "ollama", "local").
+    ///
+    /// One definition, used by both the Data tab's privacy notice and the forget
+    /// dialog. Two spellings of "is this provider a cloud?" is how one surface
+    /// ends up promising local-only while the other is uploading.
+    static func cloudProviderName(for provider: String) -> String? {
+        switch provider {
+        case "claude": "Anthropic"
+        case "openai": "OpenAI"
+        case "gemini": "Google"
+        default: nil
+        }
+    }
+
+    var cloudProviderName: String? {
+        Self.cloudProviderName(for: UserDefaults.standard.string(forKey: "llmProvider") ?? "off")
+    }
+
+    /// Survey what forgetting the last `minutes` would take. Read-only — this is
+    /// what the confirmation dialog is built from.
+    func forgetPlan(lastMinutes minutes: Int) -> ForgetService.Plan {
+        let end = Date()
+        let start = end.addingTimeInterval(-Double(minutes) * 60)
+        return forgetPlan(for: DateInterval(start: start, end: end))
+    }
+
+    func forgetPlan(for interval: DateInterval) -> ForgetService.Plan {
+        ForgetService.plan(interval: interval, database: database,
+                           cloudProvider: cloudProviderName)
+    }
+
+    /// Perform a planned forget. Returns the plan with `retainedBlocks` filled in,
+    /// so the caller can report what mull declined to delete — and with
+    /// `failureMessage` set when the forget did not fully happen, so the caller
+    /// can say so where the user is looking.
+    ///
+    /// The context files are regenerated immediately afterwards rather than left
+    /// to the 60s tick: `forget` retracts mull's blocks, and this rebuilds what is
+    /// still true from the post-delete database. Doing it in that order also
+    /// settles a race — a generation pass already in flight when the rows went may
+    /// land with pre-delete content, and this pass overwrites it. Regeneration
+    /// runs on failure too: whatever state the database is in now is the state
+    /// the context files should describe.
+    @discardableResult
+    func forget(_ plan: ForgetService.Plan) -> ForgetService.Plan {
+        var result: ForgetService.Plan
+        do {
+            result = try ForgetService.forget(plan, database: database)
+        } catch {
+            result = plan
+            result.failedLayer = (error as? ForgetService.LayerError)?.layer ?? "its records"
+        }
+        regenerateContextNow()
+        loadTodaySummary()
+        loadRecentSummaries()
+        Task.detached { [database] in
+            let count = database.eventCountToday()
+            let bytes = database.storageBytesToday()
+            await MainActor.run { [weak self] in
+                self?.todayEventCount = count
+                self?.todayStorageBytes = bytes
+            }
+        }
+        // Success stays silent by design — the event count dropping is the
+        // confirmation. Failure is the one outcome this feature must never keep
+        // to itself: a forget that quietly didn't happen is exactly the "success
+        // it did not achieve" the service's header warns about. The notice bar
+        // is the app-wide record; callers with their own surface (the menu bar
+        // panel, Settings) additionally show the same message where the user is.
+        if let problem = result.failureMessage {
+            postNotice("Forget didn't finish", detail: problem, isProblem: true)
+        }
+        return result
     }
 
     // MARK: - App exclusion (privacy — "don't record in these apps")
@@ -537,7 +670,19 @@ final class AppState: ObservableObject {
                 return
             }
             // Already on the main actor (AppState is @MainActor) — no await needed.
-            TextInjector.inject(contextText)
+            // The synthetic ⌘V needs Accessibility; without it nothing is pasted
+            // and saying otherwise would be mull reporting work it didn't do. The
+            // context is put on the clipboard instead, so the user can finish the
+            // job themselves rather than being left with nothing.
+            guard TextInjector.inject(contextText) else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(contextText, forType: .string)
+                postNotice(
+                    "Couldn't paste it for you",
+                    detail: "Pasting into another app needs Accessibility, which mull doesn't have. Your context is on the clipboard — press ⌘V. Settings › Data can turn the permission on.",
+                    isProblem: true)
+                return
+            }
             sendNotification(
                 title: "Context injected",
                 body: "Your AI context has been pasted. Clipboard restored."
@@ -577,13 +722,17 @@ final class AppState: ObservableObject {
         + "Leave it running a little longer, or check that recording is on in Live."
 
     /// Open the main mull window from anywhere via ⌘+Shift+D
+    ///
+    /// Asks the object that owns the window rather than hunting `NSApp.windows` for
+    /// one titled "mull". No window has ever had that title — the main window is
+    /// created with `title = ""` and `titleVisibility = .hidden`, because its title
+    /// bar is meant to be empty — so the lookup matched nothing and this did nothing
+    /// at all, every time, whenever the window had been closed. Which is precisely
+    /// when someone reaches for it.
     func openMainWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        // Open the main window by its ID
-        if let window = NSApp.windows.first(where: { $0.title == "mull" }) {
-            window.makeKeyAndOrderFront(nil)
-        }
+        AppDelegate.shared?.showMainWindow()
     }
 
     // MARK: - Data Loading

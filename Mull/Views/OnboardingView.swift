@@ -1,6 +1,13 @@
 import SwiftUI
 import ApplicationServices
 
+// Onboarding page gutter — the one horizontal margin every step shares, so the
+// text columns line up as the steps advance. It was the literal 40 in eighteen
+// places; a nineteenth typed as 32 or 48 would have gone unnoticed.
+extension DS {
+    fileprivate static let onboardingGutter: CGFloat = 40
+}
+
 /// Onboarding — the first 2 minutes that define whether the user keeps the app.
 ///
 /// Flow:
@@ -17,10 +24,22 @@ struct OnboardingView: View {
     @State private var step: OnboardingStep
     @State private var permissionCheckTimer: Timer?
     @State private var showHowTo = false
-    // Whether mull has already shown the system's own request for each permission.
-    // Drives the second tap, which is the only one that opens System Settings.
-    @State private var askedAccessibility = false
-    @State private var askedInputMonitoring = false
+    // Ticks of the permission poller spent waiting after a system prompt has been
+    // shown but before the grant lands. That gap is the System Settings round trip
+    // — find mull in the list, flip the switch, maybe relaunch — and it is where
+    // people get lost, so after a few of these the instructions open themselves.
+    @State private var stuckTicks = 0
+    // Opened automatically at most once. Closing the guide again is the user's
+    // decision, not a state for the poller to keep overriding.
+    @State private var autoOpenedHowTo = false
+    // Whether mull has already put the system's own request for each permission in
+    // front of the user. Drives the second tap, which is the only one that opens
+    // System Settings. Persisted, not @State: granting Input Monitoring makes macOS
+    // offer to quit and reopen the app, and after that relaunch a reset flag
+    // re-labelled the button "Allow" — a tap that did nothing visible, because TCC
+    // shows each prompt once and the decision was already on file.
+    @AppStorage("onboardingAskedAccessibility") private var askedAccessibility = false
+    @AppStorage("onboardingAskedInputMonitoring") private var askedInputMonitoring = false
     @State private var showCopiedConfirmation = false
     // Loaded when the profile step appears, not in the initialiser: a default
     // expression runs on every re-init of the struct, and this one reads a file.
@@ -44,6 +63,10 @@ struct OnboardingView: View {
     @State private var revealedFactCount = 0
     @State private var factRevealTimer: Timer?
     @State private var coldReadTask: Task<Void, Never>?
+    /// Whether a read is running right now. The payload pane needs it to tell "still
+    /// looking" from "looked, and there was nothing" — the second is a statement about
+    /// the user's day and must not be made early.
+    @State private var coldReadInFlight = false
 
     // The exact text "Copy my context" would put on the clipboard, shown before it
     // goes anywhere (根拠を見せる — DESIGN-NORTHSTAR §3.5).
@@ -53,6 +76,11 @@ struct OnboardingView: View {
     /// live read and the stated profile. The screen says so rather than letting
     /// "written from what mull has seen so far" imply a history that isn't there.
     @State private var previewIsStarterOnly = false
+    /// The recorded half of the payload, kept so a cold read that arrives after the
+    /// database pass can be folded in without repeating it. `nil` means "not composed
+    /// yet"; `""` means "composed, and there is nothing recorded" — a distinction the
+    /// pane depends on.
+    @State private var recordedContext: String?
 
     // Step 6 — the AI clients found on this Mac, and the one awaiting consent.
     @State private var aiTools: [AIToolSetup.AITool] = []
@@ -96,7 +124,16 @@ struct OnboardingView: View {
                minHeight: 560, idealHeight: 560, maxHeight: .infinity)
         // Paper, not glass: .ultraThinMaterial is the cold-tech surface the design
         // north star bans on anything a person reads (DESIGN-NORTHSTAR / CLAUDE.md §4).
-        .background(DS.canvas)
+        // The paper is watermarked with the icon's rings in the top-right corner —
+        // every onboarding page is a leaf of the same stationery.
+        .background(
+            ZStack(alignment: .topTrailing) {
+                DS.canvas
+                StippleRings(center: CGPoint(x: 0.94, y: 0.04))
+                    .opacity(0.05)
+            }
+            .ignoresSafeArea()
+        )
         .interactiveDismissDisabled()
         // The poller belongs to the permissions step alone. It used to keep running
         // after "Skip", so granting a permission ten minutes later yanked the user
@@ -124,15 +161,17 @@ struct OnboardingView: View {
         VStack(spacing: DS.xl) {
             Spacer()
 
-            // The mark, drawn rather than lit: a hairline circle and the moon in
-            // tobacco. A gradient blob with a glow behind it is the AI-startup
-            // icon treatment, and it is not what this app is.
+            // The mark, drawn rather than lit: the moon in tobacco, haloed by the
+            // app icon's stipple rings. A gradient blob with a glow behind it is
+            // the AI-startup icon treatment, and it is not what this app is.
             ZStack {
-                Circle()
-                    .strokeBorder(DS.moon.opacity(0.3), lineWidth: 1)
-                    .frame(width: 72, height: 72)
+                StippleRings(center: CGPoint(x: 0.5, y: 0.5),
+                             startR: 0.36, gap: 0.11, maxR: 0.48,
+                             dotR: 0.012, dotGap: 0.052, skip: 0.12)
+                    .frame(width: 96, height: 96)
+                    .opacity(0.45)
                 Image(systemName: "moon.stars")
-                    .font(.system(size: 30, weight: .light))
+                    .font(DS.iconHero.weight(.light))
                     .foregroundStyle(DS.moon)
             }
 
@@ -154,9 +193,9 @@ struct OnboardingView: View {
             // what gets captured, and it belongs on the screen *before* the permission
             // dialog, not in a grey sub-caption underneath the button that triggers it.
             VStack(alignment: .leading, spacing: DS.md) {
-                valueProp(icon: "keyboard", text: "Records what you type, copy, and have open")
-                valueProp(icon: "doc.text", text: "Keeps the day in plain markdown files you own")
-                valueProp(icon: "arrow.up.doc", text: "Hands that context to an AI when you ask")
+                valueProp(text: "Records what you type, copy, and have open")
+                valueProp(text: "Keeps the day in plain markdown files you own")
+                valueProp(text: "Hands that context to an AI when you ask")
             }
             .padding(.horizontal, 48)
 
@@ -164,7 +203,7 @@ struct OnboardingView: View {
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkDim)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, DS.onboardingGutter)
 
             Spacer()
 
@@ -183,7 +222,7 @@ struct OnboardingView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .padding(.bottom, DS.xl)
         }
     }
@@ -194,9 +233,8 @@ struct OnboardingView: View {
         VStack(spacing: DS.lg) {
             Spacer()
 
-            Image(systemName: "hand.raised.fill")
-                .font(.system(size: 36))
-                .foregroundStyle(DS.moon)
+            // A fleuron, not a raised hand: the step is an ask, not a warning.
+            StippleMark(dot: 5)
 
             Text("Two permissions needed")
                 .font(DS.headlineFont)
@@ -215,10 +253,48 @@ struct OnboardingView: View {
             // couldn't help. Both rows used to lead with (or straight to) the
             // Settings pane, which is the slowest path and, for Input Monitoring,
             // often a pane mull was not even listed in.
+            //
+            // Input Monitoring leads, and each detail line says what its absence
+            // costs. The rows used to sit as equals ("Read window titles" / "Record
+            // keyboard input") with nothing to say that one of them is the
+            // permission the product cannot work without, or which to start with.
             VStack(alignment: .leading, spacing: DS.md) {
                 permissionRow(
+                    name: "Input Monitoring",
+                    detail: "Record what you type — without this, mull only keeps what you copy",
+                    granted: appState.permissions.inputMonitoringGranted,
+                    asked: askedInputMonitoring,
+                    action: {
+                        if askedInputMonitoring {
+                            appState.permissions.openInputMonitoringSettings()
+                        } else {
+                            askedInputMonitoring = true
+                            // Creating a real tap is what makes macOS register mull
+                            // in the Input Monitoring list and show its prompt; the
+                            // passive check the app polls with does neither. Without
+                            // this the row dropped the user into a pane where mull
+                            // might not appear at all.
+                            //
+                            // Whether a dialog is coming has to be read BEFORE the
+                            // ask: afterwards the answer is still outstanding and TCC
+                            // says nothing useful. A failed tap does NOT mean "already
+                            // decided" — on a first run it fails *and* raises the
+                            // prompt, so treating failure as "no dialog will appear"
+                            // dropped a whole System Settings window on top of the
+                            // one-click dialog that would have finished the job. That
+                            // is the same race the Accessibility row below was fixed
+                            // to avoid, and it was still live here.
+                            let promptComing = appState.permissions.inputMonitoringPromptAvailable
+                            let alreadyGranted = appState.permissions.requestInputMonitoring()
+                            if !alreadyGranted && !promptComing {
+                                appState.permissions.openInputMonitoringSettings()
+                            }
+                        }
+                    }
+                )
+                permissionRow(
                     name: "Accessibility",
-                    detail: "Read window titles",
+                    detail: "Read window titles, so the record says where you were",
                     granted: appState.permissions.accessibilityGranted,
                     // The prompt and System Settings used to be fired back to back,
                     // so the modal grant dialog and a whole Settings window raced for
@@ -235,27 +311,8 @@ struct OnboardingView: View {
                         }
                     }
                 )
-                permissionRow(
-                    name: "Input Monitoring",
-                    detail: "Record keyboard input",
-                    granted: appState.permissions.inputMonitoringGranted,
-                    asked: askedInputMonitoring,
-                    action: {
-                        if askedInputMonitoring {
-                            appState.permissions.openInputMonitoringSettings()
-                        } else {
-                            askedInputMonitoring = true
-                            // Creating a real tap is what makes macOS register mull
-                            // in the Input Monitoring list and show its prompt; the
-                            // passive check the app polls with does neither. Without
-                            // this the row dropped the user into a pane where mull
-                            // might not appear at all.
-                            appState.permissions.requestInputMonitoring()
-                        }
-                    }
-                )
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
 
             if appState.permissions.accessibilityGranted && appState.permissions.inputMonitoringGranted {
                 HStack(spacing: DS.sm) {
@@ -293,7 +350,7 @@ struct OnboardingView: View {
             // it used to mark onboarding *complete*, so mull never asked again: a
             // keystroke recorder that records no keystrokes, permanently.
             VStack(spacing: DS.xs) {
-                Button("Skip for now") {
+                Button("Skip") {
                     stopPermissionPolling()
                     withAnimation { step = .coldRead }
                     startRecordingAndProof()
@@ -306,7 +363,7 @@ struct OnboardingView: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, DS.onboardingGutter)
             }
             .padding(.bottom, DS.sm)
         }
@@ -338,7 +395,7 @@ struct OnboardingView: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, DS.onboardingGutter)
             }
 
             VStack(alignment: .leading, spacing: DS.md) {
@@ -373,7 +430,7 @@ struct OnboardingView: View {
                     coldReadEmptyState
                 }
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .frame(minHeight: 200, alignment: .top)
 
             if hasColdRead, revealedFactCount >= (coldReading?.facts.count ?? 0) {
@@ -381,7 +438,7 @@ struct OnboardingView: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, DS.onboardingGutter)
                     .transition(.opacity)
             }
 
@@ -402,7 +459,7 @@ struct OnboardingView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .padding(.bottom, DS.xl)
         }
         .onAppear { startColdRead() }
@@ -453,7 +510,7 @@ struct OnboardingView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 40)
+                .padding(.horizontal, DS.onboardingGutter)
                 .padding(.vertical, DS.sm)
             }
 
@@ -479,7 +536,7 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .padding(.bottom, DS.lg)
         }
         // Read the saved answers here — the file read happens once, when the step is
@@ -495,9 +552,9 @@ struct OnboardingView: View {
     /// Shown when mull can't see anything yet — honest, and points at the fix.
     private var coldReadEmptyState: some View {
         VStack(spacing: DS.sm) {
-            Image(systemName: "moon.stars")
-                .font(.system(size: 28, weight: .thin))
-                .foregroundStyle(DS.moon.opacity(0.4))
+            StippleRings.roundel()
+                .frame(width: 56, height: 56)
+                .opacity(0.5)
             Text("Nothing to read yet")
                 .font(DS.bodyMedium)
             Text("mull looks at what's open, your calendar and your Mac's own settings. With those unavailable there's nothing to guess from — it starts learning the moment you keep working.")
@@ -523,19 +580,80 @@ struct OnboardingView: View {
         coldReading = nil
         revealedFactCount = 0
 
+        // The calendar ask happens here, not at app launch. This is the screen whose
+        // copy says mull looks at the calendar, so it is the one moment the system's
+        // dialog arrives with its reason already in view. Launching used to fire it
+        // cold from CalendarService's initialiser: a third dialog on a flow that had
+        // just promised two, and a reflexive "Don't Allow" that only System Settings
+        // could undo.
+        //
+        // It runs ALONGSIDE the read, never in front of it. Awaiting the dialog first
+        // put an unbounded modal wait ahead of a read whose entire design is a 2.5s
+        // ceiling ("a short reading, never a hang" — ColdReadService), and a dialog
+        // that surfaced behind the window, or simply wasn't answered, left this screen
+        // on "Looking at what's open…" indefinitely. Worse, Continue is deliberately
+        // never gated: a user who moved on while it hung arrived at the payload screen
+        // with `coldReading` still nil, and on a first run — where the recorded half is
+        // empty by definition — that renders the empty state and a disabled Copy
+        // button, which is precisely the failure ColdReading.contextBlock() exists to
+        // prevent.
+        if appState.calendar.accessState == .notDetermined {
+            appState.calendar.requestAccess { granted in
+                // An answer that lands after the first pass earns a second one, so a
+                // granted calendar still makes it into the reading. A refusal changes
+                // nothing that is on screen: the first pass already said mull can't
+                // see the calendar, and that is still true.
+                if granted { runColdRead() }
+            }
+        }
+        runColdRead()
+    }
+
+    /// Perform the read and show it. Safe to run more than once — a calendar grant
+    /// that arrives after the first pass earns a repeat — and the reveal resumes from
+    /// where it got to rather than replaying the stagger from the top.
+    private func runColdRead() {
+        coldReadTask?.cancel()
+        // Set before the task is created, so a cancelled predecessor can never clear
+        // the flag out from under its replacement: the only path that clears it is a
+        // read that reached the end without being cancelled, and every mutation here
+        // happens on the main actor.
+        coldReadInFlight = true
         coldReadTask = Task { @MainActor in
             let reading = await ColdReadService.read()
             guard !Task.isCancelled else { return }
+            coldReadInFlight = false
             coldReading = reading
-            startFactReveal(count: reading.facts.count)
+            // The answer can arrive after the user has moved on. The facts are still
+            // worth keeping — the payload screen reads `coldReading` — but a reveal
+            // timer ticking against a screen nobody is looking at is not.
+            if step == .coldRead {
+                startFactReveal(count: reading.facts.count, from: revealedFactCount)
+            } else {
+                revealedFactCount = reading.facts.count
+            }
+            // Fold it into the payload screen, which may already have been drawn from
+            // a half-finished pair. No-ops until that screen has composed its recorded
+            // half, and again if the text comes out unchanged.
+            rebuildContextPreview()
         }
     }
 
     /// Fade the observations in one after another. A quick stagger — it is a page
     /// settling, not a reveal being drawn out for effect, and nothing waits on it.
-    private func startFactReveal(count: Int) {
-        guard count > 0 else { return }
-        var index = 0
+    ///
+    /// `from` is how many lines are already on screen. A second pass (the calendar
+    /// answered after the first read) continues from there instead of blanking the
+    /// list and playing the whole stagger again in front of someone who has already
+    /// read it.
+    private func startFactReveal(count: Int, from alreadyShown: Int = 0) {
+        // A later pass can be shorter than an earlier one. Clamp rather than leave the
+        // "that's the whole of it" line keyed to a count the list no longer has.
+        var index = min(alreadyShown, count)
+        revealedFactCount = index
+        guard count > index else { return }
+
+        factRevealTimer?.invalidate()
         factRevealTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { timer in
             guard index < count else {
                 timer.invalidate()
@@ -546,12 +664,12 @@ struct OnboardingView: View {
                 revealedFactCount = index
             }
         }
-        // Show the first line immediately rather than after one tick of dead air.
-        withAnimation(.spring(duration: 0.3)) { revealedFactCount = 1 }
-        index = 1
+        // Show the next line immediately rather than after one tick of dead air.
+        index += 1
+        withAnimation(.spring(duration: 0.3)) { revealedFactCount = index }
     }
 
-    // MARK: - Step 4: Try It
+    // MARK: - Step 5: Try It
 
     /// The first time mull's record leaves the app, the user reads it first.
     ///
@@ -596,7 +714,7 @@ struct OnboardingView: View {
                 .padding(.vertical, 12)
             }
             .buttonStyle(.borderedProminent)
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .disabled((contextPreview ?? "").isEmpty)
 
             if showCopiedConfirmation {
@@ -641,10 +759,19 @@ struct OnboardingView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .padding(.bottom, DS.xl)
         }
-        .onAppear { loadContextPreview() }
+        .onAppear {
+            // Onboarding can resume at any step it was abandoned on, and resuming
+            // straight into this one means the cold read — which only runs on the
+            // screen before — never happened at all. The live half is exactly what
+            // carries this screen on a machine with little or no history, so take it
+            // now rather than showing the empty state to someone who merely quit at
+            // the wrong moment. An already-running read is left to finish.
+            if coldReading == nil && !coldReadInFlight { runColdRead() }
+            loadContextPreview()
+        }
     }
 
     // MARK: - Step 6: Connect
@@ -672,7 +799,7 @@ struct OnboardingView: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, DS.onboardingGutter)
             }
             .padding(.top, DS.lg)
 
@@ -685,7 +812,7 @@ struct OnboardingView: View {
                     }
                 }
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .frame(minHeight: 150, alignment: .top)
 
             if let error = connectError {
@@ -693,7 +820,7 @@ struct OnboardingView: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.paused)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, DS.onboardingGutter)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -701,7 +828,7 @@ struct OnboardingView: View {
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkFaint)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, DS.onboardingGutter)
 
             Spacer(minLength: DS.sm)
 
@@ -714,7 +841,7 @@ struct OnboardingView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .padding(.horizontal, 40)
+            .padding(.horizontal, DS.onboardingGutter)
             .padding(.bottom, DS.xl)
         }
         .onAppear { aiTools = AIToolSetup.detectTools() }
@@ -732,7 +859,7 @@ struct OnboardingView: View {
     private func connectRow(_ tool: AIToolSetup.AITool) -> some View {
         HStack(spacing: DS.md) {
             Image(systemName: tool.configured ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 16))
+                .font(DS.iconBody)
                 .foregroundStyle(tool.configured ? AnyShapeStyle(DS.recording) : AnyShapeStyle(DS.inkFaint))
 
             VStack(alignment: .leading, spacing: DS.hair) {
@@ -757,12 +884,15 @@ struct OnboardingView: View {
 
     private var noToolsState: some View {
         VStack(spacing: DS.sm) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 24, weight: .thin))
-                .foregroundStyle(DS.moon.opacity(0.4))
+            // The empty-state figure everywhere in mull: the icon's rings, sparse
+            // and half-formed. "sparkles" was the one glyph the design can least
+            // afford — the stock shorthand for AI glitter.
+            StippleRings.roundel()
+                .frame(width: 56, height: 56)
+                .opacity(0.5)
             Text("No AI tools found on this Mac")
                 .font(DS.bodyMedium)
-            Text("mull looks for Claude Code, Claude Desktop and Cursor. Install any of them and connect it from Settings → AI — until then, the copy button on the last screen does the same job by hand.")
+            Text("mull looks for Claude Code, Claude Desktop and Cursor. Until one of them is installed, the copy button on the last screen does the same job by hand.")
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkDim)
                 .multilineTextAlignment(.center)
@@ -799,10 +929,13 @@ struct OnboardingView: View {
     private var contextPreviewPane: some View {
         ScrollView {
             Group {
+                // Anything already composed keeps the pane, even while a second read
+                // is running: content → spinner → the same content again is a flicker
+                // that says something is wrong when nothing is.
                 if let preview = contextPreview, !preview.isEmpty {
                     MarkdownView(preview, titleFirstLine: false)
                         .textSelection(.enabled)
-                } else if isLoadingPreview {
+                } else if isLoadingPreview || coldReadInFlight {
                     HStack(spacing: DS.sm) {
                         ProgressView().controlSize(.small)
                         Text("Putting it together…")
@@ -812,9 +945,10 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     // Now reachable only when there is genuinely nothing at all: no
-                    // profile answered, no history, and a cold read that came back
-                    // empty too. Honest — pretending otherwise would be the first
-                    // thing mull made up.
+                    // profile answered, no history, and a cold read that has finished
+                    // and came back empty. Honest — pretending otherwise would be the
+                    // first thing mull made up, and claiming it while the read is
+                    // still running would be the same lie told early.
                     Text("There's nothing to hand over yet — mull has only just started. Come back after a stretch of work and this will have your day in it.")
                         .font(DS.bodyFont)
                         .foregroundStyle(DS.inkDim)
@@ -833,14 +967,45 @@ struct OnboardingView: View {
         )
     }
 
+    /// Compose the recorded half — the expensive one, a database pass — exactly once,
+    /// then derive the pane from it.
+    ///
+    /// Guarded on `recordedContext` rather than on `contextPreview`, because the
+    /// preview is legitimately allowed to be `""` and the old guard could not tell
+    /// "not composed yet" from "composed, and there was nothing". That is the same
+    /// distinction the pane's own empty state turns on.
     private func loadContextPreview() {
-        guard contextPreview == nil, !isLoadingPreview else { return }
+        guard recordedContext == nil, !isLoadingPreview else { return }
         isLoadingPreview = true
         Task { @MainActor in
-            let recorded = await ContextComposer(database: appState.database).compose()
-            previewIsStarterOnly = recorded.isEmpty
-            contextPreview = Self.previewText(recorded: recorded, reading: coldReading)
+            recordedContext = await ContextComposer(database: appState.database).compose()
+            rebuildContextPreview()
             isLoadingPreview = false
+        }
+    }
+
+    /// Re-derive the pane from the two halves that feed it: the recorded context and
+    /// the live read. String assembly only — the database is not touched — so it is
+    /// cheap enough to run again whenever either half changes.
+    ///
+    /// This exists because the halves do not arrive together. The preview used to be
+    /// committed once, at whatever moment the database pass happened to return, and a
+    /// cold read that landed a moment later was simply lost: on a first run, where the
+    /// recorded half is empty by definition, that left the product's headline screen
+    /// showing its empty state with the Copy button disabled. A calendar granted
+    /// mid-flow produces a second, richer reading with the same problem.
+    private func rebuildContextPreview() {
+        guard let recorded = recordedContext else { return }
+        let rebuilt = Self.previewText(recorded: recorded, reading: coldReading)
+        guard rebuilt != contextPreview else { return }
+
+        previewIsStarterOnly = recorded.isEmpty
+        contextPreview = rebuilt
+        // The confirmation says the clipboard holds what is on screen. Once the text
+        // underneath it has changed that is no longer true, so the note goes rather
+        // than sitting beside something it no longer describes.
+        if showCopiedConfirmation {
+            withAnimation(.spring(duration: 0.3)) { showCopiedConfirmation = false }
         }
     }
 
@@ -873,11 +1038,11 @@ struct OnboardingView: View {
 
     // MARK: - Helpers
 
-    private func valueProp(icon: String, text: String) -> some View {
-        HStack(spacing: DS.md) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundStyle(DS.moon)
+    private func valueProp(text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: DS.md) {
+            // The icon motif's mark as the bullet, not a stock glyph per line —
+            // three different symbols were three different voices for one list.
+            StippleMark()
                 .frame(width: 24)
             Text(text)
                 .font(DS.bodyFont)
@@ -892,7 +1057,7 @@ struct OnboardingView: View {
                                asked: Bool, action: @escaping () -> Void) -> some View {
         HStack(spacing: DS.md) {
             Image(systemName: granted ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 16))
+                .font(DS.iconBody)
                 .foregroundStyle(granted ? AnyShapeStyle(DS.recording) : AnyShapeStyle(DS.inkFaint))
 
             VStack(alignment: .leading, spacing: DS.hair) {
@@ -935,13 +1100,14 @@ struct OnboardingView: View {
         .padding(DS.md)
         .background(DS.surface)
         .clipShape(RoundedRectangle(cornerRadius: DS.radiusSm))
-        .padding(.horizontal, 40)
+        .padding(.horizontal, DS.onboardingGutter)
     }
 
     // MARK: - Actions
 
     private func startPermissionPolling() {
         stopPermissionPolling()
+        stuckTicks = 0
         permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
             Task { @MainActor in
                 // The user may have moved on (Skip, or a granted-then-advanced race)
@@ -950,10 +1116,28 @@ struct OnboardingView: View {
                 appState.permissions.checkAll()
                 if appState.permissions.accessibilityGranted && appState.permissions.inputMonitoringGranted {
                     stopPermissionPolling()
-                    // Auto-advance after 1 second
+                    // Let the two ticks register as granted before moving on, then
+                    // advance — but only from the step that scheduled this. The tick
+                    // above guards on `step` and this delayed half did not, so a user
+                    // who tapped Skip and then Continue inside the one-second window
+                    // was dragged back to .coldRead from wherever they had reached.
+                    // Skip starts recording on its own, so there is nothing to do here
+                    // but stand down.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        guard step == .permissions else { return }
                         withAnimation(.spring(duration: 0.3)) { step = .coldRead }
                         startRecordingAndProof()
+                    }
+                } else if askedAccessibility || askedInputMonitoring {
+                    // A prompt has been faced and the grant still hasn't arrived:
+                    // the user is somewhere in the Settings round trip. The guide
+                    // used to sit collapsed behind "How do I do this?" — the person
+                    // who needs it most discovers it only after being lost. ~9s of
+                    // waiting is that person.
+                    stuckTicks += 1
+                    if stuckTicks >= 6 && !autoOpenedHowTo && !showHowTo {
+                        autoOpenedHowTo = true
+                        withAnimation { showHowTo = true }
                     }
                 }
             }

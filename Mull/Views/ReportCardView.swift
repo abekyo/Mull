@@ -63,6 +63,10 @@ struct ReportCardView: View {
     @State private var autosavedAt: Date?
     /// An unsaved edit found on disk at launch, waiting to be resumed or let go.
     @State private var recovered: String?
+    /// The day this edit began, fixed for its whole length. Reading the clock afresh
+    /// on each autosave meant an edit running past midnight scattered itself across
+    /// two recovery files, only one of which anything ever cleaned up.
+    @State private var editingDay = Date()
 
     private var writer: ReportWriter { ReportWriter(database: appState.database) }
 
@@ -129,12 +133,9 @@ struct ReportCardView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(DS.inkFaint)
-                    .help(approved ? "Replace your kept report with a new draft"
+                    .help(approved ? "Asks first, then replaces your kept report with a new draft"
                                    : "Re-draft in my voice")
                     .accessibilityLabel("Re-draft report")
-                    .accessibilityHint(approved
-                        ? "Asks first, then replaces your kept report with a new draft"
-                        : "Writes today's report again in your voice")
                 }
             }
 
@@ -230,7 +231,7 @@ struct ReportCardView: View {
                                     .font(DS.captionFont)
                             }
                             .buttonStyle(.plain).foregroundStyle(DS.moon)
-                            .help("Save today's report as written — it becomes tomorrow's voice sample")
+                            .help("Kept as written, it becomes tomorrow's voice sample")
                         } else {
                             Label("Kept", systemImage: "checkmark.circle")
                                 .font(DS.captionFont)
@@ -258,7 +259,7 @@ struct ReportCardView: View {
                     }
                 } else if !isLLMOff {
                     VStack(alignment: .leading, spacing: DS.sm) {
-                        Text("Let your understudy draft today's report in your voice.")
+                        Text("Your understudy can draft it from what you did today.")
                             .font(DS.bodyFont).foregroundStyle(DS.inkDim)
                         Button { generate() } label: {
                             Label("Write today's report", systemImage: "square.and.pencil")
@@ -270,6 +271,14 @@ struct ReportCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The rings as stationery watermark: this card is the understudy's letter,
+        // and the letterhead is the record it was drafted from. Held at a whisper
+        // so the report's own words stay the loudest thing on the paper.
+        .background(
+            StippleRings(center: CGPoint(x: 0.9, y: 0.1))
+                .opacity(0.06)
+                .clipped()
+        )
         .mullCard()
         .confirmationDialog(
             "Replace your kept report with a new draft?",
@@ -414,7 +423,14 @@ struct ReportCardView: View {
 
         // An autosaved edit outranks nothing on screen — it is *offered*, not
         // applied. Identical text means the edit did land before the interruption.
-        if let parked = MullDirectory.read(editBackupPath(for: Date()))?
+        //
+        // Whichever day it was parked on, not today's. Every read, write and cleanup
+        // used to call `editBackupPath(for: Date())` independently, so an edit
+        // autosaved at 23:59 and interrupted at 00:03 was looked for under the *next*
+        // day's name and never found again: the words sat on disk in a file nothing
+        // would ever open, under a card that promises not to lose one.
+        if let path = parkedEdits().first,
+           let parked = MullDirectory.read(path)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !parked.isEmpty,
            parked != (draft ?? "") {
@@ -424,9 +440,20 @@ struct ReportCardView: View {
         }
     }
 
+    /// Every parked edit on disk, newest first. `yyyy-MM-dd-editing.md` in POSIX
+    /// order means sorting the names sorts the days.
+    private func parkedEdits() -> [String] {
+        MullDirectory.markdownFiles(in: "reports/.drafts")
+            .filter { $0.hasSuffix("-editing.md") }
+            .sorted(by: >)
+    }
+
     private func beginEditing(_ text: String) {
         buffer = text
         baseline = text
+        // Pinned for the length of this edit, so one sitting writes one recovery
+        // file however long it runs.
+        editingDay = Date()
         autosavedAt = nil
         recovered = nil
         editing = true
@@ -460,17 +487,22 @@ struct ReportCardView: View {
         guard editing else { return }
         autosaveTask?.cancel()
         let text = buffer
+        let day = editingDay
         autosaveTask = Task {
             try? await Task.sleep(for: .milliseconds(700))
             guard !Task.isCancelled else { return }
-            MullDirectory.write(text, to: editBackupPath(for: Date()))
+            MullDirectory.write(text, to: editBackupPath(for: day))
             guard !Task.isCancelled else { return }
             await MainActor.run { autosavedAt = Date() }
         }
     }
 
+    /// Clear every parked edit, not only the one named after today. Only one edit
+    /// can be in progress, so anything else on disk is an orphan — and clearing by
+    /// today's name alone is what stranded the file an edit across midnight left
+    /// behind.
     private func clearBackup() {
-        try? FileManager.default.removeItem(at: MullDirectory.url(for: editBackupPath(for: Date())))
+        for path in parkedEdits() { MullDirectory.delete(path) }
     }
 
     /// Confirmed re-draft: step the approved copy off disk first, so a reload cannot
@@ -557,7 +589,11 @@ struct ReportCardView: View {
                 // The previous draft is untouched and comes straight back — a failed
                 // re-draft must never cost the user the text they already had.
                 await MainActor.run {
-                    self.error = error.localizedDescription
+                    // Through the same translator chat uses. This card used to
+                    // print the provider's raw text, so a 401 arrived on the Home
+                    // screen as a JSON blob and a spent token budget as advice to
+                    // raise `maxTokens` — neither of which is the reader's to act on.
+                    self.error = LLMFailure.explain(error).text
                     streaming = nil
                     loading = false
                 }

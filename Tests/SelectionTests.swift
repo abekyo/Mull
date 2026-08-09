@@ -51,11 +51,121 @@ final class SelectionTests: XCTestCase {
         _ events: [RecordingEvent],
         query: String = "",
         entity: String? = nil,
+        anchor: String? = nil,
         type: String? = nil,
         limit: Int = 8
     ) -> [Selection.Result] {
-        Selection.rank(events: events, query: query, entity: entity, type: type,
-                       now: now, since: window, limit: limit)
+        Selection.rank(events: events, query: query, entity: entity, anchor: anchor,
+                       type: type, now: now, since: window, limit: limit)
+    }
+
+    private func slice(
+        _ events: [RecordingEvent],
+        query: String = "",
+        entity: String? = nil,
+        anchor: String? = nil,
+        type: String? = nil,
+        limit: Int = 8
+    ) -> Selection.Slice {
+        Selection.slice(events: events, query: query, entity: entity, anchor: anchor,
+                        type: type, now: now, since: window, limit: limit)
+    }
+
+    // MARK: - Explicit scope vs implicit anchor
+    //
+    // The distinction the ranker got wrong for its whole life: `entity` is a
+    // request and filters; `anchor` is a guess about what is on screen and only
+    // ranks. Collapsing them made the default `search` — the one an agent issues
+    // when it has no reason to name a project — blind to every project but the
+    // current one, which is the opposite of what "how did I solve this before?"
+    // needs. These five tests are the contract.
+
+    func testAnchorRanksButNeverExcludesOtherProjects() {
+        let elsewhere = event("fixed the stripe webhook signature by using the raw body",
+                              ago: 3600, eventType: .clipboard, title: "Webhook.swift — PaymentsApp")
+        let here = event("chart placeholder", eventType: .clipboard, title: "Dash.swift — PantryApp")
+
+        let results = rank([elsewhere, here], query: "stripe webhook", anchor: "PantryApp")
+
+        XCTAssertEqual(results.map(\.text), [elsewhere.textContent],
+                       "the anchor is a prior, not a WHERE clause — the answer lives in another project")
+    }
+
+    func testExplicitEntityStillExcludesOtherProjects() {
+        let mine = event("retry logic rewritten", eventType: .clipboard, title: "Net.swift — Mull")
+        let theirs = event("retry logic with exponential backoff", eventType: .clipboard,
+                           title: "Net.swift — OtherApp")
+
+        let results = rank([mine, theirs], query: "retry", entity: "Mull")
+
+        XCTAssertEqual(results.map(\.text), [mine.textContent],
+                       "naming a project is a request to be confined to it")
+    }
+
+    func testAnchorBreaksTiesTowardTheCurrentProject() {
+        // The other project's event is NEWER, so recency alone would pick it.
+        let other = event("cache layer redesign for the other app", ago: 30,
+                          eventType: .clipboard, title: "Cache.swift — OtherApp")
+        let anchored = event("cache layer redesign in mull", ago: 90,
+                             eventType: .clipboard, title: "Cache.swift — Mull")
+
+        let results = rank([other, anchored], query: "cache redesign", anchor: "Mull", limit: 1)
+
+        XCTAssertEqual(results.map(\.text), [anchored.textContent])
+    }
+
+    func testSubstitutesAnchoredSalientActivityWhenNothingMatchesLiterally() {
+        // "auth broken" appears nowhere; the event that answers it says "401".
+        let answer = event("login returns 401 after the session expires",
+                           eventType: .clipboard, title: "Session.swift — PaymentsApp")
+        let chatter = event("groceries and dry cleaning", eventType: .clipboard, title: "Errands — Personal")
+
+        let result = slice([answer, chatter], query: "auth broken", anchor: "PaymentsApp")
+
+        XCTAssertEqual(result.results.map(\.text), [answer.textContent])
+        XCTAssertTrue(result.substituted,
+                      "the caller has to be able to tell the agent these did not match its words")
+    }
+
+    func testNoSubstitutionWhenALiteralHitExists() {
+        let hit = event("the export csv job times out", eventType: .clipboard, title: "Export.swift — PantryApp")
+        let salientNeighbour = event("remember to renew the domain",
+                                     eventType: .clipboard, title: "Notes — PantryApp")
+
+        let result = slice([hit, salientNeighbour], query: "export csv", anchor: "PantryApp")
+
+        XCTAssertEqual(result.results.map(\.text), [hit.textContent],
+                       "a good match is never padded out with merely-salient neighbours")
+        XCTAssertFalse(result.substituted)
+    }
+
+    func testNoSubstitutionWithoutAnAnchor() {
+        let a = event("URGENT decided to drop the feature", eventType: .clipboard)
+        let b = event("quarterly planning notes", eventType: .clipboard)
+
+        let result = slice([a, b], query: "graphql")
+
+        XCTAssertTrue(result.results.isEmpty, "returning nothing is the correct answer here")
+        XCTAssertFalse(result.substituted)
+    }
+
+    // MARK: - MODE axis
+
+    func testModeOrdersAuthoredWorkAboveConsumption() {
+        // Same text, same age, same entity, same salience — only the MODE axis
+        // differs (Xcode → produce, Safari → consume). MAP-ARCHITECTURE says mode
+        // is used for 「重み付け・選別」, but nothing in this file read it until
+        // 2026-08-09 (ROADMAP §1, B1).
+        let consumed = event("caching strategy", eventType: .clipboard,
+                             app: "Safari", entity: "Mull")
+        let authored = event("caching strategy", eventType: .clipboard,
+                             app: "Xcode", entity: "Mull")
+
+        let results = rank([consumed, authored], query: "caching", anchor: "Mull")
+
+        XCTAssertEqual(results.count, 2, "mode orders, it never filters (Law 5)")
+        XCTAssertEqual(results.first?.app, "Xcode",
+                       "authored work outranks consumption when everything else ties")
     }
 
     // MARK: - Ranking components
@@ -158,14 +268,24 @@ final class SelectionTests: XCTestCase {
     }
 
     func testUnscopedSearchPrefersEventsThatHaveAnEntity() {
-        // With no anchor, having an identifiable project earns the 0.10-weighted
-        // 0.3 bonus. Both texts are >40 chars and separator-free, so the
-        // title-less event genuinely resolves to a nil entity.
+        // With no anchor, having an identifiable project earns the 0.03
+        // `attributable` tiebreak. Both texts are >40 chars and separator-free, so
+        // the title-less event genuinely resolves to a nil entity.
+        //
+        // (Comment corrected, assertions untouched: the weight used to be written
+        // as "0.10-weighted 0.3 bonus" on an expression that also silently required
+        // the anchor to be nil. Splitting anchor-match from attributability made
+        // that description wrong; without the tiebreak these two events tie on
+        // every component and this test would pass on input order alone.)
         let text = "reviewing the payment reconciliation report today"
         let anchored = event(text, title: "PantryApp")
         let floating = event(text, title: nil)
 
-        let results = rank([anchored, floating])
+        // Floating first on purpose. These two tie on lexical, recency and
+        // salience, so with the entity-less event already in front, only a real
+        // score difference can reorder them — passing on input order is no longer
+        // available to this test.
+        let results = rank([floating, anchored])
 
         XCTAssertEqual(results.count, 2, "the entity-less event is bonused down, never dropped")
         XCTAssertEqual(results.first?.entity, "PantryApp")

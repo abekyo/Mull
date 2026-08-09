@@ -1,9 +1,45 @@
-// Copy to Local.xcconfig and fill in your own signing identity.
+// Copy to Local.xcconfig and fill in the values for this machine. Local.xcconfig
+// is gitignored, and Signing.xcconfig includes it only if it exists — so skipping
+// this file entirely still builds. Nothing here is required to run mull locally.
 //
-// Find your Development certificate's SHA-1 hash with:
+// Two different certificates, for two different jobs. Neither can do the other's.
+//
+// ---------------------------------------------------------------------------
+// Debug — MULL_CODE_SIGN_IDENTITY (Apple Development certificate)
+// ---------------------------------------------------------------------------
+// Keeps macOS TCC grants (Calendar, Accessibility, Input Monitoring) stable
+// across rebuilds. Leaving it unset falls back to ad-hoc signing, which builds
+// and runs but re-prompts for permissions each time.
+//
 //     security find-identity -v -p codesigning
 //
-// Setting this keeps macOS TCC grants (Calendar, Accessibility, Input
-// Monitoring) stable across rebuilds. Leaving it unset falls back to ad-hoc
-// signing, which builds and runs but re-prompts for permissions each time.
 MULL_CODE_SIGN_IDENTITY =
+
+// ---------------------------------------------------------------------------
+// Release — MULL_DEVELOPER_ID_IDENTITY (Developer ID Application certificate)
+// ---------------------------------------------------------------------------
+// Only needed to cut a distributable build. Notarization accepts a "Developer ID
+// Application" certificate and nothing else — an Apple Development certificate
+// is rejected however the rest of the build is configured, so these cannot be
+// the same value. Create one at developer.apple.com under Certificates, then:
+//
+//     security find-identity -v | grep "Developer ID Application"
+//
+// NOTE: the name on this certificate is shown to every user in the Gatekeeper
+// dialog when they open the app. Whatever name you enrol under is the name that
+// ships. Decide that before cutting the first release.
+MULL_DEVELOPER_ID_IDENTITY =
+
+// The Apple Developer Team ID that certificate belongs to (10 characters).
+// scripts/release.sh passes it to notarytool.
+MULL_TEAM_ID =
+
+// Name of the notarytool credential profile stored in your keychain. Create it
+// once with an app-specific password from appleid.apple.com:
+//
+//     xcrun notarytool store-credentials "mull-notary" \
+//         --apple-id "you@example.com" --team-id "<MULL_TEAM_ID>" \
+//         --password "<app-specific-password>"
+//
+// The password lives in the keychain, never here.
+MULL_NOTARY_PROFILE = mull-notary

@@ -41,18 +41,6 @@ struct SearchHit: Identifiable, Hashable {
             }
         }
 
-        var icon: String {
-            switch self {
-            case .typed: "keyboard"
-            case .copied: "doc.on.clipboard"
-            case .window: "macwindow"
-            case .document: "doc.text"
-            case .app: "app.dashed"
-            case .audio: "waveform"
-            case .schedule: "calendar"
-            }
-        }
-
         var color: Color {
             switch self {
             case .typed: DS.eventKeystroke
@@ -194,7 +182,7 @@ enum SearchService {
 
         // One row over the cap: the cheapest way to learn "there are more" without a
         // second COUNT query. The extra row is dropped before anyone sees it.
-        if range != .all, !DatabaseService.containsCJK(trimmed), ftsTokenisable(trimmed) {
+        if range != .all, !TextScript.containsCJK(trimmed), ftsTokenisable(trimmed) {
             let cap = boundedEventCap
             let fetched = database.fetchCandidates(query: trimmed, since: cutoff,
                                                    useFTS: true, limit: cap + 1)

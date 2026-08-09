@@ -42,7 +42,7 @@ struct WeekSection: View {
             }
 
             if isEmpty {
-                Text("Nothing recorded this week yet — mull fills this in as you work.")
+                Text("Nothing recorded this week yet.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
             } else if let comp = comparison {
@@ -64,16 +64,20 @@ struct WeekSection: View {
         let isHovered = hoveredDay == day.date && onSelectDay != nil
 
         return VStack(spacing: DS.xs) {
-            Text(day.mainProject ?? "")
-                .font(DS.tinyFont)
+            // A space, not an empty string, on quiet days — it reserves the line so
+            // the seven columns stay level. No fixed height: the old `height: 10`
+            // was shorter than the font's own line and shaved descenders (and CJK
+            // glyphs) off every name. A seventh of the card is narrow, so the name
+            // still truncates — the whole of it is on hover.
+            Text(day.mainProject ?? " ")
+                .font(DS.miniFont)
                 .foregroundStyle(DS.inkFaint)
                 .lineLimit(1)
-                .frame(height: 10)
+                .help(day.mainProject ?? "")
 
-            Text(day.durationFormatted)
+            Text(day.durationFormatted.isEmpty ? " " : day.durationFormatted)
                 .font(DS.miniMedium)
                 .foregroundStyle(day.isToday ? DS.moon : DS.inkDim)
-                .frame(height: 12)
 
             // Fixed-height track with the bar pinned to the bottom, so every bar grows
             // upward from a shared zero baseline (not centred, which made them spill both ways).
@@ -128,7 +132,7 @@ struct WeekSection: View {
             // Duration comparison
             HStack(spacing: DS.md) {
                 stat(
-                    label: "This week",
+                    label: "So far",
                     value: comp.thisWeekHours,
                     delta: comp.lastWeekDuration > 0 ? comp.deltaFormatted : nil,
                     deltaUp: comp.durationDelta >= 0

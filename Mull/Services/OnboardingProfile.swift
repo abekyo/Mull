@@ -6,10 +6,10 @@ import Foundation
 /// *observed update* on top. We never replace capture with this — we seed it.
 ///
 /// Answers are stored in UserDefaults (the editable source of truth) AND projected
-/// into me.pinned.md as a delimited, comment-marked section. Because both markers
-/// begin with '#', Curator.pinnedFacts() treats them as comments and strips them
-/// from me.md, while the `- …` fact lines between them become authoritative pinned
-/// facts placed atop me.md — and, like the rest of me.pinned.md, never overwritten.
+/// into me.pinned.md as a delimited section. Because both markers are markdown
+/// headings, Curator.filterPinned skips them as scaffold, while the `- …` fact
+/// lines between them become authoritative pinned facts placed atop me.md — and,
+/// like the rest of me.pinned.md, never overwritten.
 enum OnboardingProfile {
 
     struct Question: Identifiable {
@@ -48,9 +48,28 @@ enum OnboardingProfile {
 
     // MARK: - Persistence (source of truth)
 
-    private static let answersKey = "onboardingProfileAnswers"
-    private static let startMarker = "# ── mull profile (from onboarding · edit in Settings) ──"
-    private static let endMarker = "# ── end mull profile ──"
+    static let answersKey = "onboardingProfileAnswers"   // mirrored by UserLanguage.onboardingAnswersKey
+
+    /// Section markers follow the reader's language — they are the one part of
+    /// this user-owned file mull writes visibly. Removal must recognize EVERY
+    /// variant ever shipped, not just the current locale's: the file may hold a
+    /// section written under another system language.
+    private static var startMarker: String {
+        UserLanguage.isJapanese
+            ? "# ── mull プロフィール（オンボーディングの回答 · Settings で編集） ──"
+            : "# ── mull profile (from onboarding · edit in Settings) ──"
+    }
+    private static var endMarker: String {
+        UserLanguage.isJapanese ? "# ── mull プロフィール ここまで ──" : "# ── end mull profile ──"
+    }
+    static let allStartMarkers: Set<String> = [
+        "# ── mull profile (from onboarding · edit in Settings) ──",
+        "# ── mull プロフィール（オンボーディングの回答 · Settings で編集） ──",
+    ]
+    static let allEndMarkers: Set<String> = [
+        "# ── end mull profile ──",
+        "# ── mull プロフィール ここまで ──",
+    ]
 
     static var answers: [String: String] {
         (UserDefaults.standard.dictionary(forKey: answersKey) as? [String: String]) ?? [:]
@@ -94,15 +113,28 @@ enum OnboardingProfile {
     }
 
     /// Strip any existing managed section (idempotent), leaving all other lines.
-    private static func removeSection(from text: String) -> String {
+    /// Matches marker variants from every locale, so switching the system
+    /// language replaces the old section instead of stacking a second one.
+    static func removeSection(from text: String) -> String {
         var out: [String] = []
         var inside = false
         for line in text.components(separatedBy: "\n") {
-            if line == startMarker { inside = true; continue }
-            if line == endMarker { inside = false; continue }
+            if allStartMarkers.contains(line) {
+                inside = true
+                // Collapse the blank line `writeSection` puts in front of the
+                // marker — the separator is re-created on every save, so leaving
+                // the old one behind meant every save added another. Onboarding's
+                // Save & Continue and Settings › Profile both land here, so the
+                // gap in a file mull has promised to preserve grew by a line each
+                // time the user so much as revisited the form. Removing the whole
+                // run rather than a single line also heals the files that already
+                // accumulated one.
+                while out.last?.isEmpty == true { out.removeLast() }
+                continue
+            }
+            if allEndMarkers.contains(line) { inside = false; continue }
             if !inside { out.append(line) }
         }
-        // Collapse the leading blank we may have inserted before the section.
         return out.joined(separator: "\n")
     }
 }

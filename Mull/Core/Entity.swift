@@ -21,4 +21,15 @@ enum Entity {
         // Editors (Xcode/VS Code) tend to put the project last; fall back to first.
         return candidates.last ?? candidates.first
     }
+
+    /// App-aware variant. A content-driven app (browser, Finder) titles its window
+    /// after whatever happens to be open — a web page, a folder — so no segment of
+    /// it names a project, however plausible its shape. `ProjectNames.rank` already
+    /// refuses candidates from these apps; this applies the same rule on the
+    /// single-title path, which is how "Downloads" and "iCloud Drive" used to
+    /// become projects the proactive loop would brief on.
+    static func from(_ title: String?, app: String?) -> String? {
+        if let app, ProjectNames.contentDrivenApps.contains(app.lowercased()) { return nil }
+        return from(title)
+    }
 }

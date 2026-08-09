@@ -3,8 +3,16 @@
 > **信条**: 領土はロスなく永遠に。地図は正しく・指すだけ・作り直せる形で。
 > 削るな。要約で原本を置き換えるな。意味は「モード」で与えよ。
 
-mull が「第二の脳に渡す材料」であるための、データ層の一枚絵。視覚の北極星は
-[DESIGN-NORTHSTAR.md](DESIGN-NORTHSTAR.md)、これはその対になる**構造の北極星**。
+mull が**エージェントに渡す材料**であるための、データ層の一枚絵。
+これは**構造の北極星**（対になる視覚の北極星 [DESIGN-NORTHSTAR.md](DESIGN-NORTHSTAR.md) は
+2026-08-08 より当面凍結中。本書は凍結対象ではない——**むしろ位置づけが上がった**）。
+
+> **2026-08-08 の位置づけ更新**: mull の製品は GUI ではなく MCP サーフェスになった
+> （STRATEGY-2026-08.md（非公開の内部文書） / CLAUDE.md §5）。
+> 上図の右上「served at use-time」＝ **MCP の 12 ツールそのもの**であり、
+> **本書の serving 層が製品の出口になった**。
+> 「第二の脳に渡す」という言い方は「エージェントが引く」に置き換わったが、
+> **5つの不変法則（§下）は一字も変わらない。**
 
 ---
 
@@ -53,15 +61,18 @@ mull が「第二の脳に渡す材料」であるための、データ層の一
 
 ## 地図の3軸 — そして欠けている決定打
 
-| 軸 | 問い | 役割 | mull の現状 |
+| 軸 | 問い | 役割 | mull の現状（2026-08-08） |
 |---|---|---|---|
-| **WHAT** | 何について | entity / topic ノード(mull=Dream=アプリ、FX事業、この人) | Entity 層あり・解像度が低い |
-| **HOW = MODE** | どう語っているか | **姿勢/モードのタグ** | **ほぼ無い ← 核心の欠落** |
-| **NOW** | 今どこか | now-anchor | CurrentState あり |
+| **WHAT** | 何について | entity / topic ノード(mull=Dream=アプリ、確定申告、この人) | `Entity.swift` あり。**名寄せの解像度が低い**（残課題） |
+| **HOW = MODE** | どう語っているか | **姿勢/モードのタグ** | ✅ `Mode.swift` ＋ `ModeTests`。capture-time に付与される（下表の6値） |
+| **NOW** | 今どこか | now-anchor | ✅ `CurrentState.swift`。MCP `whats_active_now` として公開済み |
+
+> **更新**: 本書執筆時「MODE 軸はほぼ無い ← 核心の欠落」と書いたが、**実装された**。
+> 残る欠落は **WHAT の名寄せ解像度**と、下表「既存部品への対応」の back-pointer / 再生成。
 
 ### MODE 軸（どう語っているか）が一番効く
 
-今日の失敗(FX動画は仕事か遊びか / 口述は思考かノイズか)は、全部 MODE が無いせい。
+今日の失敗(税務の解説動画は仕事か遊びか / 口述は思考かノイズか)は、全部 MODE が無いせい。
 **消す代わりに、姿勢でタグ付けして意味を与える**:
 
 | mode | 意味 | 例 |
@@ -74,7 +85,14 @@ mull が「第二の脳に渡す材料」であるための、データ層の一
 | **communicate** | 伝えた | メール、投稿、会議 |
 
 - MODE は**スパン(時間域/イベント塊)に付く**。削除でなく、**重み付け・選別・配置**に使う。
-- 共起で解ける: 「FX動画 = consume だが、FX事業エンティティと共起 → **research**」「長い口述 =
+
+> **⚠ 2026-08-09 まで、この「重み付け・選別」は実装されていなかった。**
+> `Mode` は捕捉時に計算・保存されていたが、消費先は `ContextComposer`（＝配置）のみで、
+> **`Selection.rank`（＝選別）は mode を一度も読んでいなかった**。
+> `Mode.weight` を追加して接続済み（重みと測定上の限界は SELECTION-LAYER §4 が正本）。
+> **この節が「一番効く」と書いていた軸が、1年近く検索に効いていなかった**——
+> 文書が実装より先に走ると起きる典型（ROADMAP §1 B1 / PRC-001）。
+- 共起で解ける: 「税務の解説動画 = consume だが、確定申告エンティティと共起 → **research**」「長い口述 =
   mull エンティティ下の **think**」→ **両方とも捨てずに、意味づけて置く**。
 - MODE 自体も再生成可能(今日 = ルール/ヒューリスティック、明日 = LLM)。地図側なので作り直せる。
 
@@ -84,14 +102,14 @@ mull が「第二の脳に渡す材料」であるための、データ層の一
 
 | 一枚絵の層 | 既存の実装 | 足りないもの |
 |---|---|---|
-| TERRITORY | `_raw/<connector>/`(immutable source) | 捕捉の**忠実度**(タイトル→中身、断片→全文、ブラウザ本文) |
+| TERRITORY | `RawStore` / `_raw/<connector>/`(immutable source) | 捕捉の**忠実度**——ブラウザ本文、打鍵の断片化（§捕捉忠実度 監査 #3/#4） |
 | 設計全体図(schema) | `FolderOntology`(番号フォルダ) | territory/map/mode を映す形への整理 |
-| MAP: WHAT | `Entity` / `Selection`(SELECTION-LAYER) | entity 解像度・名寄せ(Dream=mull) |
-| MAP: NOW | `CurrentState`(now-anchor) | — |
-| MAP: HOW | — | **MODE 軸そのもの** |
+| MAP: WHAT | `Entity` / `Selection`(SELECTION-LAYER) | **entity 解像度・名寄せ(Dream=mull)** ← 最大の残課題 |
+| MAP: NOW | ✅ `CurrentState`(now-anchor) | — |
+| MAP: HOW | ✅ `Mode` / `Signal`(capture-time 分類) | mode の精度（今はルール、後で LLM に差し替え可） |
 | back-pointer | (弱い) | ノード→生イベント id の**参照を一級にする** |
 | 再生成 | (無い) | 地図の**バージョン付き再生成**(領土から rebuild) |
-| serving | MCP / Copy to AI | 小ctx=レンズ / 大ctx=丸ごと、の切替 |
+| serving | ✅ **MCP 12ツール**（製品の出口） | 小ctx=レンズ / 大ctx=丸ごと、の切替 |
 
 ---
 

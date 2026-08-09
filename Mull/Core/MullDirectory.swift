@@ -122,6 +122,11 @@ enum MullDirectory {
             return status
         }
 
+        // Heal files stamped .completeUnlessOpen by earlier builds — the stamp
+        // can refuse reads (see FilePrivacy.protectFile), and files that are
+        // never rewritten would otherwise carry it forever.
+        FilePrivacy.stripLegacyProtection(under: root)
+
         logger.info("~/mull directory ready")
         status = .ready
         return status
@@ -190,6 +195,25 @@ enum MullDirectory {
             .filter { $0.hasSuffix(".md") && $0 != "index.md" }
             .sorted()
             .map { "\(relativeDir)/\($0)" }
+    }
+
+    /// Delete one file inside ~/mull. Returns `true` if the file is gone
+    /// afterwards (including when it was already absent).
+    ///
+    /// Nothing goes to the Trash: a file removed by the forget path is being
+    /// removed *because* the user wants it gone, and a copy sitting in ~/.Trash
+    /// would make the promise false.
+    @discardableResult
+    static func delete(_ relativePath: String) -> Bool {
+        let url = root.appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
+        do {
+            try FileManager.default.removeItem(at: url)
+            return true
+        } catch {
+            logger.error("Failed to delete \(relativePath): \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Delete the entire vault. Only for the explicit "delete everything" action

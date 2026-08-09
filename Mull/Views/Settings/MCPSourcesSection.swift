@@ -37,15 +37,24 @@ struct MCPSourcesSection: View {
     }
 
     var body: some View {
-        Section("Sources (MCP)") {
+        // Not "Sources": it sat directly under Data Sources, and two adjacent
+        // sections carrying the same noun made neither title say which was which.
+        Section("Connected servers (MCP)") {
             if sources.isEmpty {
-                Text("No sources yet. Add an MCP server below to pull email, calendar, GitHub, etc. Nothing is pulled until you add one.")
+                Text("No servers yet. Add one below to pull email, calendar, GitHub, and so on.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
             }
 
-            ForEach(Array(sources.enumerated()), id: \.offset) { idx, src in
-                sourceRow(idx: idx, src: src)
+            // Keyed by what the source *is*, not by where it sits. Keyed by index, a
+            // row's identity was its position: deleting the first of three handed row
+            // 0's view to what had been row 1 and so on down, and the trash button and
+            // the toggle both addressed `sources[idx]` with an index captured when the
+            // row was built — so a click that arrived after the array had shrunk hit a
+            // different source than the one it was pointed at, or ran off the end of
+            // the array entirely. Identity belongs to the thing, not to the slot.
+            ForEach(sources, id: \.rowKey) { src in
+                sourceRow(src)
             }
 
             advancedForm
@@ -84,8 +93,9 @@ struct MCPSourcesSection: View {
 
     // MARK: - Rows
 
-    private func sourceRow(idx: Int, src: MCPSourceConfig) -> some View {
-        HStack {
+    private func sourceRow(_ src: MCPSourceConfig) -> some View {
+        let key = src.rowKey
+        return HStack {
             VStack(alignment: .leading, spacing: DS.hair) {
                 Text("\(src.connectorID) · \(src.tool)")
                     .font(DS.bodyMedium)
@@ -93,17 +103,22 @@ struct MCPSourcesSection: View {
                     .font(DS.miniFont)
                     .foregroundStyle(DS.inkGhost)
                     .lineLimit(1)
+                    .help("\(src.server.command) \(src.server.args.joined(separator: " "))")
             }
             Spacer()
             Toggle("", isOn: Binding(
-                get: { sources[idx].enabled },
-                set: { sources[idx].enabled = $0; persist() }
+                get: { sources.first { $0.rowKey == key }?.enabled ?? false },
+                set: { on in
+                    guard let i = sources.firstIndex(where: { $0.rowKey == key }) else { return }
+                    sources[i].enabled = on
+                    persist()
+                }
             ))
             .labelsHidden()
             .accessibilityLabel("Enable \(src.connectorID)")
             .accessibilityHint("Turns this source on or off for the next pull")
             Button(role: .destructive) {
-                sources.remove(at: idx)
+                sources.removeAll { $0.rowKey == key }
                 persist()
             } label: {
                 Image(systemName: "trash").font(DS.captionFont)
@@ -301,4 +316,24 @@ struct MCPSourcesSection: View {
         f.setLocalizedDateFormatFromTemplate("jmm")
         return f
     }()
+}
+
+// MARK: - Row identity
+
+private extension MCPSourceConfig {
+    /// What makes this row *this* source, independent of where it sits in the array.
+    ///
+    /// `MCPSourceConfig.id` is the connector alone, and two sources may legitimately
+    /// share one — the row label is "github · search_issues" precisely because a
+    /// second "github · list_commits" is allowed — so the connector cannot tell the
+    /// rows apart on its own.
+    ///
+    /// `enabled` is deliberately not part of it: a key that changed when you flicked
+    /// the toggle would make the row a different row mid-click.
+    var rowKey: String {
+        let env = server.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+        let toolArgs = arguments.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+        return ([connectorID, tool, server.command]
+                + server.args + env + toolArgs).joined(separator: "\u{1F}")
+    }
 }
