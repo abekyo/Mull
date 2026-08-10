@@ -18,15 +18,13 @@ extension CalendarWeekView {
 
     var toolbar: some View {
         HStack(spacing: DS.md) {
-            Text(rangeTitle)
-                .font(DS.displayFont)
-                .foregroundStyle(DS.ink)
-                .lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
+            rangeTitleButton
 
             Spacer(minLength: DS.md)
 
             calendarVisibilityControl
+
+            exportControl
 
             newEventControl
 
@@ -41,8 +39,6 @@ extension CalendarWeekView {
                     .help("Today (⌘T)")
                 navArrow("chevron.right", hint: String(localized: "Go forward"), action: { step(1) })
             }
-
-            jumpButton
 
             Picker("", selection: $mode) {
                 ForEach(CalMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -171,20 +167,39 @@ extension CalendarWeekView {
         }
     }
 
-    /// Go straight to a date rather than walking to it. Last April was twelve
-    /// clicks of the back chevron before this existed.
-    var jumpButton: some View {
+    /// Go straight to a date rather than walking to it, from the date itself.
+    ///
+    /// This used to be a calendar glyph out at the right end of the toolbar, and the
+    /// reason given for it was that reaching last April took twelve clicks of the back
+    /// chevron. That stopped being true once the year grid's months became buttons
+    /// (`jumpToMonth`) — ⌘4 and one click gets there — so the glyph was a fourth way to
+    /// do something there were already three ways to do, holding a slot in a toolbar
+    /// that had run out of them.
+    ///
+    /// What it is worth keeping for is the far date with a known day, which drilling
+    /// down reaches in four moves and a picker reaches in two. So the capability stays
+    /// and the chrome goes: the title *is* the control, which is where somebody who
+    /// wants to be on another date looks first, and is what Fantastical and Google
+    /// Calendar both do. The caret is what says so — without it this is a keyboard
+    /// shortcut nobody was told about, wearing a heading.
+    var rangeTitleButton: some View {
         Button { pickerDate = anchorDate; showingDatePicker = true } label: {
-            Image(systemName: DS.Glyph.calendar)
-                .font(DS.bodyFont)
-                .foregroundStyle(DS.inkDim)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
+            HStack(spacing: DS.xs) {
+                Text(rangeTitle)
+                    .font(DS.displayFont)
+                    .foregroundStyle(DS.ink)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(DS.miniFont.weight(.semibold))
+                    .foregroundStyle(DS.inkFaint)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Jump to a date (← → to step)")
-        .accessibilityLabel("Jump to a date")
-        .accessibilityHint("Left and right arrows step by one period.")
+        .accessibilityLabel(rangeTitle)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityHint("Opens a date picker. Left and right arrows step by one period.")
         .pointingHandCursor()
         .popover(isPresented: $showingDatePicker, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: DS.sm) {

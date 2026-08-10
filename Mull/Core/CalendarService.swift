@@ -698,11 +698,26 @@ final class CalendarService {
     /// All-day events are carried through with a flag rather than discarded —
     /// deciding what to do with them is the caller's business, and dropping them
     /// here is what made them invisible everywhere at once.
+    /// An event mull's own mirror wrote.
+    ///
+    /// Excluded from every read path, because mull already holds that span as the
+    /// observed block it was made from. Reading it back as a *scheduled* event states
+    /// the same fact twice in the one place where the whole vocabulary is "outlined
+    /// means planned, filled means happened" — the grid drew the work and a
+    /// commitment to do the work, side by side, at the same hour. Writing something
+    /// down afterwards does not make it a plan.
+    ///
+    /// `mirroredEvents(in:from:to:)` deliberately does not go through here: that is
+    /// the reconcile path, and it is the one caller that must see them.
+    private func isMirrorEcho(_ event: EKEvent) -> Bool {
+        CalendarMirror.key(fromMarker: event.url) != nil
+    }
+
     private func fetch(from start: Date, to end: Date,
                        excluding hidden: Set<String> = []) -> [CalendarEvent] {
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
         let rawEvents = store.events(matching: predicate)
-            .filter { !hidden.contains($0.calendar.calendarIdentifier) }
+            .filter { !hidden.contains($0.calendar.calendarIdentifier) && !isMirrorEcho($0) }
             .sorted { $0.startDate < $1.startDate }
 
         var index: [String: Int] = [:]
@@ -759,8 +774,9 @@ final class CalendarService {
 
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
         let matches = store.events(matching: predicate).filter { ev in
-            (ev.title?.localizedCaseInsensitiveContains(q) ?? false) ||
-            (ev.location?.localizedCaseInsensitiveContains(q) ?? false)
+            guard !isMirrorEcho(ev) else { return false }
+            return (ev.title?.localizedCaseInsensitiveContains(q) ?? false) ||
+                   (ev.location?.localizedCaseInsensitiveContains(q) ?? false)
         }
         .sorted { $0.startDate > $1.startDate }
 
@@ -798,7 +814,9 @@ final class CalendarService {
 
         let predicate = store.predicateForEvents(withStart: now, end: endOfDay, calendars: nil)
         return store.events(matching: predicate)
-            .filter { !$0.isAllDay && $0.startDate > now }
+            // A mirrored block is something you already did; it is never a thing
+            // coming up, and a meeting reminder for one would be nonsense.
+            .filter { !$0.isAllDay && $0.startDate > now && !isMirrorEcho($0) }
             .sorted { $0.startDate < $1.startDate }
             .prefix(limit)
             .map { (

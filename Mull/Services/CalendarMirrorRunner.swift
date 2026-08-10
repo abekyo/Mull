@@ -78,14 +78,8 @@ final class CalendarMirrorRunner {
               let to = cal.date(byAdding: .day, value: 1, to: today) else { return CalendarMirror.Plan() }
 
         let engine = TimeBlockEngine(database: database)
-        var blocks: [TimeBlock] = []
-        for offset in 0..<CalendarMirror.daysCovered {
-            guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
-            blocks.append(contentsOf: engine.generateBlocks(for: day))
-        }
-
         let plan = CalendarMirror.plan(
-            blocks: blocks,
+            blocks: blocks(from: from, to: to, engine: engine),
             existing: calendar.mirroredEvents(in: calendarID, from: from, to: to),
             written: written,
             tombstoned: tombstoned,
@@ -94,6 +88,61 @@ final class CalendarMirrorRunner {
 
         apply(plan, calendarID: calendarID, now: now)
         return plan
+    }
+
+    /// Every block whose day falls in the range. Derived per day because that is the
+    /// unit `generateBlocks` segments in — asking it for a span would let a block
+    /// straddle midnight and be counted twice.
+    private nonisolated func blocks(from: Date, to: Date, engine: TimeBlockEngine) -> [TimeBlock] {
+        let cal = Calendar.current
+        var day = cal.startOfDay(for: from)
+        var out: [TimeBlock] = []
+        while day < to {
+            out.append(contentsOf: engine.generateBlocks(for: day))
+            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return out
+    }
+
+    // MARK: - Written by hand
+
+    /// What the toolbar's write button would do to `calendarID` for a range the user
+    /// picked out on screen.
+    ///
+    /// Both ledgers are passed empty, and that is the whole difference from a timed
+    /// run. A press is a stronger signal than the silence the timer reads: it writes
+    /// a block the user once deleted rather than honouring the tombstone, which is
+    /// also the only way back for somebody who cleared a day and then wanted it.
+    /// Nothing is tombstoned by this path either — a missing event is a thing to
+    /// write, not a decision to record.
+    ///
+    /// `nonisolated` because it touches neither ledger and no other mutable state, and
+    /// a month on screen means re-deriving six weeks of blocks — which is not work to
+    /// do on the main thread while somebody waits for a sheet to open.
+    nonisolated func manualPlan(in calendarID: String, from: Date, to: Date,
+                                now: Date = Date()) -> CalendarMirror.Plan {
+        let engine = TimeBlockEngine(database: database)
+        return CalendarMirror.plan(
+            blocks: blocks(from: from, to: to, engine: engine),
+            existing: calendar.mirroredEvents(in: calendarID, from: from, to: to),
+            written: [],
+            tombstoned: [],
+            now: now,
+            resumeGap: engine.resumeGap)
+    }
+
+    /// Fold a hand-written result into the ledger, so the timer afterwards agrees with
+    /// what the press did — including forgetting tombstones the press overrode.
+    func recordManualResult(created: [String], deleted: [String], now: Date = Date()) {
+        var written = self.written
+        written.formUnion(created)
+        written.subtract(deleted)
+        self.written = prune(written, before: now)
+
+        var tombstoned = self.tombstoned
+        tombstoned.subtract(created)
+        self.tombstoned = prune(tombstoned, before: now)
     }
 
     private func apply(_ plan: CalendarMirror.Plan, calendarID: String, now: Date) {

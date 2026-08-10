@@ -43,6 +43,10 @@ struct CalendarWeekView: View {
     @State var weekAllDay: [Date: [CalendarEvent]] = [:]
     /// The card whose detail or editor is open.
     @State var selectedItem: CalItem?
+    /// Set while the "write to Calendar" sheet is up. Holds the plan the sheet is
+    /// describing, so what gets written is what the reader agreed to rather than a
+    /// freshly computed answer that may have moved on.
+    @State var exportProposal: ExportProposal?
     /// The card the keyboard is on. Separate from `selectedItem` so ↑ / ↓ can walk
     /// the day without a popover springing open at every step.
     @State var keyboardSelection: String?
@@ -298,6 +302,7 @@ struct CalendarWeekView: View {
         } message: { message in
             Text(message)
         }
+        .sheet(item: $exportProposal) { exportSheet($0) }
     }
 
     var writeErrorBinding: Binding<Bool> {

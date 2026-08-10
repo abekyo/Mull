@@ -59,11 +59,17 @@ final class CalendarWriter {
 
     // MARK: - The three operations
 
+    /// `extras` carries the mirror's marker when the calendar export writes an event,
+    /// and is nil for one the user typed. `performDelete` reads whatever is on the
+    /// event back before removing it, so the marker survives an undo/redo cycle rather
+    /// than being dropped the first time ⌘Z touches it.
     @discardableResult
-    func create(_ fields: CalendarService.EventFields, undo: UndoManager?) -> Ref? {
+    func create(_ fields: CalendarService.EventFields,
+                extras: CalendarService.EventExtras? = nil,
+                undo: UndoManager?, name: String = "New Event") -> Ref? {
         let ref = Ref(nil)
-        guard performCreate(ref: ref, fields: fields, extras: nil,
-                            undo: undo, name: "New Event") else { return nil }
+        guard performCreate(ref: ref, fields: fields, extras: extras,
+                            undo: undo, name: name) else { return nil }
         return ref
     }
 
