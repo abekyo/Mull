@@ -22,9 +22,18 @@ extension CalendarWeekView {
         let from: Date
         let to: Date
 
-        /// Identity is the question asked, not the answer: re-proposing the same range
-        /// into the same calendar replaces the open sheet rather than stacking one.
-        var id: String { "\(calendar.id)|\(from.timeIntervalSince1970)|\(to.timeIntervalSince1970)" }
+        /// One identity per proposal, not per range.
+        ///
+        /// It was keyed on calendar + range, on the reasoning that re-proposing the
+        /// same range should replace an open sheet rather than stack one. That buys
+        /// nothing — the sheet is modal, so the button cannot be pressed while it is
+        /// up — and it means two presses on the *same day* hand `sheet(item:)` the
+        /// same identity twice, which is the shape of a well-worn SwiftUI failure to
+        /// re-present. A second press on the same day doing nothing was reported once
+        /// and cleared by a relaunch, so this is not a confirmed cause; it is the one
+        /// thing in the path that could produce exactly that symptom and has no
+        /// reason to stay.
+        let id = UUID()
 
         var isEmpty: Bool { plan.isEmpty }
     }

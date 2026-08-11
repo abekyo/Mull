@@ -78,6 +78,36 @@ extension CalendarWeekView {
         }
     }
 
+    /// Re-derive today's activity blocks, on the minute, while the window sits open.
+    ///
+    /// Only today, and this is what makes it affordable. Every other day on screen is
+    /// finished: its events cannot change, so re-deriving it would be seven database
+    /// analyses a minute to reproduce seven identical answers — the cost that
+    /// `refreshEvents` already refuses to pay for a calendar change. Today is the one
+    /// day where new events keep arriving, and it is one analysis.
+    ///
+    /// Skipped entirely when today is not on screen, so paging back to last week
+    /// costs nothing per minute.
+    func refreshToday() {
+        let key = Calendar.current.startOfDay(for: Date())
+        guard displayedDays.contains(where: { Calendar.current.isDate($0, inSameDayAs: key) })
+                || (mode == .day && Calendar.current.isDateInToday(selectedDay)) else { return }
+
+        let database = appState.database
+        let rangeKey = loadKey
+        blockRefresh?.cancel()
+        blockRefresh = Task.detached(priority: .utility) {
+            let blocks = TimeBlockEngine(database: database).generateBlocks(for: key)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                // The range may have moved while this was deriving; publishing then
+                // would drop today's blocks under another week's header.
+                guard loadKey == rangeKey else { return }
+                weekBlocks[key] = blocks
+            }
+        }
+    }
+
     /// The span of days whose events are on screen.
     var eventRange: (Date, Date)? {
         let cal = Calendar.current

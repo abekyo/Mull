@@ -87,6 +87,9 @@ struct CalendarWeekView: View {
     /// week of activity blocks from the database, and a busy sync should not do it
     /// forty times.
     @State var eventRefresh: Task<Void, Never>?
+    /// The in-flight re-derive of today's blocks, so a slow minute cannot stack up
+    /// behind the next one.
+    @State var blockRefresh: Task<Void, Never>?
 
     /// The clock behind the "now" line. Read from state, not `Date()` during body —
     /// body only re-runs on state changes, so the line used to freeze mid-morning.
@@ -263,6 +266,11 @@ struct CalendarWeekView: View {
             // to reach an app that slept through midnight. The minute tick is the
             // belt to its braces, and both converge on the same state.
             rollOver(to: instant)
+            // The observed half was derived once, when the range was opened, and
+            // then never again — so a window left on today showed the work you were
+            // doing when you opened it and nothing since. The red now-line kept
+            // moving down an hour that stayed empty.
+            refreshToday()
         }
         .onReceive(NotificationCenter.default
             .publisher(for: .NSCalendarDayChanged)
