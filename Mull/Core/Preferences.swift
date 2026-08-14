@@ -39,10 +39,10 @@ enum Preferences {
     /// rather than the same one resumed. Seconds; `0` disables rejoining entirely.
     ///
     /// See `TimeBlockEngine.coalesceResumed` for what it does and
-    /// `TimeBlockEngine.defaultResumeGap` for why ten minutes is the default.
+    /// `BlockSegmenter.defaultResumeGap` for why ten minutes is the default.
     static var resumeGap: TimeInterval {
         guard let stored = store.object(forKey: resumeGapKey) as? Int else {
-            return TimeBlockEngine.defaultResumeGap
+            return BlockSegmenter.defaultResumeGap
         }
         return TimeInterval(max(stored, 0))
     }
@@ -77,6 +77,19 @@ enum Preferences {
             return defaultMirrorInterval
         }
         return TimeInterval(max(stored, 60))
+    }
+
+    /// Turn the mirror on and point it somewhere, in one act.
+    ///
+    /// The two settings are separate switches and were reachable only from a Settings
+    /// pane, which is how the mirror spent its whole life never running: turning it on
+    /// there and leaving the calendar unpicked produces a timer that fires every hour
+    /// and returns immediately. They are set together or not at all — a caller that has
+    /// a calendar in hand is the only kind that should be enabling this.
+    static func enableMirror(calendarID: String) {
+        guard !calendarID.isEmpty else { return }
+        store.set(calendarID, forKey: mirrorCalendarKey)
+        store.set(true, forKey: mirrorEnabledKey)
     }
 
     // MARK: - Output

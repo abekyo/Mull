@@ -193,11 +193,20 @@ re-record yesterday, so this is the one place where being thorough now actually 
 | Keystrokes | CGEvent tap | Everything typed, IME romaji included, 3s flush |
 | Clipboard | NSPasteboard polling (0.5s) | Post-IME, high signal, up to 40,000 chars |
 | Window titles | Accessibility API (5s) | Which file / page / tab |
-| Window body | Accessibility API (30s) | The work itself, not just its title |
-| Browser URLs | AppleScript | Safari, Chrome, Arc, Brave, Edge |
+| Window body | Accessibility API (30s, 5min while untouched) | The work itself, not just its title |
+| Browser URLs | AppleScript (30s, 5min while untouched) | Safari, Chrome, Arc, Brave, Edge |
 | App switches | NSWorkspace | Time allocation |
 | Calendar | EventKit | Today's schedule |
 | Email | AppleScript, Mail.app (opt-in) | Headers only on this channel: subject, sender, date |
+
+"While untouched" means two minutes with no key, click or scroll anywhere on the machine.
+Those two rows then sample every five minutes instead of every thirty seconds; they do not
+stop, and no other row changes. Both are cheap for mull and expensive for whoever is in
+front — one walks up to 1,500 Accessibility nodes in that app, the other wakes the browser's
+main thread with an Apple Event — and against a screen nobody is touching, both re-read what
+they have already recorded. Window titles keep their 5s: someone's agent working while they
+are away from the keyboard is a normal afternoon here, and the record should be able to say
+what it did.
 
 The rows are not independent of each other. "Headers only" is true of the Mail channel and
 false of the product: Mail.app is not on the excluded-apps list, so while you are reading a
@@ -215,7 +224,7 @@ replaced by them.
 
 | Field | Derived from | Used for |
 |---|---|---|
-| `entity` | window title head segment, git repo, clipboard paths | the strongest axis |
+| `entity` | a window title segment. Editors put the project last, so `candidates.last ?? candidates.first` | the strongest axis |
 | `contentType` | note / error / decision / code / web / file | faceting |
 | `salience` | 0 to 1. A copied error scores high, a stray keystroke low | ranking, budget |
 | `session` | gap < N minutes | "this chunk of work" |
@@ -274,6 +283,11 @@ any tool (git, Obsidian, iCloud, another AI):
 └── daily/                      — one file per day
 ```
 
+`daily/` does not yet hold what that line promises. `MullEngine.writeDailyFile` is a no-op, and
+what is actually written there is a copy of `full.md`, refreshed every 60 seconds. The day's
+written record exists — it is generated, it is accurate, and it is in the database — but it has
+no file. See [DIRECTION.md](DIRECTION.md) §6.2.
+
 | File | Who reads it | What changes because of it |
 |------|---|---|
 | `rules.md` | your agent, every session | **it works the way you corrected it to** |
@@ -282,8 +296,16 @@ any tool (git, Obsidian, iCloud, another AI):
 | `full.md` | your agent, on request | — *(see [CLAUDE.md](CLAUDE.md) §7: this one cannot answer the question, and is under review)* |
 
 `me.md` is held to a strict rule: **it may only contain lines you can trace back to a specific
-record.** Guessing someone's job from their app list is a claim, not an observation. Inferences
-about role, tech stack, and domain were removed in 2026-07 for exactly this reason.
+record.** Guessing someone's job from their app list is a claim, not an observation. The code
+that inferred role, tech stack and domain was removed in 2026-07 for exactly this reason.
+
+The rule now binds what mull writes. It did not reach back for what mull had already written:
+on 2026-08-14 the author's own `me.md` still carried `- Software developer` under the block id
+`mem:user-role`, from a `memory_entries` row stamped 2026-06-02 (`Senior iOS developer`) that
+predates the cut and has been handed to every agent since. Deleting the extractor stopped the
+production of such lines and did nothing about the stock of them. Purging the rows the old rule
+produced is open work, and it is stated here rather than fixed quietly because a promise a
+reader can falsify by opening one file costs more than the line it was protecting (§7.4).
 
 ---
 
@@ -404,13 +426,22 @@ toggle, because there is nothing to toggle.
 
 ### Why this is open source
 
-Every tool that sits near your keystrokes and earned trust did it by not keeping the content.
-TextExpander holds 30 keystrokes in volatile memory, 300 with Snippet Suggestions turned on, and
-what it holds is a hash rather than the characters you typed. Espanso holds the last 3 characters
-by default. ActivityWatch counts keystrokes and says plainly that it is not a keylogger.
+Tools that sit near your keystrokes have earned trust two different ways, and only one of them is
+"keep nothing". TextExpander holds 30 keystrokes in volatile memory, 300 with Snippet Suggestions
+turned on, and what it holds is a hash rather than the characters you typed. Espanso holds the
+last 3 characters by default. ActivityWatch does not record which keys you pressed, and says so
+plainly — though it does keep window titles and browser URLs, which is content by the definition
+this project uses for itself.
 
-mull keeps the content. The two products that made the same choice and shipped it closed source,
-Rewind and Microsoft Recall, were both rejected by their users.
+The other way is Maccy. It keeps every string you copy, on your machine, forever, and it is the
+43rd most-installed cask on Homebrew out of 22,030 over the last year. It is MIT-licensed, so you
+can read what it does with your clipboard. Keeping the content did not cost it anything; being
+unreadable would have.
+
+mull keeps the content. Of the two products that kept it and shipped closed, Microsoft Recall was
+walked back to explicit opt-in after security researchers took it apart, and Rewind was folded
+into Meta and had screen capture switched off for good in December 2025. Neither of them ever let
+you check a claim it made about itself.
 
 So the source is the argument. You should not trust a closed binary with an Input Monitoring
 grant, and that includes this one. Read `Mull/Services/RecordingService.swift` and
@@ -461,6 +492,8 @@ MullMCP/            standalone MCP server binary (also embedded at
 Tests/              XCTest suite — run it, do not trust a count written in a document
 eval/               selection_eval.swift + run.sh — the synthetic retrieval harness
 eval/real/          harvest.sh + run.sh — the same ranker, scored on your own log
+eval/calendar/      harvest.sh + run.sh — the titles the calendar mirror would write,
+                    scored on your own log
 scripts/            release.sh — build, sign, notarize, staple, verify
 ```
 
@@ -476,11 +509,18 @@ what. Read that before proposing a design change. You do not need Japanese to wr
 ### The GUI
 
 There is a SwiftUI app: menu bar, a Home view, a calendar, a live event stream, and a markdown
-editor over the vault. It works, and it is how you inspect and correct what mull believes.
+editor over the vault.
 
-It is not where the work is going. New UI investment is frozen. The product is the MCP surface
-and the app is the inspector. The visual design documents are kept out of this repository for
-the same reason: there is nothing here for them to govern until that changes.
+On 2026-08-14 that last one was ruled out. The GUI keeps the two things a person opens every
+day — the calendar that puts your schedule beside what you actually did, and the markdown file
+holding that day's record — and gives up being a place to edit the vault. Your vault is plain
+markdown in a folder; Finder, Obsidian and VS Code are already better at editing it than mull
+will ever be. The files do not change, only the editor over them goes.
+
+**The Files tab is still in the shipped app.** The ruling is a decision, not a completion
+report, and it is sequenced behind two repairs so the deletion is not made while the thing it
+replaces is broken. [DIRECTION.md](DIRECTION.md) §6.2 is the source of truth for the reasoning,
+the order of work, and what would reverse it.
 
 ---
 

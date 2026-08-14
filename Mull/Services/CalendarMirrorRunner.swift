@@ -30,6 +30,21 @@ final class CalendarMirrorRunner {
     private static let writtenKey = "calendarMirrorWritten"
     private static let tombstoneKey = "calendarMirrorTombstoned"
 
+    /// What the mirror has been doing, for the screens that report it.
+    ///
+    /// Held in memory rather than decoded on demand, unlike the two ledgers above. The
+    /// toolbar pill reads this from `body`, which re-runs on every hover and every
+    /// frame of a drag — a `UserDefaults` read and a `JSONDecoder` pass per frame to
+    /// re-learn a number that changes once an hour. Loaded once and written through.
+    private(set) lazy var status: CalendarMirrorStatus = .load()
+
+    private func update(_ change: (inout CalendarMirrorStatus) -> Void) {
+        var next = status
+        change(&next)
+        status = next
+        next.save()
+    }
+
     /// Both ledgers are keyed on a block's start instant, so they prune by arithmetic
     /// rather than by remembering when each entry was added. Kept a little longer than
     /// the covered range so a run that is late by a day still recognises its own work.
@@ -134,7 +149,14 @@ final class CalendarMirrorRunner {
 
     /// Fold a hand-written result into the ledger, so the timer afterwards agrees with
     /// what the press did — including forgetting tombstones the press overrode.
-    func recordManualResult(created: [String], deleted: [String], now: Date = Date()) {
+    ///
+    /// The status is recorded here too, and it has to be: on 2026-08-14 every one of
+    /// the 37 keys in the ledger had come through this path rather than the timer, and
+    /// nothing distinguished them. A press and a tick write the same events; only the
+    /// status says which of them has ever happened.
+    func recordManualResult(_ plan: CalendarMirror.Plan,
+                            created: [String], updated: Int, deleted: [String],
+                            now: Date = Date()) {
         var written = self.written
         written.formUnion(created)
         written.subtract(deleted)
@@ -143,37 +165,59 @@ final class CalendarMirrorRunner {
         var tombstoned = self.tombstoned
         tombstoned.subtract(created)
         self.tombstoned = prune(tombstoned, before: now)
+
+        update { $0.record(plan, created: created.count, updated: updated,
+                           deleted: deleted.count, failures: 0, lastError: nil, now: now) }
     }
 
     private func apply(_ plan: CalendarMirror.Plan, calendarID: String, now: Date) {
-        guard !plan.isEmpty else { return }
+        // Recorded even when there is nothing to do. "Ran and found nothing" and "did
+        // not run" produce the same empty calendar and are the opposite problem, and
+        // until this line there was no way to tell them apart from inside mull.
+        guard !plan.isEmpty else {
+            update { $0.record(plan, created: 0, updated: 0, deleted: 0,
+                               failures: 0, lastError: nil, now: now) }
+            return
+        }
+
         var written = self.written
         var tombstoned = self.tombstoned
+        var created = 0, updated = 0, deleted = 0, failures = 0
+        var lastError: String?
+
+        // One failure is not a reason to abandon the rest — the next run tries again,
+        // and the ledger has not recorded a write that did not happen. It is a reason
+        // to say so afterwards, which is the half that was missing.
+        func attempt(_ work: () throws -> Void) -> Bool {
+            do { try work(); return true } catch {
+                failures += 1
+                lastError = (error as? CalendarService.WriteError)?.errorDescription
+                    ?? error.localizedDescription
+                return false
+            }
+        }
 
         for entry in plan.create {
             let fields = CalendarService.EventFields(title: entry.title, start: entry.start,
                                                      end: entry.end, calendarID: calendarID)
-            do {
-                _ = try calendar.createEvent(fields,
-                                             extras: CalendarService.EventExtras(url: CalendarMirror.marker(entry.key)))
+            let extras = CalendarService.EventExtras(url: CalendarMirror.marker(entry.key))
+            if attempt({ _ = try calendar.createEvent(fields, extras: extras) }) {
                 written.insert(entry.key)
-            } catch {
-                // One event failing is not a reason to abandon the rest: the next run
-                // will try again, and the ledger has not recorded a write that did not
-                // happen.
-                continue
+                created += 1
             }
         }
 
         for change in plan.update {
             let fields = CalendarService.EventFields(title: change.entry.title, start: change.entry.start,
                                                      end: change.entry.end, calendarID: calendarID)
-            try? calendar.updateEvent(change.handle, to: fields)
+            if attempt({ try calendar.updateEvent(change.handle, to: fields) }) { updated += 1 }
         }
 
         for removal in plan.delete {
-            try? calendar.deleteEvent(removal.handle)
-            written.remove(removal.key)
+            if attempt({ try calendar.deleteEvent(removal.handle) }) {
+                written.remove(removal.key)
+                deleted += 1
+            }
         }
 
         // A key mull will never write again does not need to be remembered as written.
@@ -182,6 +226,33 @@ final class CalendarMirrorRunner {
 
         self.written = prune(written, before: now)
         self.tombstoned = prune(tombstoned, before: now)
+
+        recordRejections(plan, now: now)
+
+        update { $0.record(plan, created: created, updated: updated, deleted: deleted,
+                           failures: failures, lastError: lastError, now: now) }
+    }
+
+    /// Turn the blocks the user deleted into correction cards.
+    ///
+    /// This is the wire that was missing. `tombstone` already carried the strongest
+    /// signal mull can get — it proposed a thing and a human removed it — and spent it
+    /// entirely on not repeating itself. The cards go where `Curator`'s go, so
+    /// `get_corrections` hands them to an agent and the verdict lands in the same
+    /// ledger `Selection` already reads (§7.3 ①と②, both of them).
+    ///
+    /// Additive, like `Curator.recordCorrections`: a ledger the user has hand-edited is
+    /// parsed and merged, never replaced.
+    private func recordRejections(_ plan: CalendarMirror.Plan, now: Date) {
+        let cards = CalendarMirror.correctionCards(for: plan, now: now,
+                                                   context: Curator.contextSnapshotProvider?())
+        guard !cards.isEmpty else { return }
+        for card in cards {
+            _ = MullDirectory.write(card.render(), to: "\(CorrectionIndex.directory)/\(card.id).md")
+        }
+        let onDisk = CorrectionIndex.parseLedger(MullDirectory.read(CorrectionIndex.ledgerPath) ?? "")
+        let merged = CorrectionIndex.merge(onDisk, CorrectionIndex.fold(cards))
+        _ = MullDirectory.write(merged.renderLedger(), to: CorrectionIndex.ledgerPath)
     }
 
     /// Both ledgers are sets of block-start epochs, so old entries fall out by age.
@@ -200,5 +271,10 @@ final class CalendarMirrorRunner {
     func forgetLedger() {
         Preferences.store.removeObject(forKey: Self.writtenKey)
         Preferences.store.removeObject(forKey: Self.tombstoneKey)
+        // The counts described work in the calendar being left behind. Carrying them
+        // over would report a mirror as healthy on the strength of writes it made
+        // somewhere else — which is the same class of lie as the ledger itself.
+        CalendarMirrorStatus.clear()
+        status = CalendarMirrorStatus()
     }
 }

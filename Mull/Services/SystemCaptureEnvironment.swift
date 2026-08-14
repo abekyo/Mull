@@ -70,4 +70,20 @@ final class SystemCaptureEnvironment: CaptureEnvironment {
     }
 
     var isSecureInputEnabled: Bool { IsSecureEventInputEnabled() }
+
+    var focusedWindowBody: String? { WindowTextCapture.focusedWindowText() }
+
+    /// `kCGAnyInputEventType` is `~0` — every input type at once, from the
+    /// session-wide event stream, so input into other apps counts. This is the
+    /// same clock display sleep and the screen saver run on, and unlike mull's own
+    /// event tap it sees mouse movement and scrolling, so reading a long page
+    /// without typing is correctly "present" rather than "away".
+    ///
+    /// `rawValue: ~0` is not one of the enum's cases. It survives the init on
+    /// every SDK this has been run against, but a nil here must mean "present"
+    /// rather than crash or silently stop capture.
+    var secondsSinceUserInput: TimeInterval {
+        guard let anyInput = CGEventType(rawValue: ~0) else { return 0 }
+        return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+    }
 }

@@ -150,9 +150,11 @@ final class VaultLocalizationTests: XCTestCase {
         // a fresh section under the current language on top of the stale one.
         let body = "# my own comment\n- my own pinned fact"
         let english = body + "\n\n# ── mull profile (from onboarding · edit in Settings) ──\n- Role: founder\n# ── end mull profile ──\n"
-        let japanese = body + "\n\n# ── mull プロフィール（オンボーディングの回答 · Settings で編集） ──\n- Role: founder\n# ── mull プロフィール ここまで ──\n"
+        let japanese = body + "\n\n# ── mull プロフィール（セットアップでの回答 · 設定で編集） ──\n- Role: founder\n# ── mull プロフィール ここまで ──\n"
+        // The Japanese start marker before it was reworded to match Settings.
+        let japaneseLegacy = body + "\n\n# ── mull プロフィール（オンボーディングの回答 · Settings で編集） ──\n- Role: founder\n# ── mull プロフィール ここまで ──\n"
 
-        for text in [english, japanese] {
+        for text in [english, japanese, japaneseLegacy] {
             let stripped = OnboardingProfile.removeSection(from: text)
             XCTAssertFalse(stripped.contains("Role: founder"))
             XCTAssertTrue(stripped.contains("- my own pinned fact"), "only the managed section goes")

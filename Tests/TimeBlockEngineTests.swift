@@ -54,7 +54,7 @@ final class TimeBlockEngineTests: XCTestCase {
         // `Preferences`. The test bundle's host is Mull.app, so `Preferences.store`
         // resolves to the *developer's own* settings — a suite whose segmentation
         // depended on that would pass or fail according to a picker in Settings.
-        engine = TimeBlockEngine(database: db, resumeGap: TimeBlockEngine.defaultResumeGap)
+        engine = TimeBlockEngine(database: db, resumeGap: BlockSegmenter.defaultResumeGap)
     }
 
     override func tearDown() {
@@ -161,7 +161,7 @@ final class TimeBlockEngineTests: XCTestCase {
         XCTAssertEqual(engine.generateBlocks(for: fixtureDate).count, 1, "179s gap must stay in the same block")
 
         let db2 = try! DatabaseService.temporary()
-        let engine2 = TimeBlockEngine(database: db2, resumeGap: TimeBlockEngine.defaultResumeGap)
+        let engine2 = TimeBlockEngine(database: db2, resumeGap: BlockSegmenter.defaultResumeGap)
         for t in [at(9, 0), at(9, 1), at(9, 1).addingTimeInterval(180)] {
             db2.insertEvent(RecordingEvent(timestamp: t, eventType: .screenText,
                                            appName: "Xcode", windowTitle: "Nocturne — IngestPipeline.swift"))
@@ -449,6 +449,23 @@ final class TimeBlockEngineTests: XCTestCase {
 
         XCTAssertEqual(blocks.count, 1)
         XCTAssertEqual(blocks[0].label, "Refactored the ChartViewModel bindings")
+        // The caption stays on the grid, and the block remembers it was copied so the
+        // one surface that leaves this Mac can refuse it (`CalendarMirror.title(for:)`).
+        XCTAssertTrue(blocks[0].labelFromClipboard)
+    }
+
+    func testALabelFromAWindowTitleIsNotMarkedAsCopied() {
+        seedRun(start: at(9, 0), count: 11, spacing: 60, app: "Code",
+                title: "PantryApp — ChartViewModel.swift")
+        db.insertEvent(RecordingEvent(timestamp: at(9, 2), eventType: .clipboard,
+                                      appName: "Code",
+                                      textContent: "Refactored the ChartViewModel bindings"))
+
+        let blocks = engine.generateBlocks(for: fixtureDate)
+
+        XCTAssertEqual(blocks[0].label, "PantryApp — ChartViewModel.swift")
+        XCTAssertFalse(blocks[0].labelFromClipboard,
+                       "a clipboard entry sitting in the same block does not taint a real title")
     }
 
     // MARK: - Duration accounting
@@ -470,7 +487,7 @@ final class TimeBlockEngineTests: XCTestCase {
         XCTAssertEqual(blocks[0].duration, 270, accuracy: 0.5)
         XCTAssertEqual(blocks[0].activeDuration, 210, accuracy: 0.5,
                        "the 150s gap contributes only the 90s cap")
-        XCTAssertEqual(TimeBlockEngine.activeGapCap, 90)
+        XCTAssertEqual(BlockSegmenter.activeGapCap, 90)
         XCTAssertLessThanOrEqual(blocks[0].activeDuration, blocks[0].duration)
     }
 

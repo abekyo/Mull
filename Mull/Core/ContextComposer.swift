@@ -29,8 +29,23 @@ struct ContextComposer {
     /// Exposed because onboarding composes a starter block from a live read of the
     /// Mac before any history exists, and that block has to arrive framed the same
     /// way this one does.
-    static let preamble = "Here is my current context from mull (a tool that records what I work on). "
-        + "Use it to help me without making me re-explain myself.\n"
+    ///
+    /// Follows the reader's language like every other line in the block. It was a
+    /// bare English literal while the eight sentences beneath it went through
+    /// `VaultText`, so a Japanese user pasted a Japanese block with an English
+    /// first line — the one line they read before deciding to paste at all. The
+    /// argument for pinning it ("its audience is a model") is the same one
+    /// `VaultText` already rejected for me.md: a model reads Japanese, and the
+    /// person reviewing the block before they send it does not necessarily.
+    ///
+    /// A `var`, not a `let`: a `let` is resolved once per process, which would
+    /// pin the language to whatever it was the first time anything asked.
+    static var preamble: String {
+        VaultText.t("Here is my current context from mull (a tool that records what I work on). "
+                    + "Use it to help me without making me re-explain myself.\n",
+                    "これは mull（作業内容を記録する道具）が持っている、私のいまの文脈です。"
+                    + "説明し直さなくて済むように、これを踏まえて手伝ってください。\n")
+    }
 
     /// Build the "Copy context" text: a selected, current, self-contained snapshot
     /// rather than a raw full.md dump. It composes the same use-time signals the MCP
@@ -154,7 +169,14 @@ struct ContextComposer {
             }
 
             let anchor = state.activeEntity
-            let anchorSnapshot = anchor.flatMap { name in active.first { $0.name == name } }
+            // Looked up in `snaps`, not in `active`. `active` is capped at five and
+            // ordered by last-active, so the project the user is sitting in right
+            // now drops out of it the moment five other things were touched more
+            // recently — and the opening sentence quietly loses the number the
+            // rest of the block is least able to replace.
+            let anchorSnapshot = anchor.flatMap { name in
+                snaps.first { $0.name == name && $0.isWorthReporting }
+            }
             var sections: [String] = []
 
             // The user's own answers, first and verbatim. They were typed rather
@@ -176,9 +198,9 @@ struct ContextComposer {
             case (nil, nil):
                 break
             }
-            if let snapshot = anchorSnapshot {
-                opening.append(VaultText.t("\(snapshot.totalDurationFormatted) today.",
-                                           "今日ここまで \(snapshot.totalDurationFormatted)。"))
+            if let today = anchorSnapshot?.todayDuration {
+                let span = VaultText.duration(seconds: today)
+                opening.append(VaultText.t("\(span) today.", "今日ここまで \(span)。"))
             }
             if !opening.isEmpty { sections.append(opening.joined(separator: " ")) }
 
@@ -189,7 +211,14 @@ struct ContextComposer {
             if !about.isEmpty { sections.append(about + VaultText.t(".", "。")) }
 
             if !doing.isEmpty {
-                let header = VaultText.t("Today, most recent first:", "今日やったこと（新しい順）:")
+                // "Today" was the claim; thirty minutes was the query
+                // (`fetchEvents(from: -1800)`), and nothing above widens it. A real
+                // block headed 今日やったこと listed six lines spanning 92 seconds.
+                // Two ways to make that true — say thirty minutes, or fetch a day —
+                // and only one of them can be made without re-measuring what the
+                // wider window pulls in (§0, scenario D). So: say thirty minutes.
+                let header = VaultText.t("Last 30 minutes, most recent first:",
+                                         "直近30分（新しい順）:")
                 let lines = doing.map { "- " + withoutProjectSuffix($0, anchor) }
                 sections.append(([header] + lines).joined(separator: "\n"))
             }

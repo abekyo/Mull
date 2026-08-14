@@ -81,7 +81,7 @@ struct FactExtractor {
                 facts.append(Fact(.identity, VaultText.t("Bilingual: Japanese (\(pct(jpShare))%) and English (\(pct(enShare))%)",
                                                   "二言語: 日本語 \(pct(jpShare))% / 英語 \(pct(enShare))%")))
             } else if jpShare > 65 {
-                facts.append(Fact(.identity, "Primary language: Japanese"))
+                facts.append(Fact(.identity, VaultText.t("Primary language: Japanese", "主な言語: 日本語")))
             } else if enShare > 65 {
                 facts.append(Fact(.identity, VaultText.t("Primary language: English", "主な言語: 英語")))
             }

@@ -67,8 +67,13 @@ enum LiveContextGenerator {
 
     // MARK: - Staleness sweep
     //
-    // The 60s pass is the only thing in mull guaranteed to keep running, so it is
-    // where the expiry of OTHER passes' output has to live. `nightly:` blocks come
+    // The 60s pass is the only thing in mull that keeps running for as long as
+    // anything is being recorded (`AppState.shouldRegenerateContext` skips it when
+    // no event has arrived since the last one, but any event at all resumes it), so
+    // it is where the expiry of OTHER passes' output has to live. A vault nobody is
+    // adding to also has no new `nightly:` block to go stale, so the gate cannot
+    // strand one: the expiry is late only for a machine that is recording nothing,
+    // and it is late by the length of that silence. `nightly:` blocks come
     // from the LLM consolidation; with no provider configured that pass never runs
     // again, and its last output stays in now.md and full.md under the heading
     // "From last night's consolidation" indefinitely — in the shipped vault, for

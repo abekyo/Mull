@@ -171,6 +171,39 @@
         }
       }
     },
+    "%@ not found. Available: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ が見つかりません。使えるモデル: %@"
+          }
+        }
+      }
+    },
+    "%@ not loaded. Available: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ は読み込まれていません。使えるモデル: %@"
+          }
+        }
+      }
+    },
+    "%@ ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ が使えます"
+          }
+        }
+      }
+    },
     "%@ today": {
       "extractionState": "manual",
       "localizations": {
@@ -765,7 +798,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "あなたの記録について mull に聞く…"
+            "value": "記録について聞く…"
           }
         }
       }
@@ -1106,7 +1139,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日ぶんを消去"
+            "value": "今日の記録を消去"
           }
         }
       }
@@ -1205,7 +1238,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日ぶんを消去しますか？"
+            "value": "今日の記録を消去しますか？"
           }
         }
       }
@@ -1216,7 +1249,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "プロフィールの回答を消去しますか？"
+            "value": "セットアップでの回答を消去しますか？"
           }
         }
       }
@@ -1304,7 +1337,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このまま接続"
+            "value": "それでも接続"
           }
         }
       }
@@ -1315,7 +1348,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このまま接続…"
+            "value": "それでも接続…"
           }
         }
       }
@@ -1558,6 +1591,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "訂正"
+          }
+        }
+      }
+    },
+    "Could not build the request URL": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リクエスト URL を組み立てられませんでした"
           }
         }
       }
@@ -2041,7 +2085,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "回答を編集…"
+            "value": "編集…"
           }
         }
       }
@@ -2112,13 +2156,13 @@
         }
       }
     },
-    "Enter your key from Google AI Studio. A key you enter is kept in the macOS Keychain, never in a file.": {
+    "Enter your key from Google AI Studio.": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Google AI Studio で取得したキーを入力してください。入力したキーは macOS のキーチェーンに保管され、ファイルには書きません。"
+            "value": "Google AI Studio で取得したキーを入力してください。"
           }
         }
       }
@@ -2405,17 +2449,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "忘れますか？"
-          }
-        }
-      }
-    },
-    "Gemini Flash (Free)": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gemini Flash（無料）"
           }
         }
       }
@@ -2724,6 +2757,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "このファイルへ"
+          }
+        }
+      }
+    },
+    "Invalid base URL": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ベース URL が正しくありません"
           }
         }
       }
@@ -3520,6 +3564,17 @@
         }
       }
     },
+    "No API key entered": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API キーが入力されていません"
+          }
+        }
+      }
+    },
     "No calendar access, so no schedule here": {
       "extractionState": "manual",
       "localizations": {
@@ -3560,6 +3615,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "そのパスに実行可能ファイルがありません。"
+          }
+        }
+      }
+    },
+    "No internet connection": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "インターネットに接続していません"
           }
         }
       }
@@ -3942,13 +4008,13 @@
       "extractionState": "manual",
       "shouldTranslate": false
     },
-    "Off — local rule-based only (no cloud)": {
+    "Off — local rule-based only": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "オフ: ローカルの規則ベースのみ（クラウドなし）"
+            "value": "オフ: ローカルの規則ベースのみ"
           }
         }
       }
@@ -4597,7 +4663,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "あなたの記録から読みました。AI は呼んでいません。"
+            "value": "記録から読みました。AI は呼んでいません。"
           }
         }
       }
@@ -4652,7 +4718,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "あなたの記録を読んでいます…"
+            "value": "記録を読んでいます…"
           }
         }
       }
@@ -5009,17 +5075,6 @@
         }
       }
     },
-    "Requests go straight from this Mac to Google under your own key and account.": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "リクエストはこの Mac から Google へ直接送られます。あなた自身のキーとアカウントで通信します。"
-          }
-        }
-      }
-    },
     "Reread your mull folder": {
       "extractionState": "manual",
       "localizations": {
@@ -5048,7 +5103,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "回答をリセット"
+            "value": "リセット"
           }
         }
       }
@@ -5423,6 +5478,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ に送信"
+          }
+        }
+      }
+    },
+    "Server up, but no model loaded — load one in LM Studio": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバーは起動していますが、モデルが読み込まれていません。LM Studio で読み込んでください"
           }
         }
       }
@@ -5972,7 +6038,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "mull の MCP サーバーを試す"
+            "value": "MCP サーバーを試す"
           }
         }
       }
@@ -6021,13 +6087,13 @@
         }
       }
     },
-    "The banner when a summary finishes or fails. The summary itself still appears in the window and the menu bar's unread mark.": {
+    "The banner when the nightly summary finishes or fails. A run you start yourself is silent. The summary itself still appears in the window and the menu bar's unread mark.": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "要約が終わったとき、または失敗したときのバナーです。要約そのものはウィンドウとメニューバーの未読マークに出ます。"
+            "value": "夜の要約が終わったとき、または失敗したときのバナーです。自分で走らせた分は出ません。要約そのものはウィンドウとメニューバーの未読マークに出ます。"
           }
         }
       }
@@ -6248,6 +6314,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "期間"
+          }
+        }
+      }
+    },
+    "Timed out — server not responding": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タイムアウトしました。サーバーが応答していません"
           }
         }
       }
@@ -6654,7 +6731,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "完了した作業をカレンダーに書き出す"
+            "value": "完了した作業を書き出す"
           }
         }
       }
@@ -6808,7 +6885,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "あなたの回答"
+            "value": "セットアップでの回答"
           }
         }
       }
@@ -6819,7 +6896,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "セットアップでの回答は me.pinned.md を通じて me.md の先頭に載り、記録がそれを上書きすることはありません。消せば、mull はまたあなたの作業から推測し直します。"
+            "value": "この回答は me.pinned.md を通じて me.md の先頭に載り、記録がそれを上書きすることはありません。消せば、mull はまたあなたの作業から推測し直します。"
           }
         }
       }
@@ -6852,7 +6929,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "プロフィールへのあなた自身の編集"
+            "value": "プロフィール。あなた自身が書いた行"
           }
         }
       }
@@ -6874,7 +6951,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "プロフィールの回答"
+            "value": "セットアップでの回答"
           }
         }
       }

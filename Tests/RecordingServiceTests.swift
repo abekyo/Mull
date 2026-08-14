@@ -27,7 +27,19 @@ final class RecordingServiceTests: XCTestCase {
         var clipboardText: String?
         var clipboardIsMarkedDoNotStore: Bool = false
         var isSecureInputEnabled: Bool = false
+        var focusedWindowBody: String?
+        var secondsSinceUserInput: TimeInterval = 0
         var now: Date = Date(timeIntervalSince1970: 1_700_000_000)
+
+        /// Nobody has touched this machine for `seconds`. Advances the clock too,
+        /// because the two always move together on a real one.
+        func goAway(for seconds: TimeInterval) {
+            secondsSinceUserInput = seconds
+            now = now.addingTimeInterval(seconds)
+        }
+
+        /// Somebody just touched it.
+        func comeBack() { secondsSinceUserInput = 0 }
 
         /// Copy something, the way a person would: the change counter moves.
         func copy(_ text: String) {
@@ -362,5 +374,78 @@ final class RecordingServiceTests: XCTestCase {
         leaveApp(toBundleID: "com.apple.Safari", named: "Safari")
 
         XCTAssertEqual(db.texts, ["Code: Selection.swift — Mull (2m10s)"])
+    }
+
+    // MARK: - The AX walk nobody was there to need
+    //
+    // The window-body poller is the most expensive thing mull does, and almost
+    // none of that cost lands on mull: it is thousands of cross-process
+    // Accessibility calls into whatever app is in front. At a fixed 30s it ran
+    // 2,880 times a day into an app nobody was looking at.
+
+    /// Long enough to clear the 80-char floor, distinct per call so the dedupe
+    /// cannot be what makes a test pass.
+    private static func body(_ marker: String) -> String {
+        marker + String(repeating: " lorem ipsum dolor", count: 8)
+    }
+
+    func testTheWindowBodyIsCapturedWhileTheUserIsThere() {
+        env.focusedWindowBody = Self.body("one")
+        recorder.pollWindowBody()
+
+        XCTAssertEqual(db.texts, [Self.body("one")])
+    }
+
+    func testTheWindowIsNotWalkedAgainRightAfterTheUserLeaves() {
+        env.focusedWindowBody = Self.body("one")
+        recorder.pollWindowBody()
+
+        // Past `awayAfter`, inside `awaySampleInterval`.
+        env.goAway(for: 180)
+        env.focusedWindowBody = Self.body("two")
+        recorder.pollWindowBody()
+
+        XCTAssertEqual(db.texts, [Self.body("one")],
+                       "the AX walk ran again with nobody at the machine")
+    }
+
+    /// The other half, and the reason this is a backoff rather than a switch: a
+    /// machine left alone can still change, and what it did is not re-readable
+    /// afterwards.
+    func testAnAbandonedMachineIsStillSampledOccasionally() {
+        env.focusedWindowBody = Self.body("one")
+        recorder.pollWindowBody()
+
+        env.goAway(for: 400)
+        env.focusedWindowBody = Self.body("two")
+        recorder.pollWindowBody()
+
+        XCTAssertEqual(db.texts, [Self.body("one"), Self.body("two")],
+                       "an away machine stopped being sampled at all")
+    }
+
+    func testComingBackDoesNotWaitOutTheAwayInterval() {
+        env.focusedWindowBody = Self.body("one")
+        recorder.pollWindowBody()
+
+        env.goAway(for: 180)
+        env.focusedWindowBody = Self.body("two")
+        recorder.pollWindowBody()
+
+        env.comeBack()
+        recorder.pollWindowBody()
+
+        XCTAssertEqual(db.texts.last, Self.body("two"),
+                       "a returning user had to sit through the away interval")
+    }
+
+    /// The backoff is not a privacy gate and must not be read as one: an excluded
+    /// app is still excluded when somebody is right there typing.
+    func testAnExcludedAppsBodyIsNeverWalkedEvenWhilePresent() {
+        env.frontmostBundleID = "com.1password.1password"
+        env.focusedWindowBody = Self.body("vault")
+        recorder.pollWindowBody()
+
+        XCTAssertTrue(db.written.isEmpty, "an excluded app's body reached the database")
     }
 }

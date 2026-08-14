@@ -66,6 +66,51 @@ final class RecordingService {
     private var lastClipboardCount: Int = 0
     private var lastClipboardText: String = ""
 
+    // MARK: - Away backoff
+    //
+    // Two of the pollers below are expensive in a way that does not show up in
+    // mull's own CPU time, because most of the work happens in somebody else's
+    // process: the window-body walk is up to 1,500 AX nodes × 3 cross-process
+    // calls into whatever app is in front, and the browser URL fetch is a
+    // synchronous Apple Event that wakes the browser's main thread. Both ran at a
+    // fixed 30s whether or not anyone was at the machine, which is 2,880 walks a
+    // day into an app nobody is looking at.
+    //
+    // With no input at all, neither one can learn anything: an untouched window's
+    // body is the body already recorded (the `lastWindowBody` dedupe would drop
+    // it) and an untouched browser is on the URL already cached. So while the user
+    // is away, sample rarely rather than not at all — rarely, because "the machine
+    // did something while I was gone" is exactly the kind of thing the record is
+    // for, and the territory cannot be re-read later (MAP-ARCHITECTURE).
+    //
+    // The 5s window-title poll is deliberately NOT backed off. It is two AX calls,
+    // and titles are the entity anchor the whole selection layer ranks on — an
+    // agent working in the editor while its user is away from the keyboard is a
+    // thing that happens here, and mull should be able to say what it did.
+
+    /// No human input for this long and the pollers treat the user as away.
+    static let awayAfter: TimeInterval = 120
+
+    /// How often the expensive pollers still sample while the user is away.
+    static let awaySampleInterval: TimeInterval = 300
+
+    /// Nobody has touched the machine for `awayAfter`.
+    var isUserAway: Bool { environment.secondsSinceUserInput >= Self.awayAfter }
+
+    /// Whether an expensive poller should run this tick. Always yes while the user
+    /// is present; while they are away, yes once per `awaySampleInterval`.
+    ///
+    /// The caller records `now` into its own `last` only when it actually goes on
+    /// to do the work, so a tick dropped by a privacy gate does not consume the
+    /// slot. Coming back is instant: one keypress makes this true again on the
+    /// next tick rather than after the interval.
+    private func dueWhileAway(since last: Date) -> Bool {
+        !isUserAway || environment.now.timeIntervalSince(last) >= Self.awaySampleInterval
+    }
+
+    private var lastWindowBodyPollAt: Date = .distantPast
+    private var lastBrowserURLPollAt: Date = .distantPast
+
     /// Public read-only access for ProactiveEngine.
     var currentWindowTitlePublic: String? { currentWindowTitle }
     var lastBrowserURLPublic: String? { lastBrowserURL.isEmpty ? nil : lastBrowserURL }
@@ -429,17 +474,31 @@ final class RecordingService {
 
     private func startWindowBodyMonitor() {
         windowBodyTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            guard let self, self.isRunning, !self.isPaused else { return }
-            guard !self.isExcludedApp() else { return }
-            if environment.isSecureInputEnabled { return }
-            if let title = self.currentWindowTitle, PrivateBrowsing.isPrivate(title) { return }
-
-            // Below ~80 chars a title-only window adds nothing over .screenText.
-            guard let body = WindowTextCapture.focusedWindowText(), body.count >= 80 else { return }
-            guard body != self.lastWindowBody else { return }
-            self.lastWindowBody = body
-            self.recordEvent(type: .windowBody, text: body)
+            guard let self, self.isRunning else { return }
+            self.pollWindowBody()
         }
+    }
+
+    /// One window-body tick. Internal for the same reason as the other two
+    /// pollers: the gates below are policy, and policy that cannot be called
+    /// cannot be tested.
+    func pollWindowBody() {
+        guard !isPaused else { return }
+        guard !isExcludedApp() else { return }
+        if environment.isSecureInputEnabled { return }
+        if let title = currentWindowTitle, PrivateBrowsing.isPrivate(title) { return }
+
+        // Last gate before the expensive part, and only the expensive part: the
+        // privacy gates above have already answered, and their answers cost
+        // nothing. Nothing below this line runs 30-secondly with nobody there.
+        guard dueWhileAway(since: lastWindowBodyPollAt) else { return }
+        lastWindowBodyPollAt = environment.now
+
+        // Below ~80 chars a title-only window adds nothing over .screenText.
+        guard let body = environment.focusedWindowBody, body.count >= 80 else { return }
+        guard body != lastWindowBody else { return }
+        lastWindowBody = body
+        recordEvent(type: .windowBody, text: body)
     }
 
     // MARK: - 3c. Browser URL Monitor
@@ -506,6 +565,14 @@ final class RecordingService {
         }
 
         guard !browserFetchInFlight, let ask = browserURLScript() else { return }
+
+        // After the in-flight check, so a tick that had nothing to do anyway does
+        // not spend the away slot. A browser nobody is touching stays on the URL
+        // already in `lastBrowserURL`; waking it every 30s to be told that costs
+        // the browser more than it costs mull.
+        guard dueWhileAway(since: lastBrowserURLPollAt) else { return }
+        lastBrowserURLPollAt = environment.now
+
         browserFetchInFlight = true
 
         Self.browserQueue.async {

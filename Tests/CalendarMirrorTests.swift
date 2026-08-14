@@ -11,7 +11,7 @@ import XCTest
 final class CalendarMirrorTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
-    private let resumeGap = TimeBlockEngine.defaultResumeGap
+    private let resumeGap = BlockSegmenter.defaultResumeGap
 
     /// A block ending `minutesAgo` before `now`, spanning `spanMinutes`.
     private func block(minutesAgo: Double, spanMinutes: Double = 30, label: String = "Mull — parser") -> TimeBlock {
@@ -143,6 +143,132 @@ final class CalendarMirrorTests: XCTestCase {
 
         XCTAssertEqual(result.create.count, 1)
         XCTAssertTrue(result.tombstone.isEmpty)
+    }
+
+    // MARK: - What is fit to write in somebody's day
+
+    func testProseIsNotWrittenAsATitle() {
+        // `generateLabel` falls through to a cleaned window title when it can parse
+        // nothing out of it, so a question somebody asked an assistant arrives here
+        // wearing exactly the shape of a project name. On the grid that is a card you
+        // can ignore; on a calendar it is a line in your day, on your phone.
+        XCTAssertFalse(CalendarMirror.isPresentable("how do I cancel a Task in Swift"))
+        XCTAssertFalse(CalendarMirror.isPresentable("修正してください"))
+        XCTAssertFalse(CalendarMirror.isPresentable("プロダクトの事業価値と社会的インパクトを検討"))
+        XCTAssertFalse(CalendarMirror.isPresentable("https://example.com/a/page"))
+        XCTAssertFalse(CalendarMirror.isPresentable("Untitled"))
+        XCTAssertFalse(CalendarMirror.isPresentable(""))
+        XCTAssertFalse(CalendarMirror.isPresentable(String(repeating: "a", count: 200)))
+    }
+
+    func testANameOrAFileNameIsWritten() {
+        XCTAssertTrue(CalendarMirror.isPresentable("Mull — parser"))
+        // A filename is rejected as a *project* name and is exactly right as a
+        // calendar title. Two different questions; only one is asked here.
+        XCTAssertTrue(CalendarMirror.isPresentable("CalendarView.swift"))
+        XCTAssertTrue(CalendarMirror.isPresentable("Mull — CalendarView.swift"))
+    }
+
+    func testAGlanceIsLeftOutAndSaidSo() {
+        // The engine's floor is 30 seconds, which is right for a grid you can zoom into
+        // and wrong for a calendar that syncs to a phone. Counted rather than silently
+        // dropped: a day of nothing but glances must not read as an empty day.
+        let result = plan([block(minutesAgo: 30, spanMinutes: 3)])
+
+        XCTAssertTrue(result.create.isEmpty)
+        XCTAssertEqual(result.quality.tooShort, 1)
+        XCTAssertEqual(result.quality.considered, 0)
+        XCTAssertNil(result.quality.namedFraction, "nothing to name is not the same as naming nothing")
+    }
+
+    func testAnUnreadableTitleFallsBackToTheAppAndIsCounted() {
+        let result = plan([block(minutesAgo: 30, label: "how do I cancel a Task in Swift")])
+
+        XCTAssertEqual(result.create.count, 1)
+        XCTAssertEqual(result.create[0].title, "Code", "an hour of Code is true; the sentence is not a title")
+        XCTAssertEqual(result.quality.fellBack, 1)
+        XCTAssertEqual(result.quality.named, 0)
+        XCTAssertEqual(result.quality.namedFraction, 0)
+    }
+
+    func testCopiedTextIsNeverWrittenAsATitle() {
+        // The shape gate cannot help here, and that is the whole point: all three of
+        // these pass `isPresentable` on their own merits. Short copied fragments clear
+        // it exactly when they are worst — a client, a subject, a figure — because the
+        // long ones die on the 40-character limit and what is left reads like a name.
+        // So the refusal cannot be made by looking at the string. It has to know where
+        // the string came from, which is what `labelFromClipboard` carries.
+        for copied in ["田中商事 見積書", "退職の相談", "Acme Corp Q3 renewal"] {
+            XCTAssertTrue(CalendarMirror.isPresentable(copied),
+                          "\(copied) reads as a name; the source is the only thing that separates it")
+
+            var b = block(minutesAgo: 30, label: copied)
+            b.labelFromClipboard = true
+            let result = plan([b])
+
+            XCTAssertEqual(result.create.count, 1)
+            XCTAssertEqual(result.create[0].title, "Code",
+                           "what the user copied does not leave this Mac wearing a calendar title")
+            XCTAssertEqual(result.quality.fellBack, 1)
+            XCTAssertEqual(result.quality.named, 0)
+        }
+    }
+
+    func testTheSameLabelFromAWindowTitleIsStillWritten() {
+        // The refusal above is about provenance, not vocabulary. Nothing is on a list.
+        let result = plan([block(minutesAgo: 30, label: "Acme Corp Q3 renewal")])
+
+        XCTAssertEqual(result.create[0].title, "Acme Corp Q3 renewal")
+        XCTAssertEqual(result.quality.named, 1)
+    }
+
+    func testTheQualityReadingCountsBothHalves() {
+        let result = plan([block(minutesAgo: 30, label: "Mull — parser"),
+                           block(minutesAgo: 90, label: "うまくいかないので直したい"),
+                           block(minutesAgo: 150, spanMinutes: 2)])
+
+        XCTAssertEqual(result.quality.named, 1)
+        XCTAssertEqual(result.quality.fellBack, 1)
+        XCTAssertEqual(result.quality.tooShort, 1)
+        XCTAssertEqual(result.quality.namedFraction, 0.5)
+    }
+
+    // MARK: - The correction the mirror used to throw away
+
+    func testDeletingAMirroredEventProducesACorrectionCard() {
+        // §7.3 calls "mull proposed it, the human removed it" the highest-quality
+        // relevance label there is. Until now the calendar produced one every time
+        // somebody cleared a row and spent it entirely on not repeating itself.
+        let b = block(minutesAgo: 30)
+        let key = CalendarMirror.key(forBlockStartingAt: b.start)
+
+        let cards = CalendarMirror.correctionCards(for: plan([b], existing: [], written: [key]),
+                                                   now: now)
+
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards[0].blockID, key)
+        XCTAssertEqual(cards[0].dropped, ["Mull — parser"], "the title is what was rejected")
+        XCTAssertTrue(cards[0].survived.isEmpty)
+        XCTAssertTrue(cards[0].added.isEmpty, "a deletion adds nothing")
+    }
+
+    func testTheRejectedTitleGetsANegativeVerdictInTheLedger() {
+        // The point of routing this through `CorrectionIndex` rather than a private
+        // list: a window title not worth an hour of somebody's day is not worth a slot
+        // in a context window either, and now one fact settles both.
+        let b = block(minutesAgo: 30)
+        let key = CalendarMirror.key(forBlockStartingAt: b.start)
+        let cards = CalendarMirror.correctionCards(for: plan([b], existing: [], written: [key]),
+                                                   now: now)
+
+        XCTAssertLessThan(CorrectionIndex.fold(cards).delta(for: "Mull — parser"), 0)
+    }
+
+    func testAnOrdinaryWriteProducesNoCards() {
+        // Only a deletion is a correction. Writing an event is mull proposing, and a
+        // proposal nobody has answered is not a verdict.
+        XCTAssertTrue(CalendarMirror.correctionCards(for: plan([block(minutesAgo: 30)]),
+                                                     now: now).isEmpty)
     }
 
     // MARK: - The marker

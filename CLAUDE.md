@@ -33,6 +33,7 @@
 
 | # | 場面 | 今どうなるか | mull で何をするか | 今動くか |
 |---|---|---|---|---|
+| **E** | 一日の終わりに、何に時間を使ったのか説明できない | カレンダーには予定しか入っていない。実際にやったことは残らない | 予定と観測した実績を並べて見せる。実カレンダーへの書き戻しもできる | ⚠ |
 | **C** | 月曜に戻って、金曜の続きが思い出せない | git log と開いたままのタブから再構成する | `whats_active_now` と `search` が金曜の作業をそのまま出す | ✅ |
 | **D** | エージェントに毎回同じ前提を説明し直す | 「Swift」「GRDB」「macOS 14」を毎回打つ | `get_user_context` と Copy context が観測から自動で渡す | ⚠ |
 | **B** | エージェントが同じ直され方を繰り返す | 同じ指摘を何度もする。直した事実はどこにも残らない | あなたの訂正が `rules.md` の規則になり、次のセッションでエージェントが読む | ✅ |
@@ -40,6 +41,58 @@
 
 **場面の出所**（契約1。人物についての推測を場面として書かない）:
 A と B は 2026-08-09 のセッションでの実観測、C と D は作者による確認です。
+E は 2026-08-14 の作者の報告（「使い心地は良い。ただし使うのはカレンダーだけ」）です。
+
+**E だけ、他の4つと性質が違います。** A〜D は全部エージェント経由で、人が mull の前に
+座る場面が1行もありませんでした。E は人が毎日見る唯一の画面で、mull がマシンで動き続けて
+捕捉できているのは、この画面に行く理由があるからです。ただし出所は n=1 で、しかも
+直近2コミット（`cc57489` / `b2a4447`）がカレンダー作業だったという交絡があります。
+「作ったばかりのものを使っているだけ」との分離は、まだ付いていません。
+
+**E が ⚠ の理由**（2026-08-14 に `com.mull.app` の defaults を実測）: 予定と実績を
+並べる画面は動いていて、作者が毎日見ているのはここです。動いていないのは実カレンダーへの
+書き戻しのほうで、`calendarMirrorWritten` は 2026-08-10 07:11 から 08-12 07:34 までの
+37件で止まり、`calendarMirrorEnabled` と `calendarMirrorCalendarID` は現在どちらも未設定です。
+ミラーは2日動いて、止まっています。**なぜ止めたのかは分かっていません。** 37件のうち
+ユーザーが消したものは0件（`calendarMirrorTombstoned` は空）なので、少なくとも
+「出てきたブロックが間違っていたから消した」ではありません。
+✅ にする条件は、止めた理由を特定して直すことです。
+
+**2026-08-14、E を製品の重心に決めました。** 前日に OpenAI が Computer History を出し、
+§0.1 の仕事1（広く捕える）と仕事2（今の必要に選ぶ）の代替を Codex ユーザーに配りました。
+捕捉は macOS の Accessibility API 経由で mull と同系統、出力は
+`~/.codex/memories/extensions/skysight/` にプレーン Markdown で、folder-of-MD まで同じです。
+**ただし向こうは書き戻しません。** memory を作って読ませるだけで、実カレンダーには触らない。
+33製品を当たって「観測した実績を実カレンダーに置く製品は未発見」だったところを、
+最大手が空白を埋めずに通り過ぎたことになります。実装の重心も既にこちらにあり、
+カレンダー関連は 7,021行、`MCPServer.swift` は 1,190行です。
+動かしたのは作業の優先順位だけで、Identity（§1）は動かしていません。
+
+MCP の13ツールは縮めません。Computer History に対して構造的に残っている差は2つで、
+向こうが生イベントを48時間しか持たないこと（mull は既定90日、`unlimited` 可）と、
+API キーや Bedrock から使えないこと（Claude Code から呼べない）です。どちらも MCP 側にあります。
+
+**撤回基準**（契約3）:
+
+| | |
+|---|---|
+| 期限 | 2026-11-07（§0.1 の訂正ループ撤回基準と同日）|
+| 観測点 | `calendarMirrorEnabled` が true のまま30日続き、`tombstoned` が書き込み数の20%未満 |
+| 原因の分離 | `CalendarMirrorStatus` の4フィールドで分ける。`lastRun` は動くのに `lastChange` が動かないなら書くものが無い（捕捉かブロック化の問題）。`lastRun` 自体が止まるならタイマーが動いていない（実装の問題）。`tombstoned` が伸びるなら中身が間違っている（分類品質の問題で、離脱理由2位の直撃）|
+| 戻し方 | E を1行の場面に戻し、重心を MCP に戻す。Identity を触っていないので、戻すコストは実装の優先度だけで済む |
+
+**同日の追測で、止まっているものがもう1つ見つかりました。** 1日の記録のうち、
+文章のほう（日次要約）も動いていません。`daily_summaries` に実体のある行は通算3件
+（2026-08-09 / 08-11 / 06-10）で、`mull_lock.lastSummaryAt` は 2026-08-11 15:39 UTC。
+08-12 に 3,742件、08-14 に 2,633件のイベントがあるのに要約はなく、
+`ConsolidationScheduler` の3ゲートは現在すべて開いています。
+さらに `daily/YYYY/MM/DD.md` は日記ではありません。`MullEngine.writeDailyFile` は no-op で、
+実際にそこにあるのは `LiveContextGenerator` が60秒ごとに上書きしている `full.md` のコピーです。
+**日記は、DB に3件あってファイルには1件も無い状態です。**
+
+出てきた日記の中身そのものは正しく、2026-08-11 の要約6項目はすべて同日の windowTitle に
+一致しました（捏造は見つかっていません）。壊れているのは配線のほうです。
+この観測を受けた路線の決定は [DIRECTION.md](DIRECTION.md) §6.2 が正本です。
 
 **B が ✅ になった経路**（2026-08-09 に開通）:
 
@@ -52,6 +105,16 @@ Curator が訂正を検知 → Card に §1–3 を書く（§1 は whats_active
 ただし依存が1つあります。解釈するのはエージェントで、mull ではありません（§0.1）。
 エージェントが `get_corrections` を呼ばなければ規則は増えない。`serverInstructions` で
 仕事の区切りに呼ぶよう指示していますが、これは強制ではありません。撤回基準の観測点はここを見ます。
+
+**2026-08-14 の追記**: この経路の外に、訂正を受け取れるのに受け取っていない口が1つあります。
+`CalendarMirrorRunner` は、ミラーが書いたブロックをユーザーが消したことを `tombstoned` に
+残します。「mull が提案した、人間が拒否した」であり、§7.3 が最高品質のラベルと呼ぶものと
+同じ形ですが、保存先は `UserDefaults` の再提案抑制リストで、`CorrectionIndex` には繋がって
+いません。つまり、そこで訂正が起きても学習には入りません。
+
+ただし**現時点でそこに訂正は1件もありません**（`calendarMirrorTombstoned` は空。37件
+書いて0件削除）。これは配線の不備であって、失われたデータの話ではない。5日で
+`corrections/` が0件なのは、いま分かっている範囲では単に訂正がまだ起きていないからです。
 
 **D が ⚠ に落ちた理由**（2026-08-09）: 渡してはいますが、質を測っていませんでした。
 実際の Copy context 出力を読むと、約25行のうち使えるのは2〜3行で、残りは無関係な視聴履歴、
@@ -90,7 +153,7 @@ Curator が訂正を検知 → Card に §1–3 を書く（§1 は whats_active
 |---|---|
 | 期限 | 開通（2026-08-09）から90日、つまり 2026-11-07 |
 | 観測点 | `~/mull/rules.md` の規則が3件未満のまま |
-| 原因の分離 | `corrections/` のカード数を見る。0件なら訂正自体が起きていない（出力が直すに値しないか、直す導線が無い）。カードはあるのに rules.md が空ならエージェントが解釈していない（`get_corrections` が呼ばれていない）。前者は製品の問題、後者は `serverInstructions` の問題で、打ち手が違う |
+| 原因の分離 | `corrections/` のカード数を見る。0件なら訂正自体が起きていない（出力が直すに値しないか、直す導線が無い）。カードはあるのに rules.md が空ならエージェントが解釈していない（`get_corrections` が呼ばれていない）。前者は製品の問題、後者は `serverInstructions` の問題で、打ち手が違う。**この二分は 2026-08-14 に不完全と分かりました。** 第三の状態があります。訂正は起きたが `CorrectionIndex` に届かない経路を通った（`CalendarMirrorRunner.tombstoned` は `UserDefaults` 止まり）。0件を見たら、この経路の中身も併せて読む |
 | 戻し方 | 仕事を1と2の2つに戻し、訂正ループは選択順を良くする内部機構に限定する。§0 から場面 B を落とす |
 
 ---
@@ -103,7 +166,23 @@ Curator が訂正を検知 → Card に §1–3 を書く（§1 は whats_active
 - **Category**: Developer tool / Agent memory（旧: Productivity / Second Brain）
 - **Platform**: macOS (Apple Silicon)
 - **License**: MIT（2026-08-09 決定。FSL-1.1-MIT を一度採ったが公開前に撤回。理由は §8.3）
-- **配布**: OSS。MCP サーバー単体バイナリ（`MullMCP`）が主、GUI は従（新規の UI 投資はしない）
+- **配布**: OSS。MCP サーバー単体バイナリ（`MullMCP`）と GUI の両方が出荷物です。
+  「GUI は従、新規の UI 投資はしない」は 2026-08-14 に取り下げました。実装が先に反対へ
+  投票していたためで、直近2コミットが新規のカレンダー UI 投資でした（§0 場面 E）。
+  この行が許すのはカレンダー UI に手を入れてよいことだけで、Subtitle / Tagline / Category を
+  「AIカレンダー」に寄せるかどうかは 2026-08-14 に決めました。**寄せません。**
+  市場でこの語が指すのは自動スケジューラ（未来を決める道具）で、mull は未来の時間を1分も
+  決めないので誤売になること。ラベル自体が縮んでいること（Clockwise は 2026-03 に停止、
+  Motion はヒーロー文言から降格、いま「#1 AI calendar」と名乗るのは Dropbox 子会社の
+  Reclaim だけ）。そしてこのカテゴリの「AI」が指す常時稼働のスケジューリング知能は、
+  LLM 既定 Off（§8.1）と正面から矛盾すること。以上3点はどれも観測に基づきます。
+  「エンジニア向け」に絞るのも同日に見送りました。実装にエンジニア固有の捕捉が1件も無く
+  （§6.1 の訂正）、しかもそこは OpenAI が Codex 経由で 2026-08-13 に入った区画だからです。
+  根拠の全件は [2026-08-14-calendar-pivot.md](.claude/skills/mull-decision/references/research/2026-08-14-calendar-pivot.md)。
+  **Identity を動かさないまま製品の重心だけをカレンダーに寄せる**、が同日の決定です（§0 場面 E が正本）。
+  同日、その「カレンダー UI」の範囲を確定しました。GUI が持つのはカレンダーと日次 md の2つで、
+  vault の編集 UI（Files タブ）は畳みます。正本は [DIRECTION.md](DIRECTION.md) §6.2 で、
+  完全な根拠と撤回基準はそちらにあります（ここには置きません）
 
 ---
 
@@ -168,11 +247,20 @@ claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
 | キーストローク | CGEvent tap | 全入力（ローマ字含む）、3秒フラッシュ |
 | クリップボード | NSPasteboard 0.5秒ポーリング | コピーした全テキスト（40,000字まで） |
 | ウィンドウタイトル | Accessibility API 5秒ポーリング | ファイル名やページ名 |
-| ウィンドウ本文 | Accessibility API 30秒ポーリング | 作業の中身（タイトルではなく） |
-| ブラウザURL | AppleScript | Safari/Chrome/Arc/Brave/Edge |
+| ウィンドウ本文 | Accessibility API 30秒ポーリング（無操作時は5分） | 作業の中身（タイトルではなく） |
+| ブラウザURL | AppleScript 30秒（無操作時は5分） | Safari/Chrome/Arc/Brave/Edge |
 | アプリ切り替え | NSWorkspace 通知 | アプリ名と滞在時間 |
 | カレンダー | EventKit | 今日のスケジュール |
 | メール | AppleScript（オプトイン） | この経路は件名と送信者のみ（下記） |
+
+> **「無操作時は5分」について。** キーもマウスもトラックパッドも2分間動かないと、この2行だけが
+> 5分間隔に落ちます（`RecordingService.awayAfter` / `awaySampleInterval`）。止まるのではなく、
+> 間隔が伸びるだけです。他の経路は変わりません。
+> 理由は電池で、この2つだけが対象なのは、費用の大半が mull ではなく相手アプリ側で発生するからです。
+> ウィンドウ本文は最前面アプリのAXツリーを最大1,500ノード歩き、ブラウザURLはブラウザの
+> メインスレッドを Apple Event で起こします。誰も触っていない画面に対しては、どちらも
+> 既に記録済みの内容を取り直すだけになります。ウィンドウタイトルの5秒は落としていません。
+> 本人が席を外している間にエージェントが編集を続ける、はこの製品では普通に起きるからです。
 
 > **メールの行について。** 「本文は読まない」はこの経路については正しく、製品については誤りです。
 > Mail.app は除外リストに載っていないので、メールを読んでいる間の画面の文字は
@@ -185,13 +273,22 @@ claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
 
 | フィールド | 由来 | 用途 |
 |---|---|---|
-| `entity` | window title の先頭セグメント、git リポ名、clipboard 内のパス | entity で引く（最強の軸） |
+| `entity` | window title のセグメント。エディタは末尾に置くので `candidates.last ?? candidates.first` | entity で引く（最強の軸） |
 | `contentType` | note / error / decision / code / web / file など | type で絞る |
 | `salience` | 0〜1。自分宛メモ、コピーしたエラー、commit が高く、ランダム打鍵片が低い | 並べ替え、予算配分 |
 | `session` | 直前イベントとの間隔が N 分未満なら同セッション | 「この作業の塊」で引く |
 | `mode` | produce / consume / decide / think / research / communicate | 意味づけ（MAP-ARCHITECTURE） |
 
 > 要約すると原文が失われます。索引を足しても失われません。だから索引だけを足します。
+
+> **`entity` の行は 2026-08-14 に訂正しました。** ここには「window title の先頭セグメント、
+> git リポ名、clipboard 内のパス」と書いてありました。3つのうち2つは実装にありません。
+> entity が付く箇所は `RecordingService.swift:905` の1つだけで、渡しているのは
+> `Entity.from(currentWindowTitle ?? cleaned)`、`Entity.swift` はウィンドウタイトルしか見ません。
+> 「先頭セグメント」も逆で、エディタは投影名を末尾に置くため `candidates.last` を先に採ります。
+> §7.4 と同じ理由で消さずに残します。この行は「エンジニアのためのカレンダー」に絞るかどうかの
+> 判断材料でもあり、git を読んでいるという記述が、絞る根拠として使われうる位置にありました。
+> 実際には mull にエンジニア固有の捕捉は1件もありません（§1 の決定を参照）。
 
 ---
 
@@ -207,8 +304,15 @@ claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
 | `me.pinned.md` | エージェントと人間 | 人が自分で書いた前提が最上段に載る（§7.4） | D | ✅ |
 | `rules.md` | エージェント（`get_user_context` 全レベル / `mull://rules`） | エージェントの振る舞いが、あなたが直した通りに変わる | B | ✅ |
 | `corrections/`（Card と ledger） | `get_corrections`（カード）と `Selection`（ledger） | 規則の材料になる。選択の並び順が変わる | B | ✅ |
+| `daily/YYYY/MM/DD.md` | 人間（翌朝に読む） | その日に何をしたか説明できる | E | ⚠ |
 | `full.md`（~1,500+ tok） | エージェント（`level: "full"`） | **答えられない** | — | ⚠ |
 
+> **`daily/` の ⚠ について。** この表で唯一、読み手が人間の行です。
+> 3列は埋まりますが、ファイルの中身が契約と一致していません。
+> `MullEngine.writeDailyFile` は no-op で、そこにあるのは `full.md` のコピーです。
+> つまり「翌朝に読む人間」に向けて置いた場所に、エージェント向けの全部入りが入っています。
+> ✅ にする条件は §0 場面 E と同じで、詳細と順序は [DIRECTION.md](DIRECTION.md) §6.2 にあります。
+>
 > **`full.md` の ⚠ について。** これは全部入りで、mull 自身が否定している「詰め込み」そのものです
 > （選択せずに渡すと成功率は上がらずコストだけ増える、という反証への態度は README 参照）。
 > 選択層を通した `search` があるのに全部を1枚で渡す経路が残っているのは、契約に照らして
@@ -326,13 +430,41 @@ Screenpipe も ManicTime も Timing も、この信号を持っていません�
 
 ### 8.3 なぜ「読めること」が privacy の要件なのか
 
-市場調査で見つかった、動かせない事実があります。
+市場調査で見つかった事実があります。
 
-> **内容を保持したまま受け入れられた製品は1件もありません。**
-> 信頼されている打鍵近傍アプリ（TextExpander / Espanso / ActivityWatch）は、
-> 全て「保持しない」ことで信頼を得ています。内容保持を宣言した2製品、
-> Rewind（$33M調達）と Microsoft Recall（Windows の流通力）は、両方とも跳ね返されました
-> （Recall は GA 後も明示オプトインで、有効化率は10%未満）。
+> **24/7 で画面全体を撮り続ける製品で、広範な個人受容を得たものはありません。**
+> 内容保持を宣言した2製品、Rewind（$33M調達）と Microsoft Recall（Windows の流通力）は、
+> どちらも単独では立ちませんでした。Recall は GA 後も明示オプトインで、
+> Rewind は 2025-12 に Meta へ吸収されてキャプチャを停止しています。
+>
+> **ただし保持そのものは失格要因ではありません。** Maccy はコピーした全文字列を
+> ローカルに持ったまま、Homebrew cask で年間113,027インストール（22,030件中43位）です。
+> MIT、21.2k stars。分かれ目は保持の有無ではなく、**用途が一文で言えるか、
+> 自分で入れることを選んだか、ローカルに閉じているか**のほうにあります。
+
+**2026-08-14 の訂正。** 初出（2026-07）の段落から4箇所を訂正します。消さずに残します。
+理由は §7.4 と同じで、実装や出典で確かめられない一文を1つ置くと、他の約束も同じ精度で
+疑われるからです。TextExpander（揮発30打鍵、保持するのはハッシュ）と Espanso（直近3打鍵）の
+記述は裏取りで一致したので、そのまま残っています。
+
+| 初出の記述 | 何が誤りだったか | 出所 |
+|---|---|---|
+| 「内容を保持したまま受け入れられた製品は1件もありません」 | Maccy が反例。年間113,027インストールで、初出が「信頼された例」に挙げた Espanso（11,926）の9.5倍、ActivityWatch（2,449）の46倍。同一チャネル・同一期間で、保持量と受容度は逆相関している | [formulae.brew.sh](https://formulae.brew.sh/api/analytics/cask-install/365d.json) 2026-08-14 取得 |
+| 「ActivityWatch は保持しないことで信頼を得ている」 | ActivityWatch はブラウザタブの**タイトルと URL** を保持する。§6 は「ウィンドウタイトル」を mull 自身の捕捉ソースに数えているので、本書の定義では content。信頼された例ではなく、反例の側 | [ActivityWatch README](https://github.com/ActivityWatch/activitywatch) |
+| 「Recall は有効化率10%未満」 | 原典は "fewer than 10% of Windows 11 PCs **can enable and run** the current version" で、**ハードウェア適格率**。オプトイン率ではない。真の有効化率は Microsoft が公表しておらず未発見 | [GeekWire 2026-04-15](https://www.geekwire.com/2026/one-year-after-its-rocky-launch-microsofts-windows-recall-still-raises-security-red-flags/) |
+| 「Rewind は跳ね返された」 | 跳ね返されたのではなく、買収で終了した。2025-12-05 に Meta が Limitless を買収、12-19 にキャプチャを恒久停止。離脱の実因として記録されているのはバッテリーと発熱、次いで LLM 出力の質で、privacy はそのリストに出てこない | [limitless.ai](https://www.limitless.ai/)、[9to5Mac 2025-12-05](https://9to5mac.com/2025/12/05/rewind-limitless-meta-acquisition/) |
+
+Maccy が平文で保持するかどうかは利用者の証言しかなく、リポジトリでは確認していません。
+確認したのは MIT・21.2k stars・ローカル保持・インストール数の4点です。
+
+**結論は変わりません。支えが良くなりました。** 唯一の反例である Maccy は MIT の OSS で、
+ローカルに閉じていて、内容を保持したまま受け入れられています。つまり内容保持型が信頼を得た
+経路は1件だけ見つかっていて、それは mull が採っている経路そのものです。
+初出は「保持したら終わり」と読める書き方でしたが、実際に効いているのは保持の有無ではなく、
+用途・選択・局所性の3点でした。
+
+裏取りの全件と探索範囲は
+[references/research/2026-08-14-calendar-pivot.md](.claude/skills/mull-decision/references/research/2026-08-14-calendar-pivot.md) §4 にあります。
 
 mull は内容を保持します。ならばコードが読めることが唯一の説得手段です。
 Bartender の事例（所有者交代、解析を無断追加、HN 252pt 炎上、無料OSS の Ice に市場を奪われる）は、
@@ -364,7 +496,7 @@ Bartender の事例（所有者交代、解析を無断追加、HN 252pt 炎上�
 | レイヤー | 技術 |
 |---------|------|
 | Language | Swift |
-| UI | SwiftUI（凍結中） |
+| UI | SwiftUI（カレンダーと日次 md のみ。vault 編集 UI は畳む — DIRECTION §6.2） |
 | Database | SQLite via GRDB.swift (WAL + FTS5 + DatabasePool) |
 | Keystrokes | CGEvent tap (Quartz Event Services) |
 | Calendar | EventKit |

@@ -84,6 +84,8 @@ extension CalendarWeekView {
         Task.detached(priority: .userInitiated) {
             let plan = mirror.manualPlan(in: target.id, from: from, to: to)
             await MainActor.run {
+                // A fresh sheet asks the automatic question fresh. See `exportKeepUpdated`.
+                exportKeepUpdated = false
                 exportProposal = ExportProposal(plan: plan, calendar: target, from: from, to: to)
             }
         }
@@ -94,6 +96,14 @@ extension CalendarWeekView {
         prepareWriter()
         guard let writer else { return }
 
+        // Before the writes, not after. Pointing the mirror at a calendar is what makes
+        // Settings' `onChange` clear the ledger, and a ledger cleared *after* this press
+        // would throw away the record of what the press just wrote.
+        if exportKeepUpdated {
+            Preferences.enableMirror(calendarID: proposal.calendar.id)
+            appState.calendarMirror.reschedule()
+        }
+
         // One group, so ⌘Z reverses the press rather than the last event in it.
         undoManager?.beginUndoGrouping()
         undoManager?.setActionName(String(localized: "Write to Calendar"))
@@ -101,6 +111,7 @@ extension CalendarWeekView {
 
         var created: [String] = []
         var deleted: [String] = []
+        var updated = 0
 
         for entry in proposal.plan.create {
             let fields = CalendarService.EventFields(title: entry.title, start: entry.start,
@@ -117,6 +128,7 @@ extension CalendarWeekView {
             let after = CalendarService.EventFields(title: change.entry.title, start: change.entry.start,
                                                     end: change.entry.end, calendarID: proposal.calendar.id)
             writer.update(ref: writer.ref(for: change.handle), from: before, to: after, undo: undoManager)
+            updated += 1
         }
 
         for removal in proposal.plan.delete {
@@ -125,7 +137,8 @@ extension CalendarWeekView {
             deleted.append(removal.key)
         }
 
-        appState.calendarMirror.recordManualResult(created: created, deleted: deleted)
+        appState.calendarMirror.recordManualResult(proposal.plan, created: created,
+                                                   updated: updated, deleted: deleted)
     }
 
     /// What the press is about to do, in the units the reader is looking at.
@@ -157,6 +170,8 @@ extension CalendarWeekView {
                 .font(DS.captionFont)
                 .foregroundStyle(DS.inkDim)
 
+                qualityNote(proposal.plan.quality)
+
                 Text("Only finished work is written, so nothing here will move afterwards. ⌘Z takes the whole write back.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
@@ -171,6 +186,11 @@ extension CalendarWeekView {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .foregroundStyle(DS.error)
+            }
+
+            if !proposal.isEmpty {
+                Divider()
+                keepUpdatedBox(proposal)
             }
 
             HStack {
@@ -188,5 +208,72 @@ extension CalendarWeekView {
         }
         .padding(DS.xl)
         .frame(width: 420)
+    }
+
+    /// How much of this range mull could actually name.
+    ///
+    /// On the sheet rather than in a log, because this is the number that decides
+    /// whether the feature is worth having and the reader is about to act on it. A day
+    /// mull can name is a row of "Mull — CalendarView.swift"; a day it cannot is a row
+    /// of "Xcode", eight times. Both are true. Only one of them is worth syncing to a
+    /// phone, and until this line nothing anywhere said which one you were getting.
+    @ViewBuilder
+    func qualityNote(_ quality: CalendarMirror.Quality) -> some View {
+        if quality.considered > 0 || quality.tooShort > 0 {
+            VStack(alignment: .leading, spacing: DS.hair) {
+                if let fraction = quality.namedFraction {
+                    Label {
+                        Text("\(quality.named) of \(quality.considered) named from what you had open · \(Int((fraction * 100).rounded()))%")
+                    } icon: {
+                        Image(systemName: "textformat")
+                    }
+                }
+                if quality.fellBack > 0 {
+                    Text("\(pluralized(quality.fellBack, "event")) will just say the app's name — mull couldn't read a title worth writing.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if quality.tooShort > 0 {
+                    Text("\(pluralized(quality.tooShort, "short stretch")) left out, under \(Int(CalendarMirror.minimumDuration / 60)) minutes.")
+                }
+            }
+            .font(DS.captionFont)
+            .foregroundStyle(DS.inkFaint)
+        }
+    }
+
+    /// The doorway.
+    ///
+    /// The automatic mirror had exactly one way in — a toggle in a Settings pane, next
+    /// to a calendar picker that has to be set separately or the timer does nothing —
+    /// and on 2026-08-14 neither preference had ever been written on the machine of the
+    /// person who built it, while 37 events sat in the ledger from this button. The
+    /// feature was not refused. It was never found.
+    ///
+    /// So the offer is made here, at the moment somebody has just decided they want
+    /// their work in their calendar, and it names the calendar it would use rather than
+    /// asking them to go and pick one.
+    @ViewBuilder
+    func keepUpdatedBox(_ proposal: ExportProposal) -> some View {
+        if Preferences.mirrorEnabled, Preferences.mirrorCalendarID == proposal.calendar.id {
+            Label {
+                Text("mull already keeps “\(proposal.calendar.title)” up to date on its own.")
+            } icon: {
+                Image(systemName: "checkmark.circle")
+            }
+            .font(DS.captionFont)
+            .foregroundStyle(DS.inkDim)
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            VStack(alignment: .leading, spacing: DS.hair) {
+                Toggle(isOn: $exportKeepUpdated) {
+                    Text("Keep “\(proposal.calendar.title)” up to date from now on")
+                }
+                .toggleStyle(.checkbox)
+                Text("Finished work is written every hour, once it can no longer change. Anything you delete there stays deleted, and you can stop it in Settings.")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }

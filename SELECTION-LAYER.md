@@ -18,6 +18,11 @@
 > かつ他社（Mem0 / Zep / Letta）も売っています。mull にしか無いのは §0 の場面 B、
 > つまり訂正から規則が立ち上がる層のほうで、本書はその下敷きです（§5 / [HARNESS.md](HARNESS.md)）。
 >
+> **2026-08-14 の訂正**: 上の「GUI は従、MCP サーフェスが主」は取り下げました。
+> [CLAUDE.md](CLAUDE.md) §0 に場面 E（カレンダー）が入り、§1 の「新規の UI 投資はしない」も
+> 同日に取り下げています。正本は CLAUDE.md §0 と §1 で、本書はポインタだけを持ちます。
+> 選択層の設計そのものは変わりません。変わったのは、その出口が MCP だけではないことです。
+>
 > そして §6 の評価ハーネスは、公開時の主張の全体重が乗る場所になりました。
 > ETH arXiv 2602.11988（"context files don't improve success rates, +20% cost"）に対して
 > 「詰め込めば効かない。選べば効く。測った」と言うための唯一の道具です。
@@ -50,7 +55,7 @@ appName, windowTitle, textContent }` に、検索の取っ手を足します。�
 
 | フィールド | 由来（安く計算） | 用途 |
 |-----------|----------------|------|
-| `entity`   | window title の先頭セグメント（`Project / File / App` の Project）、git リポ名、clipboard 内のパス | entity で引く（最強の軸） |
+| `entity`   | window title のセグメント。エディタは投影名を末尾に置くので `candidates.last ?? candidates.first`（2026-08-14 訂正。git リポ名と clipboard 内のパスは実装に無い。理由は CLAUDE.md §6.1 が正本） | entity で引く（最強の軸） |
 | `type`     | note（自分宛メモ）/ error / decision / code / web / file などを語彙ルールで判定 | type で絞る |
 | `salience` | 0〜1。自分宛メモ、コピーしたエラー、git commit が高く、ランダム打鍵片が低い | 並べ替え、予算配分 |
 | `session`  | 直前イベントとの間隔が N 分未満なら同セッションID | 「この作業の塊」で引く |

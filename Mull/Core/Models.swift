@@ -240,7 +240,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .off: "Off — local rule-based only"
-        case .gemini: "Gemini Flash (Free)"
+        case .gemini: "Gemini Flash"
         case .local: "Local (Ollama)"
         case .localOpenAI: "Local (OpenAI-compatible)"
         case .claude: "Claude API"

@@ -60,7 +60,7 @@ enum OnboardingProfile {
     /// section written under another system language.
     private static var startMarker: String {
         UserLanguage.isJapanese
-            ? "# ── mull プロフィール（オンボーディングの回答 · Settings で編集） ──"
+            ? "# ── mull プロフィール（セットアップでの回答 · 設定で編集） ──"
             : "# ── mull profile (from onboarding · edit in Settings) ──"
     }
     private static var endMarker: String {
@@ -68,6 +68,11 @@ enum OnboardingProfile {
     }
     static let allStartMarkers: Set<String> = [
         "# ── mull profile (from onboarding · edit in Settings) ──",
+        "# ── mull プロフィール（セットアップでの回答 · 設定で編集） ──",
+        // Shipped before the Japanese wording settled on the words Settings uses
+        // ("セットアップでの回答", and 設定 rather than the English "Settings").
+        // Vaults written under it are still out there; dropping it from this set
+        // would leave that section behind and stack a new one beneath it.
         "# ── mull プロフィール（オンボーディングの回答 · Settings で編集） ──",
     ]
     static let allEndMarkers: Set<String> = [

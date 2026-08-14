@@ -10,8 +10,8 @@ import Foundation
 /// privacy gate mull advertises — excluded apps, secure input, private browsing —
 /// lived behind that wall, unverified.
 ///
-/// Naming what the recorder needs from the OS moves all of it behind five
-/// properties. `SystemCaptureEnvironment` is the real one; tests use a stub and
+/// Naming what the recorder needs from the OS moves all of it behind one
+/// protocol. `SystemCaptureEnvironment` is the real one; tests use a stub and
 /// can finally assert the thing that matters: **that a password copied out of
 /// 1Password never reaches the database.**
 protocol CaptureEnvironment: AnyObject {
@@ -33,10 +33,22 @@ protocol CaptureEnvironment: AnyObject {
     var clipboardIsMarkedDoNotStore: Bool { get }
     /// System-wide secure input — a password field somewhere has the keyboard.
     var isSecureInputEnabled: Bool { get }
+    /// The body text of the focused window, via Accessibility. The expensive one:
+    /// a bounded walk of the window's whole AX tree (see `WindowTextCapture`),
+    /// which is thousands of cross-process calls into whatever app is in front.
+    var focusedWindowBody: String? { get }
+    /// Seconds since the machine last saw human input — key, click, scroll,
+    /// trackpad — anywhere in this login session, not just in mull. The one
+    /// property here that answers "is anybody there", which is what the expensive
+    /// pollers back off on.
+    var secondsSinceUserInput: TimeInterval { get }
     /// Injectable so session durations and timestamps are assertable.
     var now: Date { get }
 }
 
 extension CaptureEnvironment {
     var now: Date { Date() }
+    /// Defaults to "somebody just touched it", so an environment that cannot
+    /// answer never causes capture to be skipped.
+    var secondsSinceUserInput: TimeInterval { 0 }
 }

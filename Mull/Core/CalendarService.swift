@@ -214,20 +214,11 @@ final class CalendarService {
         }
     }
 
-    /// Which event a write means.
-    ///
-    /// EventKit gives every occurrence of a repeating event the same
-    /// `eventIdentifier`, and `event(withIdentifier:)` answers with the *first*
-    /// one. Naming an event by that string alone meant every edit, drag and
-    /// delete aimed at Friday's stand-up landed on Monday's instead — silently,
-    /// and on somebody's real calendar. The occurrence date is what separates
-    /// this Friday from the rest of the series.
-    struct EventHandle: Equatable, Hashable {
-        let identifier: String
-        /// `EKEvent.occurrenceDate` for a repeating event; `nil` for one that
-        /// occurs once, where the identifier already means exactly one row.
-        let occurrenceDate: Date?
-    }
+    /// Which event a write means. Declared in `CalendarEventHandle.swift`, which has
+    /// no EventKit in it, so `CalendarMirror` can plan writes — and be scored by
+    /// `eval/calendar/` — without reaching this file. The name here is the one every
+    /// call site uses.
+    typealias EventHandle = CalendarEventHandle
 
     /// The parts of an event mull does not put on screen but must not destroy.
     ///

@@ -47,6 +47,13 @@ struct CalendarWeekView: View {
     /// describing, so what gets written is what the reader agreed to rather than a
     /// freshly computed answer that may have moved on.
     @State var exportProposal: ExportProposal?
+    /// Whether the sheet's "keep doing this" box is ticked.
+    ///
+    /// Lives here rather than in the sheet because the sheet is a function, and it is
+    /// reset every time one opens: agreeing to write today is not agreeing to write
+    /// every day, and a box that remembered yesterday's tick would turn the second
+    /// press into a decision the reader did not make.
+    @State var exportKeepUpdated = false
     /// The card the keyboard is on. Separate from `selectedItem` so ↑ / ↓ can walk
     /// the day without a popover springing open at every step.
     @State var keyboardSelection: String?
@@ -112,7 +119,7 @@ struct CalendarWeekView: View {
     /// setting change: it decides where the blocks under the reader's eyes begin and
     /// end, and a grid that kept the old segmentation until the next navigation would
     /// look exactly like a control that does nothing.
-    @AppStorage(Preferences.resumeGapKey) var resumeGapSetting = Int(TimeBlockEngine.defaultResumeGap)
+    @AppStorage(Preferences.resumeGapKey) var resumeGapSetting = Int(BlockSegmenter.defaultResumeGap)
     /// Where a pinch started from, so the gesture scales the hour it began on rather
     /// than compounding on every delta.
     @State var pinchBase: Double?
@@ -176,6 +183,16 @@ struct CalendarWeekView: View {
     /// Day view, so there was no way to point at a day in the month without leaving
     /// the month — the one thing a month view is for.
     @State var monthSelection: Date?
+
+    /// The two settings that decide whether the mirror runs at all.
+    ///
+    /// Read here, and only to draw the status pill: `@AppStorage` is what makes the
+    /// toolbar notice the moment the export sheet turns the mirror on, without which
+    /// the pill would not appear until the next minute tick. The counts behind it come
+    /// from `CalendarMirrorStatus`, which is not observable and does not need to be —
+    /// see `mirrorState`.
+    @AppStorage(Preferences.mirrorEnabledKey) var mirrorIsOn = false
+    @AppStorage(Preferences.mirrorCalendarKey) var mirrorCalendarID = ""
 
     /// Calendars the reader has switched off, by identifier.
     ///

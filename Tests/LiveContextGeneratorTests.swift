@@ -146,5 +146,48 @@ final class LiveContextGeneratorTests: XCTestCase {
         XCTAssertEqual(split.recent.count, 1)
         XCTAssertNil(split.newestStale)
     }
+
+    // MARK: - When the 60s pass has anything to do
+    //
+    // The pass rewrites five files atomically, full.md among them at ~19KB. It
+    // used to run every 60s regardless, so an idle overnight machine rewrote each
+    // of them 1,440 times and handed Spotlight five fresh inodes a minute, for a
+    // record that had not changed by one event.
+
+    @MainActor
+    func testThePassRunsWhenSomethingHasBeenRecordedSinceTheLastOne() {
+        XCTAssertTrue(AppState.shouldRegenerateContext(
+            eventCount: 1_244, lastGenerated: 1_243, sinceLastUpdate: 61))
+    }
+
+    @MainActor
+    func testThePassIsSkippedWhenNothingHasBeenRecordedSince() {
+        XCTAssertFalse(AppState.shouldRegenerateContext(
+            eventCount: 1_243, lastGenerated: 1_243, sinceLastUpdate: 3_600),
+            "an idle machine rewrote the vault to say what it already said")
+    }
+
+    /// The first pass after launch, when nothing has been generated yet.
+    @MainActor
+    func testTheFirstPassRunsWithNothingToCompareAgainst() {
+        XCTAssertTrue(AppState.shouldRegenerateContext(
+            eventCount: 12, lastGenerated: nil, sinceLastUpdate: 61))
+    }
+
+    /// Midnight: today's count restarts from nothing, which is a difference, and
+    /// the new day needs its own snapshot written.
+    @MainActor
+    func testTheDayRollingOverCountsAsAChange() {
+        XCTAssertTrue(AppState.shouldRegenerateContext(
+            eventCount: 3, lastGenerated: 4_010, sinceLastUpdate: 61))
+    }
+
+    /// The 60s floor still holds — a burst of events must not turn the pass into a
+    /// 3-second one.
+    @MainActor
+    func testEventsArrivingDoNotBeatTheSixtySecondFloor() {
+        XCTAssertFalse(AppState.shouldRegenerateContext(
+            eventCount: 1_300, lastGenerated: 1_243, sinceLastUpdate: 3))
+    }
 }
 

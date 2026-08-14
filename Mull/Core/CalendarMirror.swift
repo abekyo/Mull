@@ -28,6 +28,82 @@ enum CalendarMirror {
     /// history that matters is already in the vault.
     static let daysCovered = 2
 
+    // MARK: - What is fit to write in somebody's day
+
+    /// The shortest block worth a row on a calendar.
+    ///
+    /// The same five minutes `ContextComposer` settled on, and for the same reason:
+    /// a two-minute stay is a glance, not a piece of work, and a day of them buries
+    /// the four things that were. The engine's own floor is 30 seconds, which is
+    /// right for a grid you can zoom and wrong for a calendar that syncs to a phone.
+    static let minimumDuration: TimeInterval = 300
+
+    /// The longest title mull will put on somebody's calendar. Past this a window
+    /// title is not a name, whatever shape it has.
+    static let maxTitleLength = 80
+
+    /// Whether a block's label is fit to be the title of an event on a real calendar.
+    ///
+    /// This is the same question `me.md` asks before it names a project, so it is
+    /// answered by the same rules — `ProjectNames`, which judges *shape and evidence,
+    /// never vocabulary*. Nothing here is a list of strings somebody found annoying;
+    /// a blocklist only ever rejects the noise its author already saw.
+    ///
+    /// A label is a name or it is a sentence. `generateLabel` falls through to a
+    /// cleaned window title when it can parse nothing, so "how do I cancel a Task in
+    /// Swift" and "元のプロファイル" both reach here wearing the same shape as
+    /// "Mull — parser". Written to a calendar the difference matters more than it does
+    /// anywhere else in mull: this is the one surface that leaves the Mac, and the one
+    /// a person reads every day without asking to.
+    ///
+    /// A filename passes on its own — `ViewController.swift` is exactly what somebody
+    /// wants to see at 14:00 — even though `isPlausible` rejects it as a *project*
+    /// name. The two questions are different and only one of them is being asked here.
+    ///
+    /// **What this does not catch.** `ProjectNames` has a second rule — chrome, the
+    /// segment that appears in nearly every title one browser emits — and it is
+    /// evidence-based, so it needs a corpus of at least five titles per app. A day's
+    /// blocks carry one title each, which is below that threshold for every app but the
+    /// one you lived in, so applying it here would mostly do nothing while looking like
+    /// a protection. `元のプロファイル` therefore passes this gate. The corpus rule runs
+    /// where the corpus is, in `TimeBlockEngine`; this is the shape gate only, and
+    /// saying so is cheaper than a reader discovering it.
+    static func isPresentable(_ label: String) -> Bool {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= maxTitleLength else { return false }
+        let segments = ProjectNames.segments(of: trimmed)
+        guard !segments.isEmpty else { return false }
+        return segments.allSatisfy { segment in
+            ProjectNames.isPlausible(segment) || ProjectNames.isFileName(segment)
+        }
+    }
+
+    /// The title a block gets, and whether mull had to fall back to the app's name.
+    ///
+    /// Falling back is not a failure to report at the user — an hour of "Xcode" is
+    /// true, and true is the floor this whole product stands on. It is a failure to
+    /// *count*, which is why the flag comes back with the title: a day where half the
+    /// rows say "Xcode" is a day mull could not read, and nothing else on this path
+    /// would ever say so.
+    /// **Copied text never becomes a title here.** `generateLabel` captions a block
+    /// with the clipboard when no window offered a name, which is right for the grid
+    /// and wrong for this path: the shape gate below asks whether a string *looks like*
+    /// a name, and short copied fragments pass it exactly when they are worst —
+    /// `田中商事 見積書`, `退職の相談`, `¥3,200,000` are all two-to-eight characters of
+    /// something the user copied out of somebody else's document, and all three read as
+    /// names. The long ones are already caught (`isPlausible` stops at 40 characters,
+    /// the clipboard caption runs to 60), so what survived the gate was the selective
+    /// worst case rather than a random sample.
+    ///
+    /// Settings promises writes are "taken from your window titles". This is the line
+    /// that makes that sentence true rather than nearly true (CLAUDE.md §7.4).
+    static func title(for block: TimeBlock) -> (title: String, fellBack: Bool) {
+        guard !block.label.isEmpty, block.label != block.app,
+              !block.labelFromClipboard,
+              isPresentable(block.label) else { return (block.app, true) }
+        return (block.label, false)
+    }
+
     // MARK: - Naming what mull wrote
 
     /// EventKit has no custom fields, so the marker goes in `url`, which nothing else
@@ -82,20 +158,45 @@ enum CalendarMirror {
     /// A mirrored event as it currently exists on the calendar.
     struct Existing: Equatable {
         let key: String
-        let handle: CalendarService.EventHandle
+        let handle: CalendarEventHandle
         let title: String
         let start: Date
         let end: Date
     }
 
     struct Change: Equatable {
-        let handle: CalendarService.EventHandle
+        let handle: CalendarEventHandle
         let entry: Entry
     }
 
     struct Removal: Equatable {
-        let handle: CalendarService.EventHandle
+        let handle: CalendarEventHandle
         let key: String
+    }
+
+    /// What this run could see about the quality of what it was about to write.
+    ///
+    /// Counted rather than inferred, because the alternative is the state mull was in
+    /// until now: the titles that reach a calendar are window titles, nobody was
+    /// scoring them, and the only way to find out they were bad was to read your own
+    /// calendar and be disappointed. §4 says the selection is measured or it is vibes;
+    /// this is the same rule applied to the one output a person sees every day.
+    struct Quality: Equatable, Codable {
+        /// Blocks whose own label was fit to write.
+        var named = 0
+        /// Blocks that fell back to the app's name because their label was not.
+        var fellBack = 0
+        /// Settled blocks dropped for being shorter than `minimumDuration`.
+        var tooShort = 0
+
+        var considered: Int { named + fellBack }
+
+        /// How much of the range mull could actually name, 0…1. `nil` when there was
+        /// nothing to name — which is a different answer from zero.
+        var namedFraction: Double? {
+            guard considered > 0 else { return nil }
+            return Double(named) / Double(considered)
+        }
     }
 
     struct Plan: Equatable {
@@ -104,6 +205,13 @@ enum CalendarMirror {
         var delete: [Removal] = []
         /// Keys mull wrote, the user removed, and mull must not write again.
         var tombstone: Set<String> = []
+        /// The same tombstoned blocks, carrying what mull *would* have written for
+        /// them. `tombstone` is what the ledger needs (keys, to stay silent about
+        /// them); this is what the correction loop needs (the title, to learn what
+        /// was not worth writing). One is the keys of the other — see
+        /// `correctionCards`.
+        var rejected: [Entry] = []
+        var quality = Quality()
 
         var isEmpty: Bool { create.isEmpty && update.isEmpty && delete.isEmpty && tombstone.isEmpty }
     }
@@ -123,24 +231,36 @@ enum CalendarMirror {
                      now: Date,
                      resumeGap: TimeInterval) -> Plan {
 
-        let desired = blocks
-            .filter { isSettled(end: $0.end, now: now, resumeGap: resumeGap) }
-            .map { Entry(key: key(forBlockStartingAt: $0.start),
-                         title: $0.label.isEmpty ? $0.app : $0.label,
-                         start: $0.start,
-                         end: $0.end) }
+        var quality = Quality()
+        var desired: [Entry] = []
+        for block in blocks where isSettled(end: block.end, now: now, resumeGap: resumeGap) {
+            // A glance is not a piece of work. Counted before it is dropped, so a day
+            // that was all glances can say so rather than looking like an empty day.
+            guard block.duration >= minimumDuration else {
+                quality.tooShort += 1
+                continue
+            }
+            let (title, fellBack) = title(for: block)
+            if fellBack { quality.fellBack += 1 } else { quality.named += 1 }
+            desired.append(Entry(key: key(forBlockStartingAt: block.start),
+                                 title: title,
+                                 start: block.start,
+                                 end: block.end))
+        }
 
         var byKey: [String: Entry] = [:]
         for entry in desired { byKey[entry.key] = entry }
         let present = Dictionary(existing.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
 
         var plan = Plan()
+        plan.quality = quality
 
         // Gone from the calendar but written before and still wanted: the user took it
         // out. That is an instruction, not a gap to fill.
         for entry in desired where present[entry.key] == nil {
             if written.contains(entry.key) {
                 plan.tombstone.insert(entry.key)
+                plan.rejected.append(entry)
             } else if !tombstoned.contains(entry.key) {
                 plan.create.append(entry)
             }
@@ -163,5 +283,40 @@ enum CalendarMirror {
         }
 
         return plan
+    }
+
+    // MARK: - The correction the mirror was throwing away
+
+    /// Where a calendar correction is filed. Not a vault file — the correction did not
+    /// happen in one — but the cards are keyed on this, so it has to be stable and it
+    /// has to say which surface the user was looking at.
+    static let correctionPath = "calendar"
+
+    /// Cards for the blocks the user deleted off their calendar.
+    ///
+    /// "mull proposed this, the human rejected it" is the shape §7.3 calls the
+    /// highest-quality relevance label there is, and until now the calendar produced
+    /// it and dropped it: the key went into a `UserDefaults` list that exists only to
+    /// stop mull re-proposing, and nothing downstream ever heard about it. The rest of
+    /// mull learns from exactly this event through `Curator`; the one screen the user
+    /// actually looks at every day did not.
+    ///
+    /// `kept` is empty on purpose, and that is the whole verdict. The card's `dropped`
+    /// then holds the title, so folding it into the ledger puts a negative delta on
+    /// that text — which is right beyond the calendar too. A window title not worth an
+    /// hour of somebody's day is not worth a slot in a context window either.
+    ///
+    /// Pure, like everything else in this type: the runner writes them.
+    static func correctionCards(for plan: Plan,
+                                now: Date = Date(),
+                                context: String? = nil) -> [CorrectionCard] {
+        plan.rejected.map { entry in
+            CorrectionCard(path: correctionPath,
+                           blockID: entry.key,
+                           date: now,
+                           kept: "",
+                           wouldWrite: entry.title,
+                           context: context)
+        }
     }
 }

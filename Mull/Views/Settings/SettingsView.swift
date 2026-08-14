@@ -69,7 +69,7 @@ struct GeneralTab: View {
     @AppStorage("meetingReminders") private var meetingReminders = true
     @AppStorage("aiAutoCopy") private var aiAutoCopy = true
     @AppStorage("summaryNotifications") private var summaryNotifications = true
-    @AppStorage(Preferences.resumeGapKey) private var resumeGap = Int(TimeBlockEngine.defaultResumeGap)
+    @AppStorage(Preferences.resumeGapKey) private var resumeGap = Int(BlockSegmenter.defaultResumeGap)
     @AppStorage(Preferences.mirrorEnabledKey) private var mirrorEnabled = false
     @AppStorage(Preferences.mirrorCalendarKey) private var mirrorCalendarID = ""
     @AppStorage(Preferences.mirrorIntervalKey) private var mirrorInterval = Int(Preferences.defaultMirrorInterval)
@@ -257,9 +257,13 @@ struct GeneralTab: View {
 
             Section("Notifications") {
                 // One toggle per source. Deliberately absent: "mull stopped
-                // recording" (losing capture without a word is the one failure
-                // the app must not allow) and the ⌘⇧C confirmation (it only
-                // fires when the user themselves asked for a copy).
+                // recording", because losing capture without a word is the one
+                // failure the app must not allow.
+                //
+                // Nothing else needs a toggle, because a banner is only sent for
+                // what happens while you are not looking. ⌘⇧C, ⌘⇧W and a summary
+                // you start yourself report back in the window instead — you were
+                // there, and you had just asked.
 
                 // Default off: the trigger is "the active window's project
                 // changed", which announces ordinary window-hopping, not
@@ -283,7 +287,7 @@ struct GeneralTab: View {
                     .foregroundStyle(DS.inkFaint)
 
                 Toggle("Summary notifications", isOn: $summaryNotifications)
-                Text("The banner when a summary finishes or fails. The summary itself still appears in the window and the menu bar's unread mark.")
+                Text("The banner when the nightly summary finishes or fails. A run you start yourself is silent. The summary itself still appears in the window and the menu bar's unread mark.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
             }
@@ -372,6 +376,59 @@ struct GeneralTab: View {
                     }
                     .foregroundStyle(DS.error)
                 }
+
+                Divider()
+                mirrorReport
+            }
+        }
+    }
+
+    /// What the mirror has actually done, under the switches that ask for it.
+    ///
+    /// A pane of switches describes intent. This describes what happened, which is a
+    /// different thing and the one that was missing: on 2026-08-14 the mirror had never
+    /// run on this Mac and every screen in the app looked exactly as it would have if
+    /// it were running perfectly.
+    @ViewBuilder
+    private var mirrorReport: some View {
+        let status = appState.calendarMirror.status
+        VStack(alignment: .leading, spacing: DS.xs) {
+            if !status.hasRun {
+                Label("No pass has finished yet.", systemImage: "clock")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkDim)
+            } else {
+                if let run = status.lastRun {
+                    Label {
+                        Text("Last checked \(CalendarWeekView.sinceLabel(run))")
+                    } icon: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkDim)
+                }
+                Text("\(status.created) written · \(status.updated) brought up to date · \(status.deleted) removed · \(status.tombstoned) you deleted and mull won't rewrite")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // The quality reading, in the same words the write sheet uses.
+                if let fraction = status.quality.namedFraction {
+                    Text("\(Int((fraction * 100).rounded()))% of the last pass was named from what you had open; the rest just say the app's name.")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.inkFaint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if status.failures > 0, let error = status.lastError {
+                HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(DS.miniFont)
+                    Text("\(pluralized(status.failures, "write")) failed. Last reason: \(error)")
+                        .font(DS.captionFont)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(DS.error)
             }
         }
     }
@@ -818,8 +875,8 @@ struct AITab: View {
 
             Section("Provider") {
                 Picker("", selection: $provider) {
-                    Text("Off — local rule-based only (no cloud)").tag("off")
-                    Text("Gemini Flash (Free)").tag("gemini")
+                    Text("Off — local rule-based only").tag("off")
+                    Text("Gemini Flash").tag("gemini")
                     Text("Local (Ollama)").tag("local")
                     Text("Local (OpenAI-compatible — LM Studio, Jan, …)").tag("localopenai")
                     Text("Claude API").tag("claude")
@@ -849,19 +906,16 @@ struct AITab: View {
                 case "gemini":
                     APIKeyField(placeholder: String(localized: "API Key (AIza…)"), keychainKey: "gemini_api_key",
                                 text: $geminiKey, onSaved: { testConnection() })
-                    // Where a key is kept is a privacy fact, not a feature note, so
-                    // every provider that takes one says it — Gemini's key was the
-                    // one that silently didn't.
-                    if geminiKey.isEmpty {
-                        Text("Enter your key from Google AI Studio. A key you enter is kept in the macOS Keychain, never in a file.")
-                            .font(DS.captionFont)
-                            .foregroundStyle(DS.inkFaint)
-                    } else {
-                        Text("Requests go straight from this Mac to Google under your own key and account.")
-                            .font(DS.captionFont)
-                            .foregroundStyle(DS.inkDim)
-                        keyNote
-                    }
+                    // Where to get a key is the only thing this row knows that the
+                    // other two don't. It used to say two more things, both written
+                    // against a bundled key that no longer exists: that the key is
+                    // kept in the Keychain (keyNote, directly below, says that for
+                    // every provider) and that requests run under your own account
+                    // (the Provider section above already says the data leaves).
+                    Text("Enter your key from Google AI Studio.")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.inkFaint)
+                    keyNote
                 case "claude":
                     APIKeyField(placeholder: String(localized: "API Key (sk-ant-…)"), keychainKey: "claude_api_key",
                                 text: $claudeKey, onSaved: { testConnection() })
@@ -1199,15 +1253,23 @@ struct AITab: View {
                 switch provider {
                 case "gemini":
                     guard let key = KeychainService.loadKey("gemini_api_key") else {
-                        testOutcome = .failed("No API key entered")
+                        testOutcome = .failed(String(localized: "No API key entered"))
                         return
                     }
-                    guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(key)") else {
-                        testOutcome = .failed("Could not build the request URL — the key may contain invalid characters")
+                    // The key goes in a header, not in `?key=`, for the reason
+                    // LLMClient.callGemini gives: a URL is the part of a request
+                    // that gets written down. The test used the query form, so the
+                    // same key was handled two different ways depending on which
+                    // button you pressed. It also takes the key out of a string
+                    // interpolation, where a reserved character made URL(string:)
+                    // return nil and the failure read as a malformed URL.
+                    guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models") else {
+                        testOutcome = .failed(String(localized: "Could not build the request URL"))
                         return
                     }
                     var req = URLRequest(url: url)
                     req.timeoutInterval = 15
+                    req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
                     let (data, resp) = try await URLSession.shared.data(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                     if code == 200 {
@@ -1221,11 +1283,11 @@ struct AITab: View {
 
                 case "claude":
                     guard let key = KeychainService.loadKey("claude_api_key") else {
-                        testOutcome = .failed("No API key entered")
+                        testOutcome = .failed(String(localized: "No API key entered"))
                         return
                     }
                     guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
-                        testOutcome = .failed("Could not build the request URL")
+                        testOutcome = .failed(String(localized: "Could not build the request URL"))
                         return
                     }
                     var req = URLRequest(url: url)
@@ -1240,15 +1302,15 @@ struct AITab: View {
                     ])
                     let (_, resp) = try await URLSession.shared.data(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                    testOutcome = code == 200 ? .ok("Connected") : .failed(Self.httpFailureMessage(code))
+                    testOutcome = code == 200 ? .ok(String(localized: "Connected")) : .failed(Self.httpFailureMessage(code))
 
                 case "openai":
                     guard let key = KeychainService.loadKey("openai_api_key") else {
-                        testOutcome = .failed("No API key entered")
+                        testOutcome = .failed(String(localized: "No API key entered"))
                         return
                     }
                     guard let url = URL(string: "https://api.openai.com/v1/models") else {
-                        testOutcome = .failed("Could not build the request URL")
+                        testOutcome = .failed(String(localized: "Could not build the request URL"))
                         return
                     }
                     var req = URLRequest(url: url)
@@ -1256,13 +1318,13 @@ struct AITab: View {
                     req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
                     let (_, resp) = try await URLSession.shared.data(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                    testOutcome = code == 200 ? .ok("Connected") : .failed(Self.httpFailureMessage(code))
+                    testOutcome = code == 200 ? .ok(String(localized: "Connected")) : .failed(Self.httpFailureMessage(code))
 
                 case "localopenai":
                     let base = localBaseURL.trimmingCharacters(in: .whitespaces)
                     let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
                     guard let url = URL(string: "\(trimmed)/models") else {
-                        testOutcome = .failed("Invalid base URL")
+                        testOutcome = .failed(String(localized: "Invalid base URL"))
                         return
                     }
                     var req = URLRequest(url: url)
@@ -1274,16 +1336,16 @@ struct AITab: View {
                     let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                     let models = (json?["data"] as? [[String: Any]])?.compactMap { $0["id"] as? String } ?? []
                     if models.isEmpty {
-                        testOutcome = .ok("Server up, but no model loaded — load one in LM Studio")
+                        testOutcome = .ok(String(localized: "Server up, but no model loaded — load one in LM Studio"))
                     } else if localModel.isEmpty || models.contains(where: { $0.hasPrefix(localModel) }) {
                         testOutcome = .ok(String(localized: "Ready (\(models.prefix(2).joined(separator: ", ")))"))
                     } else {
-                        testOutcome = .failed("\(localModel) not loaded. Available: \(models.prefix(3).joined(separator: ", "))")
+                        testOutcome = .failed(String(localized: "\(localModel) not loaded. Available: \(models.prefix(3).joined(separator: ", "))"))
                     }
 
                 default:
                     guard let url = URL(string: "http://localhost:11434/api/tags") else {
-                        testOutcome = .failed("Could not build the request URL")
+                        testOutcome = .failed(String(localized: "Could not build the request URL"))
                         return
                     }
                     var req = URLRequest(url: url)
@@ -1292,18 +1354,18 @@ struct AITab: View {
                     let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                     let models = (json?["models"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
                     if models.contains(where: { $0.hasPrefix(ollamaModel) }) {
-                        testOutcome = .ok("\(ollamaModel) ready")
+                        testOutcome = .ok(String(localized: "\(ollamaModel) ready"))
                     } else {
                         let available = models.prefix(3).joined(separator: ", ")
-                        testOutcome = .failed("\(ollamaModel) not found. Available: \(available)")
+                        testOutcome = .failed(String(localized: "\(ollamaModel) not found. Available: \(available)"))
                     }
                 }
             } catch let error as URLError where error.code == .timedOut {
-                testOutcome = .failed("Timed out — server not responding")
+                testOutcome = .failed(String(localized: "Timed out — server not responding"))
             } catch let error as URLError where error.code == .cannotConnectToHost {
                 testOutcome = .failed(String(localized: "Cannot connect — is the server running?"))
             } catch let error as URLError where error.code == .notConnectedToInternet {
-                testOutcome = .failed("No internet connection")
+                testOutcome = .failed(String(localized: "No internet connection"))
             } catch {
                 let msg = error.localizedDescription
                 testOutcome = .failed(msg.count > 60 ? String(msg.prefix(60)) + "…" : msg)

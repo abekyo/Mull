@@ -26,10 +26,25 @@ import Foundation
 /// and it is what the AI reads in me.pinned.md. It just no longer decides
 /// anything on the user's behalf.
 ///
-/// Deliberately NOT applied to the AI-facing contract files — me.md, now.md,
-/// full.md, MEMORY.md stay in stable English because their audience is whatever
-/// model the user pastes them into, and a fixed format survives locale changes.
-/// The split is the same one TimeFormat draws between `person` and `machine`.
+/// **Read through `Preferences.store`, not `UserDefaults.standard`.** The two are
+/// not the same store in the two targets: the app's standard domain is
+/// `com.mull.app`, and `MullMCP` is a bare executable whose standard domain is
+/// keyed on the executable name and holds none of the app's values. Reading
+/// `.standard` from Core — which `project.yml` compiles into both targets — meant
+/// the picker in Settings › General governed the vault files (written by the app)
+/// and nothing at all in the 13 MCP tools (served by the helper), which is the
+/// surface CLAUDE.md §5 calls the product. A vault in Japanese and an agent being
+/// answered in English, from one setting, with no symptom that says why.
+/// `Preferences` exists for exactly this and its doc comment describes this bug;
+/// this type simply was not using it.
+///
+/// Scope, as of the vault localization work: this decides me.md, now.md, full.md
+/// and everything else mull writes for a human to read. `VaultText` holds the
+/// reasoning — briefly, the reader opens those files in mull's own Files tab, and
+/// a model reads Japanese, so pinning them to English bought nothing. What stays
+/// English is what is *addressed to* a model (`mull.md`) and what is *parsed* by
+/// one (front-matter keys, `MarkdownDoc.generatorStamp`, block provenance
+/// markers) — protocol, not prose.
 enum UserLanguage {
 
     /// Mirror of `OnboardingProfile.answersKey` — kept literal here so Core
@@ -59,14 +74,14 @@ enum UserLanguage {
     }
 
     static var preference: Preference {
-        Preference(rawValue: UserDefaults.standard.string(forKey: preferenceKey) ?? "") ?? .system
+        Preference(rawValue: Preferences.store.string(forKey: preferenceKey) ?? "") ?? .system
     }
 
     /// The free-text onboarding answer, if the user gave one. Read by the profile
     /// projection, which puts it in front of the AI verbatim. Nothing decides a
     /// language from it — see the note at the top of this file.
     static var statedLanguage: String? {
-        (UserDefaults.standard.dictionary(forKey: onboardingAnswersKey) as? [String: String])?["language"]
+        (Preferences.store.dictionary(forKey: onboardingAnswersKey) as? [String: String])?["language"]
     }
 
     /// What macOS itself is set to, as a yes/no.

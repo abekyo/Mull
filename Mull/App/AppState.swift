@@ -389,11 +389,38 @@ final class AppState: ObservableObject {
     /// IngestionService.beginRun.
     private var contextGenerationInFlight = false
 
+    /// `todayEventCount` as of the last generation this started.
+    ///
+    /// The 60s pass rewrites five files atomically — me.md, now.md, full.md
+    /// (19KB on its own), mull.md and the day's snapshot — and it did so whether
+    /// or not anything had been recorded since the last one, because the header
+    /// timestamp guarantees the bytes differ. Overnight that is 1,440 rewrites of
+    /// each file, five new inodes a minute for Spotlight to re-index, for a record
+    /// that has not changed.
+    ///
+    /// Gating on events rather than on whether the user is at the keyboard is
+    /// deliberate. An agent can be working, and reading the vault, while its user
+    /// is away; what it does moves window titles, and window titles are events. So
+    /// the question is not whether anyone is present, it is whether there is
+    /// anything new to write.
+    private var lastGeneratedEventCount: Int?
+
+    /// Whether the 60s pass has anything to do. Pure and static so the rule can be
+    /// tested without standing up an AppState.
+    static func shouldRegenerateContext(eventCount: Int, lastGenerated: Int?,
+                                        sinceLastUpdate: TimeInterval) -> Bool {
+        eventCount > 0 && sinceLastUpdate > 60 && eventCount != lastGenerated
+    }
+
     /// Run one context generation if none is already running. Shared by the 60s tick
     /// and the explicit `regenerateContextNow()` so the two can never overlap either.
     private func generateContextIfIdle() {
         guard !contextGenerationInFlight else { return }
         contextGenerationInFlight = true
+        // Snapshot at the decision, not at completion: an event that lands while a
+        // generation is running may or may not be in it, so it must still be able
+        // to trigger the next one.
+        lastGeneratedEventCount = todayEventCount
 
         let db = database
         let analyticsRef = analytics
@@ -460,7 +487,9 @@ final class AppState: ObservableObject {
             }
         }
 
-        if todayEventCount > 0 && Date().timeIntervalSince(lastMeFileUpdate) > 60 {
+        if Self.shouldRegenerateContext(eventCount: todayEventCount,
+                                        lastGenerated: lastGeneratedEventCount,
+                                        sinceLastUpdate: Date().timeIntervalSince(lastMeFileUpdate)) {
             generateContextIfIdle()
         }
     }
@@ -646,21 +675,15 @@ final class AppState: ObservableObject {
                 loadRecentSummaries()
                 mullProgress = nil
 
-                // macOS notification — pull user back
-                if summaryBannersEnabled {
-                    sendNotification(
-                        title: "Summary is ready",
-                        body: summary.preview
-                    )
-                }
+                // No banner: this is the manual run, so the person is in the window
+                // watching the progress line they started. The nightly run keeps its
+                // banner — that one finishes while they are elsewhere.
             } catch {
                 mullProgress = "mull failed: \(error.localizedDescription)"
-                if summaryBannersEnabled {
-                    sendNotification(
-                        title: "Summary failed",
-                        body: error.localizedDescription
-                    )
-                }
+                // `mullProgress` clears itself after five seconds, so someone who
+                // started this and walked away would find no trace of the failure.
+                // The notice stays until dismissed, without a banner.
+                postNotice("Summary didn't run", detail: error.localizedDescription, isProblem: true)
                 try? await Task.sleep(for: .seconds(5))
                 mullProgress = nil
             }
@@ -740,10 +763,9 @@ final class AppState: ObservableObject {
                     isProblem: true)
                 return
             }
-            sendNotification(
-                title: "Context injected",
-                body: "Your AI context has been pasted. Clipboard restored."
-            )
+            // Nothing to announce on success: the text is now sitting in the field
+            // the person is looking at. Only the failure above is worth saying out
+            // loud, because that one leaves the field empty.
         }
     }
 
@@ -763,13 +785,14 @@ final class AppState: ObservableObject {
             NSPasteboard.general.setString(finalText, forType: .string)
 
             let wordCount = finalText.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
-            // In-app first (a system notification is invisible under Do Not Disturb),
-            // notification second for when the window isn't on screen.
+            // In-app notice only. This used to also fire a system banner, on the
+            // reasoning that ⌘⇧C is a global shortcut so the window is usually not
+            // on screen to show the notice — but the person pressed the shortcut,
+            // and a banner with a sound announcing the result of a key you just hit
+            // is the thing macOS reserves for what happens without you. The auto-copy
+            // in ProactiveEngine still announces itself, because nobody asked for it
+            // and it puts the clipboard back 30 seconds later.
             postNotice("Context copied", detail: "\(wordCount) words about your day — paste into any AI.")
-            sendNotification(
-                title: "Context copied",
-                body: "Paste into any AI — \(wordCount) words about your day."
-            )
         }
     }
 

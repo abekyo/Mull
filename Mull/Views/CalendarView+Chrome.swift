@@ -22,6 +22,8 @@ extension CalendarWeekView {
 
             Spacer(minLength: DS.md)
 
+            mirrorStatusPill
+
             calendarVisibilityControl
 
             exportControl
@@ -50,6 +52,122 @@ extension CalendarWeekView {
         }
         .padding(.horizontal, DS.xl)
         .padding(.vertical, DS.sm)
+    }
+
+    // MARK: - Is the mirror alive
+    //
+    // The mirror wrote through `try?` and reported to nobody. Off, pointed at no
+    // calendar, never run, and failing every hour all produced the same calendar —
+    // an empty one — and only two of those four are anything to act on. This is the
+    // one place in the product where the difference is visible, and it sits in the
+    // toolbar of the screen the mirror writes to.
+
+    /// Recomputed on every body pass, which is why all three inputs are handed in
+    /// rather than read from defaults: the counts come from the runner's in-memory
+    /// copy, and the two `@AppStorage` values make the on/off half immediate when the
+    /// write sheet turns the mirror on. The default arguments would re-read
+    /// `UserDefaults` and re-decode JSON on every frame of a drag to learn a number
+    /// that changes once an hour.
+    var mirrorState: CalendarMirrorState {
+        .current(status: appState.calendarMirror.status,
+                 enabled: mirrorIsOn,
+                 calendarID: mirrorCalendarID.isEmpty ? nil : mirrorCalendarID)
+    }
+
+    /// Nothing at all when the mirror is off. That is not a fault to report — it is the
+    /// default, and the offer to change it belongs on the write sheet, where somebody
+    /// has just decided they want this.
+    @ViewBuilder
+    var mirrorStatusPill: some View {
+        let state = mirrorState
+        if state != .off {
+            Button { openMirrorSettings() } label: {
+                HStack(spacing: DS.xs) {
+                    Image(systemName: mirrorGlyph(state))
+                        .font(DS.miniFont.weight(.semibold))
+                    Text(mirrorLabel(state))
+                        .font(DS.miniFont)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(state.isFaulty ? DS.error : DS.inkDim)
+                .padding(.horizontal, DS.sm)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule().fill((state.isFaulty ? DS.error : DS.moon).opacity(0.10))
+                )
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .help(mirrorHelp(state))
+            .accessibilityLabel("Calendar mirror status")
+        }
+    }
+
+    private func mirrorGlyph(_ state: CalendarMirrorState) -> String {
+        switch state {
+        case .off:        return "circle"
+        case .noCalendar: return "exclamationmark.triangle"
+        case .waiting:    return "clock"
+        case .working:    return "arrow.triangle.2.circlepath"
+        case .failing:    return "exclamationmark.triangle.fill"
+        }
+    }
+
+    /// Short enough for a toolbar, and specific enough to act on. "Mirror on" would be
+    /// the one phrasing that says nothing: it is what a pane full of switches already
+    /// told you, and it is true in the two states where the mirror is doing nothing.
+    private func mirrorLabel(_ state: CalendarMirrorState) -> String {
+        switch state {
+        case .off:        return ""
+        case .noCalendar: return String(localized: "No calendar picked")
+        case .waiting:    return String(localized: "Waiting to write")
+        case .failing:    return String(localized: "Couldn't write")
+        case .working(let status):
+            guard let last = status.lastChange else { return String(localized: "Nothing to write yet") }
+            return String(localized: "Wrote \(Self.sinceLabel(last))")
+        }
+    }
+
+    private func mirrorHelp(_ state: CalendarMirrorState) -> String {
+        switch state {
+        case .off:
+            return ""
+        case .noCalendar:
+            return String(localized: "The mirror is on but has no calendar to write to, so it does nothing. Click to pick one.")
+        case .waiting:
+            return String(localized: "The mirror is on and hasn't finished a pass yet. Click for settings.")
+        case .failing(let status):
+            let reason = status.lastError ?? String(localized: "your calendar refused the write")
+            return String(localized: "The last write failed: \(reason). Click for settings.")
+        case .working(let status):
+            var parts: [String] = []
+            if let run = status.lastRun {
+                parts.append(String(localized: "Last checked \(Self.sinceLabel(run))"))
+            }
+            parts.append(String(localized: "\(status.created) written, \(status.deleted) removed, \(status.tombstoned) you deleted"))
+            if let fraction = status.quality.namedFraction {
+                parts.append(String(localized: "\(Int((fraction * 100).rounded()))% named from what you had open"))
+            }
+            return parts.joined(separator: " · ")
+        }
+    }
+
+    /// "4 min ago". Coarse on purpose — the question this answers is "is it alive",
+    /// and a pill that ticks every second answers a question nobody asked.
+    static func sinceLabel(_ date: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Through the app delegate, not `showSettingsWindow:`. mull's Settings is a
+    /// hand-built `NSWindow` rather than a SwiftUI `Settings` scene (see
+    /// `AppDelegate.showSettings`), so the AppKit action this would otherwise use
+    /// silently does nothing — which is the exact failure this pill exists to stop
+    /// happening elsewhere.
+    func openMirrorSettings() {
+        AppDelegate.shared?.showSettings(tab: .general)
     }
 
     /// Which calendars the grid draws.
