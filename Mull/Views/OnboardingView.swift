@@ -39,7 +39,6 @@ struct OnboardingView: View {
     // re-labelled the button "Allow" — a tap that did nothing visible, because TCC
     // shows each prompt once and the decision was already on file.
     @AppStorage("onboardingAskedAccessibility") private var askedAccessibility = false
-    @AppStorage("onboardingAskedInputMonitoring") private var askedInputMonitoring = false
     @State private var showCopiedConfirmation = false
     // Loaded when the profile step appears, not in the initialiser: a default
     // expression runs on every re-init of the struct, and this one reads a file.
@@ -212,7 +211,12 @@ struct OnboardingView: View {
 
             Button {
                 appState.permissions.checkAll()
-                if appState.permissions.inputMonitoringGranted && appState.permissions.accessibilityGranted {
+                // Accessibility is what mull actually needs to start: it carries the
+                // window titles and the on-screen text, four fifths of everything
+                // captured. Input Monitoring is opt-in now and off, so requiring it
+                // here would send every new user to a System Settings pane for a
+                // channel that is not going to run.
+                if !appState.permissions.inputMonitoringMissing && appState.permissions.accessibilityGranted {
                     withAnimation { step = .coldRead }
                     startRecordingAndProof()
                 } else {
@@ -239,62 +243,33 @@ struct OnboardingView: View {
             // A fleuron, not a raised hand: the step is an ask, not a warning.
             StippleMark(dot: 5)
 
-            Text("Two permissions needed")
+            Text("One permission needed")
                 .font(DS.headlineFont)
 
             // "Nothing it records leaves your Mac" was the sentence used to buy the
             // two scariest permissions macOS has — and it stops being true the moment
             // the user turns on a cloud provider in Settings → AI. A promise made at
             // the point of maximum trust must survive the rest of the product.
-            Text("mull needs these to see what you're working on. What it records stays on this Mac unless you later turn on a cloud AI — and it will tell you when you do.")
+            Text("mull needs this to see what you're working on. What it records stays on this Mac unless you later turn on a cloud AI — and it will tell you when you do.")
                 .font(DS.bodyFont)
                 .foregroundStyle(DS.inkDim)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, DS.lg)
 
             // Ask the system first; offer Settings only to the user the system
-            // couldn't help. Both rows used to lead with (or straight to) the
-            // Settings pane, which is the slowest path and, for Input Monitoring,
-            // often a pane mull was not even listed in.
+            // couldn't help. The row used to lead with (or go straight to) the
+            // Settings pane, which is the slowest path.
             //
-            // Input Monitoring leads, and each detail line says what its absence
-            // costs. The rows used to sit as equals ("Read window titles" / "Record
-            // keyboard input") with nothing to say that one of them is the
-            // permission the product cannot work without, or which to start with.
+            // **Input Monitoring is not asked for here** (2026-08-15). It used to lead
+            // this screen, described as the permission the product cannot work
+            // without. Measured over the 75 days to 2026-08-14 that was false: the tap
+            // carried 3.0% of the text mull captured, against 80.6% for the
+            // Accessibility-driven window-body reader. It is now opt-in, off, and
+            // reachable from Settings → Data → Optional sources, so the heaviest grant
+            // macOS has is no longer part of deciding whether to install mull at all
+            // (CLAUDE.md §8.3: what separates accepted from rejected is whether the
+            // person chose it, not how much is kept).
             VStack(alignment: .leading, spacing: DS.md) {
-                permissionRow(
-                    name: String(localized: "Input Monitoring"),
-                    detail: String(localized: "Record what you type — without this, mull only keeps what you copy"),
-                    granted: appState.permissions.inputMonitoringGranted,
-                    asked: askedInputMonitoring,
-                    action: {
-                        if askedInputMonitoring {
-                            appState.permissions.openInputMonitoringSettings()
-                        } else {
-                            askedInputMonitoring = true
-                            // Creating a real tap is what makes macOS register mull
-                            // in the Input Monitoring list and show its prompt; the
-                            // passive check the app polls with does neither. Without
-                            // this the row dropped the user into a pane where mull
-                            // might not appear at all.
-                            //
-                            // Whether a dialog is coming has to be read BEFORE the
-                            // ask: afterwards the answer is still outstanding and TCC
-                            // says nothing useful. A failed tap does NOT mean "already
-                            // decided" — on a first run it fails *and* raises the
-                            // prompt, so treating failure as "no dialog will appear"
-                            // dropped a whole System Settings window on top of the
-                            // one-click dialog that would have finished the job. That
-                            // is the same race the Accessibility row below was fixed
-                            // to avoid, and it was still live here.
-                            let promptComing = appState.permissions.inputMonitoringPromptAvailable
-                            let alreadyGranted = appState.permissions.requestInputMonitoring()
-                            if !alreadyGranted && !promptComing {
-                                appState.permissions.openInputMonitoringSettings()
-                            }
-                        }
-                    }
-                )
                 permissionRow(
                     name: "Accessibility",
                     detail: String(localized: "Read window titles, so the record says where you were"),
@@ -317,7 +292,7 @@ struct OnboardingView: View {
             }
             .padding(.horizontal, DS.onboardingGutter)
 
-            if appState.permissions.accessibilityGranted && appState.permissions.inputMonitoringGranted {
+            if appState.permissions.accessibilityGranted {
                 HStack(spacing: DS.sm) {
                     Image(systemName: DS.Glyph.success)
                         .foregroundStyle(DS.recording)
@@ -1186,7 +1161,7 @@ struct OnboardingView: View {
                 // between ticks: never auto-advance from anywhere but this step.
                 guard step == .permissions else { stopPermissionPolling(); return }
                 appState.permissions.checkAll()
-                if appState.permissions.accessibilityGranted && appState.permissions.inputMonitoringGranted {
+                if appState.permissions.accessibilityGranted {
                     stopPermissionPolling()
                     // Let the two ticks register as granted before moving on, then
                     // advance — but only from the step that scheduled this. The tick
@@ -1200,7 +1175,7 @@ struct OnboardingView: View {
                         withAnimation(.spring(duration: 0.3)) { step = .coldRead }
                         startRecordingAndProof()
                     }
-                } else if askedAccessibility || askedInputMonitoring {
+                } else if askedAccessibility {
                     // A prompt has been faced and the grant still hasn't arrived:
                     // the user is somewhere in the Settings round trip. The guide
                     // used to sit collapsed behind "How do I do this?" — the person

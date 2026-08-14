@@ -1,8 +1,18 @@
 # Security
 
-mull holds an Input Monitoring grant and records what you type. That is a larger amount of
-trust than most software asks for, so this document states plainly what it does with it, what
-it deliberately does not do, and how to report it when the code does not match this page.
+mull reads the titles and the on-screen text of the windows you work in, and the things you
+copy. That is a larger amount of trust than most software asks for, so this document states
+plainly what it does with it, what it deliberately does not do, and how to report it when the
+code does not match this page.
+
+**mull does not read your keyboard unless you switch that on.** Since 2026-08-15 keystroke
+capture is off by default: a fresh install never creates the event tap, never raises the Input
+Monitoring prompt, and runs its other five channels without that grant. You can turn it on
+under Settings → Data → Optional sources, and macOS will ask you then. The reason it is off is
+measured rather than cautious — over 75 days the tap carried 3.0% of the text mull captured,
+four fifths of it duplicating what the window reader already sees, and the part only it could
+see was messages and notes ([DIRECTION.md](DIRECTION.md) §3.1). With it on, mull records
+everything you type in every app you have not excluded.
 
 ## Reporting a vulnerability
 

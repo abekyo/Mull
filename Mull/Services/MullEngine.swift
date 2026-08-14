@@ -29,12 +29,9 @@ final class MullEngine {
     /// would be seen by some writers and not others.
     private var mullOutputDir: URL { MullDirectory.root }
 
-    private var dailyDir: URL {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/MM"
-        let subpath = formatter.string(from: Date())
-        return mullOutputDir.appendingPathComponent("daily/\(subpath)", isDirectory: true)
-    }
+    // `dailyDir` was here — a fourth spelling of `daily/YYYY/MM`, unread since
+    // `writeDailyFile` became a no-op, and built from `Date()` rather than from the
+    // day being written. `VaultLayout.dailyPath(for:)` is the one formula now.
 
     private var memoryDir: URL {
         mullOutputDir.appendingPathComponent("memory", isDirectory: true)
@@ -97,6 +94,9 @@ final class MullEngine {
     func scheduleSummary(at hour: Int, minute: Int = 0) {
         scheduler.scheduleSummary(at: hour, minute: minute)
     }
+
+    /// Write a finished day the scheduled run was not running to write.
+    func catchUpOnLaunch() { scheduler.catchUpOnLaunch() }
 
     /// Callable from anywhere — AppState's `deinit` is nonisolated.
     nonisolated func cancelSchedule() { scheduler.cancelSchedule() }
@@ -200,7 +200,10 @@ final class MullEngine {
     private func phase2Gather() -> GatheredData {
         let calendar = Calendar.current
         let windowEnd = Date()
-        let windowStart = calendar.date(byAdding: .hour, value: -24, to: windowEnd)!
+        // The scheduler predicts which day this window lands on before any of it is
+        // read, so the length lives with the prediction rather than beside it.
+        let windowStart = calendar.date(
+            byAdding: .hour, value: -ConsolidationScheduler.gatherWindowHours, to: windowEnd)!
 
         let events = database.fetchEvents(from: windowStart, to: windowEnd)
 
@@ -731,10 +734,70 @@ final class MullEngine {
 
     // MARK: - File Output
 
-    /// Daily files are now managed by LiveContextGenerator.snapshotDaily().
-    /// This method is kept only for database persistence — it no longer writes to disk.
+    /// Write the day's record to `daily/YYYY/MM/YYYY-MM-DD.md`.
+    ///
+    /// This was a no-op for long enough that the folder filled up with something
+    /// else. `LiveContextGenerator` was copying `full.md` in here every 60 seconds,
+    /// so a folder called `daily` — the one place in the vault a person would look
+    /// for what they did on a Tuesday — held sixty-second-fresh copies of the
+    /// everything-file written for an agent, under a heading that said so
+    /// ("Assembled from me.md and now.md"). The day's actual record existed the
+    /// whole time and lived only in SQLite, which is the one place the vault
+    /// promises nothing lives (DIRECTION §6: a folder of markdown, or it cannot be
+    /// maintained).
+    ///
+    /// Named from `summary.date` — the day it is ABOUT — not from today. Those are
+    /// different dates for a launch catch-up, and the snapshot used today's.
     private func writeDailyFile(_ summary: DailySummary) throws {
-        // No-op: LiveContextGenerator owns the daily file.
+        // No `MarkdownDoc.header` — that adds an H1, and the summary already opens
+        // with the day as its own. Front matter and then the record, unchanged.
+        //
+        // `written_by` is the summary's own field rather than the current setting:
+        // a day the model could not answer for was written by the rule-based
+        // fallback, and a reader deciding how much to trust a sentence is owed
+        // which of the two produced it.
+        let body = MarkdownDoc.join([
+            MarkdownDoc.frontMatter([
+                // `header` adds this and `frontMatter` does not, so it is stated
+                // here. Without it `isGeneratedByMull` cannot recognise the file,
+                // and a day's record open on screen would be captured and fed back
+                // in as if the user had written it.
+                ("generator", "mull"),
+                ("day", TimeFormat.machineDay(summary.date)),
+                ("written_by", summary.llmProvider),
+                ("events", String(summary.eventCount)),
+            ]),
+            summary.content,
+        ])
+        MullDirectory.write(body, to: VaultLayout.dailyPath(for: summary.date))
+    }
+
+    /// Put the days that were only ever in the database on disk, and clear out what
+    /// the folder used to hold.
+    ///
+    /// Idempotent, safe to call at every launch, and it never touches a file mull
+    /// did not write: the sweep only removes files inside `daily/` that carry mull's
+    /// own `generator:` stamp and have no summary behind them. After this runs, a
+    /// mull-generated file in there always corresponds to a row — which is what
+    /// makes "no row" a sound test for the old scheme's leftovers rather than a
+    /// guess about the text.
+    func backfillDailyFiles() {
+        guard MullDirectory.status == .ready else { return }
+
+        let summaries = database.fetchRecentSummaries(limit: database.summaryCount())
+        var written = Set<String>()
+        for summary in summaries {
+            let path = VaultLayout.dailyPath(for: summary.date)
+            written.insert(path)
+            try? writeDailyFile(summary)
+        }
+
+        for path in MullDirectory.markdownFilesRecursively(in: VaultLayout.daily)
+        where !written.contains(path) {
+            guard let text = MullDirectory.read(path),
+                  MarkdownDoc.isGeneratedByMull(text) else { continue }
+            MullDirectory.delete(path)
+        }
     }
 
     // MARK: - 3-Layer File Generation

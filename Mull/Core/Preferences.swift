@@ -47,6 +47,28 @@ enum Preferences {
         return TimeInterval(max(stored, 0))
     }
 
+    // MARK: - Keystroke capture
+
+    static let keystrokeCaptureKey = "keystrokeCaptureEnabled"
+
+    /// Off unless the user turns it on, so mull installs without asking for Input
+    /// Monitoring at all.
+    ///
+    /// The default is measured rather than cautious. Over the 75 days to 2026-08-14
+    /// the tap produced **3.0% of the text mull captured** (115,405 characters of
+    /// 3,813,449) while accounting for 47% of its events, because what it collects are
+    /// 3-second flushes: 64% of them under ten characters, and in 75 days not one over
+    /// 99. Four fifths of that came from the editor, where the same text is already on
+    /// disk, in git, and legible to the window-body reader. What the tap alone can see
+    /// is the remainder, and the remainder is private messages and notes.
+    ///
+    /// So this permission costs the most trust in the product — it is the word
+    /// "keylogger", and the one grant no comparable tool asks for — to collect mostly
+    /// duplicates plus the most sensitive fraction. Off by default is not mull
+    /// collecting less (CLAUDE.md §8.3: retention is not what got products rejected).
+    /// It is mull not putting that question in the install decision.
+    static var keystrokeCaptureEnabled: Bool { store.bool(forKey: keystrokeCaptureKey) }
+
     // MARK: - Calendar mirror
 
     static let mirrorEnabledKey = "calendarMirrorEnabled"

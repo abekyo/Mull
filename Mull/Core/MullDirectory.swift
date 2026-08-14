@@ -207,6 +207,27 @@ enum MullDirectory {
             .map { "\(relativeDir)/\($0)" }
     }
 
+    /// Every markdown file under a vault subdirectory, at any depth, as
+    /// vault-relative paths, sorted.
+    ///
+    /// `markdownFiles(in:)` above deliberately reads one level, because the callers
+    /// that browse a folder want its documents and not its subfolders' documents.
+    /// `daily/` is the one place mull nests — `YYYY/MM/` — so the sweep that has to
+    /// see all of it needs the other shape.
+    static func markdownFilesRecursively(in relativeDir: String) -> [String] {
+        let dir = root.appendingPathComponent(relativeDir, isDirectory: true)
+        guard let walker = FileManager.default.enumerator(
+            at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
+
+        let prefix = root.standardizedFileURL.path + "/"
+        return walker.compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "md" }
+            .map { $0.standardizedFileURL.path }
+            .filter { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
+            .sorted()
+    }
+
     /// Make a name safe to put on disk without rewriting what the user meant.
     ///
     /// Path separators become hyphens (a "/" sails through and quietly targets a

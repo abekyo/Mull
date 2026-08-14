@@ -78,7 +78,11 @@ final class PermissionService: ObservableObject {
         checkInputMonitoring()
 
         if hadAccessibility && !accessibilityGranted { onRevoked?(.accessibility) }
-        if hadInputMonitoring && !inputMonitoringGranted { onRevoked?(.inputMonitoring) }
+        // Only a loss if mull was using it. With keystroke capture off, revoking Input
+        // Monitoring takes nothing away, and "mull has stopped recording" would be
+        // false — the other five channels never depended on this grant.
+        if hadInputMonitoring && !inputMonitoringGranted,
+           Preferences.keystrokeCaptureEnabled { onRevoked?(.inputMonitoring) }
     }
 
     // MARK: - Accessibility
@@ -212,6 +216,18 @@ final class PermissionService: ObservableObject {
     /// Whether we have enough permissions to record anything useful.
     /// Clipboard always works. Window titles need Accessibility. Keystrokes need Input Monitoring.
     var canRecordKeystrokes: Bool { inputMonitoringGranted }
+
+    /// A grant mull is short of **and currently wants**.
+    ///
+    /// Every surface that warns about Input Monitoring asks this rather than
+    /// `inputMonitoringGranted`, because keystroke capture is off by default now
+    /// (`Preferences.keystrokeCaptureEnabled`). Without the second half, the first
+    /// thing a new user would see is a red banner demanding a permission for a channel
+    /// mull is not using and did not ask them for — which is how people learn to
+    /// ignore the banner that matters.
+    var inputMonitoringMissing: Bool {
+        Preferences.keystrokeCaptureEnabled && !inputMonitoringGranted
+    }
     var canRecordWindowTitles: Bool { accessibilityGranted }
     var canRecordClipboard: Bool { true } // Always available
 

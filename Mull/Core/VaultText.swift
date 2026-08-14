@@ -24,7 +24,17 @@ import Foundation
 /// into. Two things were wrong with that. The reader opens them in mull's own
 /// Files tab — that is the default screen — so the argument was answering about
 /// the smaller of the two audiences. And a model reads Japanese, so nothing was
-/// bought by the pin. What stays English is what is *addressed to* a model
+/// bought by the pin.
+///
+/// **Half of that reasoning expired on 2026-08-15.** The Files tab is gone
+/// (DIRECTION §6.2), so the reader now opens these in Finder, Obsidian or an
+/// editor — they still read them, which is what the argument needed, but "the
+/// default screen" is no longer true and should not be quoted as if it were. The
+/// second half carries the decision on its own: a model reads Japanese, so the pin
+/// bought nothing. Left as-is deliberately; changing which language a vault is
+/// written in is a decision, not a tidy-up.
+///
+/// What stays English is what is *addressed to* a model
 /// (`mull.md`, the front-door instructions) and what is *parsed* by one
 /// (`MarkdownDoc.generatorStamp`, the front-matter keys, block provenance
 /// markers) — those are protocol, not prose, and rewording them silently breaks

@@ -95,13 +95,57 @@ struct CurrentState {
             // flushes as it grows, so the same thing arrives repeatedly in
             // slightly different lengths. An exact-prefix key saw neither.
             guard !NearDuplicate.isRepeat(text, of: kept) else { continue }
+            guard let line = action(text, event) else { continue }
             kept.append(text)
-            let app = event.appName.map { "[\($0)] " } ?? ""
-            out.append(app + String(text.prefix(80)))
+            out.append(line)
             if out.count >= limit { break }
         }
         return out
     }
+
+    /// How one signal reads in the list, or nil if it should not be in it.
+    ///
+    /// The eight slots here are an agent's whole first impression: `whats_active_now`
+    /// is the call it is told to make first, and everything after it is conditioned
+    /// on the answer. So a line has to be true about what the user was *doing*, and
+    /// two kinds of line were not.
+    ///
+    /// **A window title that only repeats the app name.** `[Claude] Claude`,
+    /// `[Finder] Finder`. The app is already its own line above; this spends a slot
+    /// to say it twice.
+    ///
+    /// **A copied fragment presented as an activity.** The list showed
+    /// `[Code] A. カルテが濃くなる（本命）` — a heading the user had copied out of a
+    /// document they were reading in VS Code, rendered identically to
+    /// `[Code] ログ機能のバグチェック — Pet`, which is a task they were working on.
+    /// Both came through this function; only one was a thing done. Clipboard text is
+    /// somebody's writing passing through the pasteboard, and mull knows it was
+    /// copied and not that it was worked on, so that is what the line now says
+    /// (CLAUDE.md §7.1 — observations, not claims made out of them).
+    ///
+    /// A copy long enough to be truncated is dropped rather than quoted. At that
+    /// length it is a piece of a document, not a label, and the first 80 characters
+    /// of a paragraph name nothing. `search` still has all of it; this is the
+    /// anchor, not the archive.
+    private static func action(_ text: String, _ event: RecordingEvent) -> String? {
+        let app = event.appName.map { "[\($0)] " } ?? ""
+
+        guard event.eventType == .clipboard else {
+            if let name = event.appName,
+               text.caseInsensitiveCompare(name) == .orderedSame { return nil }
+            return app + String(text.prefix(titleBudget))
+        }
+
+        guard text.count <= copyBudget else { return nil }
+        return app + VaultText.t("copied “\(text)”", "「\(text)」をコピー")
+    }
+
+    /// Window titles are already short by nature; this only catches the pathological
+    /// ones (a browser tab whose title is a whole sentence).
+    private static let titleBudget = 80
+
+    /// A copy longer than this is a document rather than a label.
+    private static let copyBudget = 60
 
     /// Start of the contiguous run ending at the latest event (gaps < 5 min →
     /// same session).

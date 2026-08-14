@@ -359,6 +359,16 @@ final class AppState: ObservableObject {
         let minute = UserDefaults.standard.object(forKey: "summaryTimeMinute") as? Int ?? 0
         mullEngine.scheduleSummary(at: hour, minute: minute)
 
+        // A day mull was not running at `hour` has no other chance: the next fire is
+        // 24 hours later and covers a different 24 hours. This looks for one that is
+        // over and unwritten. It refuses a day already written and refuses today,
+        // which is the scheduled run's to write — see ConsolidationScheduler gate 1.
+        mullEngine.catchUpOnLaunch()
+
+        // And put the days that only ever reached SQLite on disk. One pass, then it
+        // finds nothing to do on every launch after this one.
+        mullEngine.backfillDailyFiles()
+
         // No catch-up pass at launch, deliberately. Everything the mirror would have
         // written while mull was closed is still settled and still in range, so the
         // first scheduled tick covers it — and a write into somebody's calendar in the

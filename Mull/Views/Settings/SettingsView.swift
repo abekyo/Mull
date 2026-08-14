@@ -1511,6 +1511,10 @@ struct DataTab: View {
     // than 90 days on launch. One constant, one truth.
     @AppStorage("dataRetention") private var dataRetention = AppState.defaultDataRetentionDays
     @AppStorage("emailCaptureEnabled") private var emailCaptureEnabled = false
+    /// Default must match `Preferences.keystrokeCaptureEnabled`, which reads the same
+    /// key and answers `false` when it is unset. Two defaults for one key is how a
+    /// toggle comes up showing the opposite of what the recorder is doing.
+    @AppStorage(Preferences.keystrokeCaptureKey) private var keystrokeCapture = false
 
     @State private var eventCount = 0
     /// Every event in the database, not just today's. The destructive dialogs name
@@ -1536,6 +1540,7 @@ struct DataTab: View {
     @State private var calendarStore = EKEventStore()
 
     @State private var showEmailConsent = false
+    @State private var showKeystrokeConsent = false
     @State private var emailChecking = false
     @State private var emailProblem: EmailService.AccessProblem?
     /// Why browser URLs stopped arriving, if they did.
@@ -1570,7 +1575,15 @@ struct DataTab: View {
                         detail: String(localized: "Window titles, and the text on screen in the window you're using")) {
                     appState.permissions.openAccessibilitySettings()
                 }
-                permRow("Input Monitoring", granted: appState.permissions.inputMonitoringGranted, detail: String(localized: "Keystrokes")) {
+                // The row stays visible when keystroke capture is off, so somebody who
+                // granted this once can still find it and take it back. What changes is
+                // the sentence: an ungranted permission mull is not using is not a gap
+                // to fix, and showing it as one trains people past the rows that are.
+                permRow("Input Monitoring",
+                        granted: appState.permissions.inputMonitoringGranted,
+                        detail: keystrokeCapture
+                            ? String(localized: "Keystrokes")
+                            : String(localized: "Keystrokes — not in use. Turn on \"Keystrokes\" under Optional sources to use it.")) {
                     appState.permissions.openInputMonitoringSettings()
                 }
                 // Calendar was requested exactly once, from AppState.init, and never
@@ -1652,13 +1665,55 @@ struct DataTab: View {
 
             // Named for what it holds. "Data Sources" promised the list from
             // CLAUDE.md §6 — eight of them — and contained one toggle, because
-            // Mail is the only source that is off until you ask for it. The
-            // always-on ones are the Permissions section above; a pointer there
-            // beats a second copy of the list that can drift away from it.
+            // Mail used to be the only source that is off until you ask for it.
+            // Keystrokes joined it on 2026-08-15. The always-on ones are the
+            // Permissions section above; a pointer there beats a second copy of
+            // the list that can drift away from it.
             Section("Optional sources") {
-                Text("Everything else mull captures is always on, and listed under Permissions above.")
+                Text("These two are off until you turn them on. Everything else mull captures is always on, and listed under Permissions above.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Off by default, and the default is measured rather than cautious:
+                // over the 75 days to 2026-08-14 this tap produced 3.0% of the text
+                // mull captured, in fragments averaging eight characters, four fifths
+                // of it from the editor where the window-body reader already sees the
+                // same text. What the tap alone can see is messages and notes. The
+                // numbers and the reasoning are on `Preferences.keystrokeCaptureEnabled`.
+                //
+                // Same proxy shape as Email below, for the same reason: switching this
+                // on installs the CGEvent tap, which raises the Input Monitoring
+                // prompt. A system dialog nobody asked for is how people learn to
+                // press Deny.
+                Toggle("Keystrokes", isOn: Binding(
+                    get: { keystrokeCapture },
+                    set: { on in
+                        if on {
+                            showKeystrokeConsent = true
+                        } else {
+                            keystrokeCapture = false
+                            appState.recorder.reconfigureKeystrokeCapture()
+                        }
+                    }
+                ))
+                .confirmationDialog("Let mull read your keyboard?",
+                                    isPresented: $showKeystrokeConsent) {
+                    Button("Continue") {
+                        keystrokeCapture = true
+                        appState.recorder.reconfigureKeystrokeCapture()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("macOS will ask for Input Monitoring. After that mull records what you type in every app except the ones under \"Don't record in these apps\" below — including messengers and notes. Password fields are always skipped.\n\nmull works without this. It is off by default because over the last few months it added about 3% of what mull captured, and most of that was text already visible in window titles and on screen.")
+                }
+
+                Text(keystrokeCapture
+                     ? String(localized: "mull is reading your keyboard.")
+                     : String(localized: "mull is not reading your keyboard. Window titles, on-screen text, the clipboard, app switches and browser pages are unaffected."))
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 // Bound through a proxy: switching this on used to fire AppleScript
                 // at Mail.app immediately, which raises a macOS Automation prompt

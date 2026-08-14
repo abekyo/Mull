@@ -71,6 +71,14 @@ a hand-maintained file list **without GRDB**, and it has silently broken twice w
 it depends on started importing GRDB. If you make `Mull/Core/` code reach for a new symbol,
 check that `./eval/run.sh` still builds before you push.
 
+`./eval/calendar/run.sh` is the second harness of that shape, and it scores the *titles* the
+calendar mirror would write into a real calendar rather than the ranker. It has the same
+GRDB-free constraint plus an EventKit-free one, which is why `Mull/Core/BlockSegmentation.swift`
+and `Mull/Core/CalendarEventHandle.swift` exist as separate files. Unlike the two above it
+cannot break silently: `Tests/EvalReachabilityTests` reads its compile list out of the shell
+script and fails if any file in it imports something the harness cannot link. Both eval
+harnesses need a database, so neither runs in CI — but that test does.
+
 > Current scores and the four known-failing gaps are in the README's status block, and
 > [SELECTION-LAYER.md](SELECTION-LAYER.md) §6 is the specification behind them. The harness
 > beats its three baselines on the synthetic set and scores far lower on real harvested logs;

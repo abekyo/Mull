@@ -59,7 +59,6 @@ enum LiveContextGenerator {
         try generateNow(memories: memories, summaries: summaries, analytics: analytics, database: database, calendar: calendar, inbox: inbox, timestamp: timestamp)
         try generateFull(database: database, analytics: analytics, timestamp: timestamp)
         generateFrontDoor(timestamp: timestamp)
-        try snapshotDaily()
         // NOTE: Claude Code integration is manual. User runs:
         //   claude mcp add --transport stdio --scope user mull -- /path/to/MullMCP
         // We don't auto-write to ~/.claude.json or ~/.claude/CLAUDE.md — that's invasive.
@@ -119,7 +118,7 @@ enum LiveContextGenerator {
         l.append("")
         l.append("## The vault")
         l.append("- `me.md`, `now.md`, `full.md` — the 3-layer context above.")
-        l.append("- `daily/` — daily snapshots of the full context.")
+        l.append("- `daily/` — one file per day: what they actually did, written when the day was over.")
         l.append("- `\(VaultLayout.projects)/` — one briefing per project they are working on.")
         l.append("- `\(VaultLayout.corrections)/` — where they corrected mull, and what it should have said.")
         l.append("- `notes/` — the user's own notes, in whatever folders they made.")
@@ -139,29 +138,20 @@ enum LiveContextGenerator {
     // one file were being baked into another. They are still available, assembled
     // at use-time, through `ContextComposer`.
 
-    // MARK: - Daily Snapshot
+    // MARK: - Daily Snapshot (removed 2026-08-15)
     //
-    // Saves the current full.md as daily/YYYY/MM/YYYY-MM-DD.md.
-    // Each 60-second cycle overwrites today's file, so the daily file
-    // always reflects the latest state. Past days are frozen in place.
-
-    private static func snapshotDaily() throws {
-        guard let raw = MullDirectory.read("full.md"), !raw.isEmpty else { return }
-        // full.md is a curated file now (two writers, disjoint block prefixes), so
-        // strip the provenance markers before freezing the day's copy — the daily
-        // snapshot is a readable artifact, not something the Curator round-trips.
-        let content = ContextBlockFile.stripMarkers(raw)
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/MM"
-        let subpath = formatter.string(from: Date())
-
-        let fileFormatter = DateFormatter()
-        fileFormatter.dateFormat = "yyyy-MM-dd"
-        let fileName = fileFormatter.string(from: Date()) + ".md"
-
-        MullDirectory.write(content, to: "daily/\(subpath)/\(fileName)")
-    }
+    // This used to copy `full.md` into `daily/YYYY/MM/YYYY-MM-DD.md` on every
+    // 60-second cycle. It was a reasonable thing to build and the wrong file to put
+    // there: `daily/` is where a person looks for what they did on a Tuesday, and
+    // what it held was a sixty-second-fresh copy of the everything-file written for
+    // an agent, opening with "Assembled from me.md and now.md. Edit those, not
+    // this." The day's real record — the one with morning, afternoon and evening in
+    // it — was generated nightly and written nowhere, because
+    // `MullEngine.writeDailyFile` had been a no-op since this took the name.
+    //
+    // `MullEngine` owns the folder now, and writes one file per day when the day is
+    // over. Nothing needs a per-minute snapshot: `full.md` itself is current to the
+    // minute, and freezing it hourly was never something anybody asked to read.
 
     // MARK: - me.md (~200 tokens) — Who you are
     //

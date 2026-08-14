@@ -41,8 +41,11 @@ struct MenuBarPanel: View {
                 .opacity(0)
                 .accessibilityHidden(true)
 
-            // Permission banner — only on setup
-            if !appState.permissions.inputMonitoringGranted || !appState.permissions.accessibilityGranted {
+            // Permission banner — only on setup. Input Monitoring counts only when
+            // keystroke capture is on, which it is not by default: a banner demanding
+            // a grant for a channel mull is not using would greet every new user, and
+            // a banner that is wrong the first time is one nobody reads the second.
+            if appState.permissions.inputMonitoringMissing || !appState.permissions.accessibilityGranted {
                 permissionBanner
                 Divider()
             }
@@ -173,7 +176,7 @@ struct MenuBarPanel: View {
     }
 
     private var permissionsSettled: Bool {
-        appState.permissions.inputMonitoringGranted && appState.permissions.accessibilityGranted
+        !appState.permissions.inputMonitoringMissing && appState.permissions.accessibilityGranted
     }
 
     /// Close the panel without touching the draft.
@@ -458,7 +461,7 @@ struct MenuBarPanel: View {
                     action: { appState.permissions.openAccessibilitySettings() }
                 )
             }
-            if !appState.permissions.inputMonitoringGranted {
+            if appState.permissions.inputMonitoringMissing {
                 permissionRow(
                     name: String(localized: "Input Monitoring"),
                     detail: String(localized: "Keyboard recording"),

@@ -1,16 +1,27 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The mull window — a notebook, not a dashboard.
+/// The mull window.
 ///
-/// Like Apple Notes / Obsidian / Bear:
-///   Left sidebar: pinned views + files sorted by date
-///   Right main area: content of selected item
+/// Left sidebar: the five things a person opens. Right main area: the one selected.
 ///
-/// Pinned views: Home (your portrait and today's draft), Calendar, Live, Chat.
+///   Home      your portrait and today's draft
+///   Calendar  what you planned beside what you did
+///   Live      the record arriving, as it arrives
+///   Chat      ask the record something
+///   About you what mull works out about you, and where you correct it
 ///
-/// Files: me.md and now.md (written by mull), the daily summaries, and whatever
-/// notes you keep yourself — all of it plain markdown in ~/mull.
+/// **This used to be a vault browser too**, and about two thirds of this file was
+/// that: a file tree over `~/mull`, a markdown editor, import, rename, trash, new
+/// note, new folder, conflict resolution, a disk watcher. It went on 2026-08-15
+/// (DIRECTION §6.2). The vault is a folder of plain markdown, and Finder, Obsidian
+/// and VS Code open one better than mull was ever going to — the author's own
+/// `memory/` names two of them. What mull owes the reader is the record, not an
+/// editor for it.
+///
+/// `About you` is the exception, and the reason it is a row here rather than a file:
+/// `me.pinned.md` is how a person corrects mull's reading of them, and it only makes
+/// sense next to the reading it corrects. See `AboutYouView`.
 struct FullWindowView: View {
     @EnvironmentObject var appState: AppState
 
@@ -19,19 +30,16 @@ struct FullWindowView: View {
         case calendar
         case live
         case chat
-        case file(mullFile)
+        case aboutYou
 
-        /// A stable string to remember this item by between launches. A file is stored
-        /// by its path — the same identity `mullFile` itself hashes on — so a note that
-        /// has since been renamed or trashed simply fails to resolve rather than
-        /// resolving to the wrong note.
+        /// A stable string to remember this item by between launches.
         var storageKey: String {
             switch self {
             case .home: return "home"
             case .calendar: return "calendar"
             case .live: return "live"
             case .chat: return "chat"
-            case .file(let file): return "file:" + file.path
+            case .aboutYou: return "aboutYou"
             }
         }
     }
@@ -55,21 +63,15 @@ struct FullWindowView: View {
     // MARK: What the window remembers between launches
     //
     // mull is meant to be the study you come back to, and a study you come back to
-    // does not reset itself to the front page every time you close the door. Two
-    // pieces of place survive a quit: the item you were reading, and which folders you
-    // had open in the vault.
+    // does not reset itself to the front page every time you close the door.
     //
-    // These are @AppStorage rather than @SceneStorage on purpose. @SceneStorage is
-    // restored by the system per *scene*, and this window is not one — the app hosts
-    // it in a plain NSWindow via NSHostingController (see AppDelegate.showMainWindow),
+    // @AppStorage rather than @SceneStorage on purpose. @SceneStorage is restored by
+    // the system per *scene*, and this window is not one — the app hosts it in a
+    // plain NSWindow via NSHostingController (see AppDelegate.showMainWindow),
     // outside any WindowGroup. With no scene to be identified by, @SceneStorage has
-    // nowhere to write and behaves as ordinary @State, so it would have quietly
-    // persisted nothing at all.
+    // nowhere to write and behaves as ordinary @State.
 
     @AppStorage("sidebar.selection") private var storedSelection = SidebarItem.home.storageKey
-    /// Open folders, as a JSON array of vault-relative paths. JSON rather than a
-    /// joined string because a folder name may legally contain any separator we'd pick.
-    @AppStorage("sidebar.expandedFolders") private var storedExpandedFolders = "[]"
 
     @FocusState private var searchFocused: Bool         // ⌘K focuses the sidebar search field
     /// Where the user was when search took them to Home, so Esc can put them back.
@@ -79,242 +81,72 @@ struct FullWindowView: View {
     /// Home's reading of the record. Owned here so it survives Home being swapped
     /// out of `detail` — see `HomeAnalysis`.
     @StateObject private var homeAnalysis = HomeAnalysis()
-    @State private var fileTree: [mullFileNode] = []
-    @State private var editorContent: String = ""
-    @State private var savedContent: String = ""   // baseline last loaded/saved (Round-trip ref)
-    @State private var isDirty = false
-    // The file `editorContent` actually came from. `selection` is NOT a safe save
-    // target: .onChange(of: selection) fires *after* selection already points at the
-    // next file, so a save derived from it would write buffer A into file B's URL.
-    @State private var loadedFile: mullFile?
-    // Its modification date at load time — a save that finds a newer mtime knows the
-    // file was rewritten underneath us (MCP write_note, Obsidian) and refuses.
-    @State private var loadedModified: Date?
-    @State private var externalChange = false
-    /// Non-nil when the last write to disk failed. The buffer stays dirty and the
-    /// header says so — silence here loses the user's text.
-    @State private var saveError: String?
-    /// A note whose name collides with one that already exists; the sheet asks before
-    /// anything is written rather than overwriting it.
-    @State private var pendingOverwriteName: String?
-    /// The file the user asked to delete, held until they confirm.
-    @State private var pendingDelete: mullFile?
     @State private var searchQuery = ""
-    @State private var autoRefreshTimer: Timer?
-    @State private var autosaveTimer: Timer?
-
-    // MARK: - The pinned facts, edited in place at the foot of About Me
-    //
-    // me.pinned.md used to be a sidebar row of its own. It is the same subject as
-    // About Me — mull's reading, and your corrections to it — and splitting one
-    // subject across two rows meant the answer to "where do I fix this?" was never
-    // on screen next to the thing being fixed. The file is unchanged on disk; only
-    // its way in moved. Its own buffer, because me.md is read-only and rewritten
-    // every 60 seconds, and these two must never be confused for one another.
-    @State private var pinnedBuffer = ""
-    @State private var pinnedSaved = ""
-    @State private var pinnedSaveError: String?
-    @State private var pinnedAutosaveTimer: Timer?
-    @FocusState private var pinnedFocused: Bool
-
-    // The vault changes under the app all day (mull's own writers, MCP, Obsidian,
-    // Finder). The sidebar watches for that instead of being a snapshot of whatever
-    // the folder looked like when the window opened.
-    @State private var treeWatchTimer: Timer?
-    @State private var treeSignature = ""
-
-    // A regenerated read-only file that is ready but deliberately not shown yet —
-    // see `startAutoRefreshIfNeeded`. Held until the reader isn't mid-page.
-    @State private var pendingAutoUpdate: String?
-    @State private var readScrolledAway = false
-    @State private var lastReadInteraction: Date = .distantPast
-
-    // Dialog state
-    @State private var showNewFile = false
-    @State private var showNewFolder = false
-    @State private var dialogName = ""
-
-    /// The note or folder being renamed, held while the sheet is up.
-    ///
-    /// There was no rename at all: a file's name IS its heading in the sidebar and in
-    /// the editor, and the only way to change one was to leave for Finder. Renaming a
-    /// file mull generates is not offered — mull would write the original back on its
-    /// next pass and the vault would hold two.
-    @State private var renameTarget: RenameTarget?
-    @State private var renameName = ""
-
-    struct RenameTarget: Identifiable {
-        let url: URL
-        let isDirectory: Bool
-        var id: String { url.path }
-        var currentName: String { url.lastPathComponent }
-    }
-
-    private enum NewKind { case note, folder }
-
-    /// Where the next New Note / New Folder lands, vault-relative.
-    ///
-    /// It was the literal `"notes"` at five call sites, which meant the sidebar could
-    /// show you a folder you had made and give you no way to put anything in it —
-    /// you could cut one level of category and then had to go to Finder to fill it.
-    /// That was survivable while mull owned the vault's categories; DIRECTION §6.1
-    /// made them the user's, and a category you cannot file into is not one.
-    @State private var newItemParent = "notes"
-
-    private func startNew(_ kind: NewKind, in parent: String = "notes") {
-        dialogName = ""
-        newItemParent = parent
-        switch kind {
-        case .note: showNewFile = true
-        case .folder: showNewFolder = true
-        }
-    }
-
-    /// The folder a new item goes into, created if it is not there yet.
-    private func newItemDirectory() throws -> URL {
-        let dir = mullDir.appendingPathComponent(newItemParent)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
 
     private var mullDir: URL { MullDirectory.root }
 
     var body: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             sidebar
-                // Drag-resizable again, and a real range rather than one pinned number.
+                // Drag-resizable, and a real range rather than one pinned number.
                 //
                 // The pin was a workaround, not a preference. AppKit lays the title
                 // bar's *automatic* sidebar-toggle button out against the split
-                // divider, so every re-resolution of a min/ideal/max column — a longer
-                // file name appearing, a folder opening, the tree being rebuilt — slid
-                // that button sideways, and collapsing the sidebar threw it ~190pt left
-                // to the traffic lights. Freezing the column froze the divider, which
-                // cured the drift and did nothing at all for the jump, at the price of
-                // a resize handle every other macOS sidebar has.
+                // divider, so every re-resolution of a min/ideal/max column slid that
+                // button sideways, and collapsing the sidebar threw it ~190pt left to
+                // the traffic lights. mull now draws the toggle itself, measured from
+                // the traffic lights (`AppDelegate.installSidebarToggle`), so nothing
+                // is anchored to the divider and the divider is free to move.
                 //
-                // mull now draws the toggle itself, in the title bar, measured from the
-                // traffic lights (`AppDelegate.installSidebarToggle`). Nothing is
-                // anchored to the divider any more, so the divider is free to move and
-                // the reader can put it where they like — which matters more here than
-                // it did when this was written: file names are the one thing in the
-                // sidebar that a wider column really does reveal.
-                // Decline the free one. See above — it is the button that moved.
                 // Before the width, because `.toolbar` wraps the view it is applied
                 // to and the column-width preference has to be the outermost thing
                 // the split view reads.
                 .toolbar(removing: .sidebarToggle)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 360)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
                 // Nothing goes in this window's toolbar, and that is deliberate: it is
                 // the empty strip mull's own toggle sits in.
         } detail: {
             // A page must not be able to decide how tall the window's split view is.
             //
             // Every detail surface here reports an ideal height equal to all of its
-            // content — a ScrollView's ideal is its content's, and an NSScrollView
-            // wrapping an `isVerticallyResizable` NSTextView answers with the full
-            // laid-out height of the note. That ideal used to travel up into the
-            // NavigationSplitView, which then laid itself out at *that* height and
-            // overflowed the window in both directions. Measured on a 914pt window:
-            // a 1610pt split view whose top sat 374pt above the title bar. Both columns
-            // rode up with it — the sidebar's search field, "Copy context", Home /
-            // Calendar / Live / Chat and the Files header all off the top of the screen,
-            // the traffic lights drawn over the file list, the note's own header row
-            // gone. Selecting a file with any real content in it was all it took.
-            //
-            // A GeometryReader takes the size it is offered and never passes a child's
-            // appetite upward, so the split view is sized by the window and the page
-            // scrolls inside it. (`maxHeight: .infinity` on the page does not do this:
-            // it caps how far a view may stretch, not what height it asks for.)
+            // content, and that ideal used to travel up into the NavigationSplitView,
+            // which then laid itself out at *that* height and overflowed the window in
+            // both directions — the sidebar riding up off the top of the screen with
+            // it. A GeometryReader takes the size it is offered and never passes a
+            // child's appetite upward, so the split view is sized by the window and
+            // the page scrolls inside it. (`maxHeight: .infinity` on the page does not
+            // do this: it caps how far a view may stretch, not what height it asks
+            // for.)
             GeometryReader { _ in
                 detail
             }
         }
         // The field belongs to the window; the results are drawn by Home and nowhere
-        // else. So typing a query while Calendar, Live, Chat or a note was open used
-        // to be swallowed in silence — the box took the text and no surface ever
-        // answered it, which reads as "search is broken", not "search is elsewhere".
-        // A non-empty query is a request to look something up, so it goes where looking
-        // is visible. This is now the *only* thing that moves you: clicking or ⌘K-ing
-        // into the field does not, because until there is a query there is nothing to
-        // show and nothing worth losing your place over.
+        // else. So typing a query while Calendar, Live or Chat was open used to be
+        // swallowed in silence — the box took the text and no surface ever answered
+        // it, which reads as "search is broken", not "search is elsewhere". A
+        // non-empty query is a request to look something up, so it goes where looking
+        // is visible. This is the *only* thing that moves you: clicking or ⌘K-ing into
+        // the field does not, because until there is a query there is nothing to show
+        // and nothing worth losing your place over.
         .onChange(of: searchQuery) { _, query in
             let asked = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if asked, selection != .home { leaveForSearch() }
         }
-        // Esc is the way back out of search, from anywhere in the window. It used to be
-        // handled nowhere in the app at all: once search had moved you to Home there
-        // was no keystroke that undid it, and the note you were editing had to be found
-        // again by hand in the sidebar.
+        // Esc is the way back out of search, from anywhere in the window.
         .onExitCommand { endSearch() }
         .onChange(of: selection) { _, new in
             storedSelection = (new ?? .home).storageKey
             // Choosing something else yourself ends the round trip. Esc should not then
-            // throw you back to a note you had already decided to leave.
+            // throw you back to a page you had already decided to leave.
             if new != .home { searchReturn = nil }
         }
-        // Force the warm brand accent on native controls (buttons, pickers, selection):
-        // the user's macOS accent-colour setting otherwise overrides the asset with
-        // e.g. system blue, which clashes with the warm palette (DS rule: no raw colors).
         .frame(minWidth: 760, minHeight: 560)
-        // One in-app place where mull says what it just did — import, export, a
-        // conflict set aside, a context copied. A system notification is invisible
-        // under Do Not Disturb; this is not.
+        // One in-app place where mull says what it just did — an export, a context
+        // copied. A system notification is invisible under Do Not Disturb; this is not.
         .overlay(alignment: .bottom) { noticeBar }
         .animation(.easeOut(duration: 0.18), value: appState.actionNotice)
-        .onAppear {
-            scaffoldPinnedFile()
-            refreshFileTree()
-            restoreSelection()
-            startTreeWatch()
-        }
-        .onDisappear { stopTreeWatch() }
-        // The vault is a folder other things write to (mull's own 60s pass, the MCP
-        // server, Obsidian, Finder). Coming back to the window is the moment the
-        // sidebar most needs to be true. *This* window: the notification fires for
-        // every window in the app — the menu-bar panel, Settings, sheets — and each
-        // of those used to rebuild (and date-resort) the tree behind your back.
-        //
-        // Not forced: the click that brings mull forward from another app is the same
-        // click that is about to select a note, so a re-sort here lands between the
-        // mouse going down and the row being chosen (see `refreshFileTree`). A note
-        // added or removed elsewhere still shows up — that changes the vault signature.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
-            guard let window = note.object as? NSWindow,
-                  window === AppDelegate.shared?.mainWindow else { return }
-            // Signature first, off the main thread — the same care the tree watch
-            // takes, for the same reason: it walks the whole vault, and this is the
-            // one path that ran it inline. On a large vault the click that brings
-            // mull forward paid for the walk before the window would draw.
-            let root = mullDir
-            DispatchQueue.global(qos: .userInitiated).async {
-                let signature = Self.vaultSignature(root: root)
-                DispatchQueue.main.async {
-                    guard signature != treeSignature else { return }
-                    refreshFileTree()
-                }
-            }
-        }
-        .sheet(isPresented: $showNewFile) { newFileSheet }
-        .sheet(isPresented: $showNewFolder) { newFolderSheet }
-        .sheet(item: $renameTarget) { renameSheet(for: $0) }
-        // Attached to the window, not to the context menu — the menu is gone by the
-        // time the dialog would present.
-        .confirmationDialog(
-            "Move \"\(pendingDelete?.name ?? "")\" to the Trash?",
-            isPresented: Binding(
-                get: { pendingDelete != nil },
-                set: { if !$0 { pendingDelete = nil } }
-            )
-        ) {
-            Button("Move to Trash", role: .destructive) {
-                if let file = pendingDelete { trash(file) }
-                pendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
-        } message: {
-            Text("You can put it back from the Trash.")
-        }
+        .onAppear { restoreSelection() }
     }
 
     // MARK: - Search — a place you can get to, and get back from
@@ -322,18 +154,15 @@ struct FullWindowView: View {
     /// Put the caret in the search field. Invoked by the field's own magnifier and by
     /// its ⌘K equivalent.
     ///
-    /// It does *nothing else*. Results are drawn by Home and by nowhere else, so search
-    /// does eventually have to move you — but only once you have asked something, which
-    /// is what `.onChange(of: searchQuery)` below does. Moving on the click itself threw
-    /// you off the note you were reading before you had typed a character, and if you had
-    /// come to the field by accident there was nothing to show for it but a lost place.
+    /// It does *nothing else*. Results are drawn by Home and by nowhere else, so
+    /// search does eventually have to move you — but only once you have asked
+    /// something, which is what `.onChange(of: searchQuery)` above does.
     private func beginSearch() {
         searchFocused = true
     }
 
     /// Go to Home on search's behalf, remembering where from.
     private func leaveForSearch() {
-        flushPendingEdit()
         searchReturn = selection
         selection = .home
     }
@@ -344,11 +173,6 @@ struct FullWindowView: View {
         searchFocused = false
         guard let back = searchReturn else { return }
         searchReturn = nil
-        // The note may have gone while search was open — trashed from the context menu,
-        // or moved in Finder. Returning to a path that no longer resolves would open an
-        // editor onto nothing; staying on Home is the honest outcome.
-        if case .file(let file) = back,
-           !FileManager.default.fileExists(atPath: file.path) { return }
         selection = back
     }
 
@@ -356,68 +180,17 @@ struct FullWindowView: View {
 
     /// Reopen whatever was on screen when the window last closed.
     ///
-    /// A file that has since been renamed, trashed or moved out of the vault is simply
-    /// gone — landing on Home is better than opening an empty editor onto a path that
-    /// no longer resolves. The vault-root check is the same one every other read here
-    /// makes: a stale default must not be able to name a file outside ~/mull.
+    /// Anything unrecognised lands on Home — including the `file:…` keys the vault
+    /// browser used to write here, which is what a window last closed on a note will
+    /// be carrying.
     private func restoreSelection() {
         switch storedSelection {
         case SidebarItem.calendar.storageKey: selection = .calendar
         case SidebarItem.live.storageKey: selection = .live
         case SidebarItem.chat.storageKey: selection = .chat
-        case SidebarItem.home.storageKey: selection = .home
-        default:
-            guard storedSelection.hasPrefix("file:") else { selection = .home; return }
-            let path = String(storedSelection.dropFirst("file:".count))
-            let url = URL(fileURLWithPath: path).standardizedFileURL
-            // me.pinned.md no longer has a row of its own — it is edited at the foot
-            // of About Me. A window that was last closed on it reopens there, rather
-            // than on a file the sidebar can no longer show as selected.
-            if url.lastPathComponent == Curator.pinnedFileName {
-                if let me = makeFile(url: mullDir.appendingPathComponent("me.md"), autoGenerated: true) {
-                    selection = .file(me)
-                } else {
-                    selection = .home
-                }
-                return
-            }
-            guard url.path.hasPrefix(mullDir.standardizedFileURL.path + "/"),
-                  let file = makeFile(url: url, autoGenerated: isAutoGenerated(url)) else {
-                selection = .home
-                return
-            }
-            selection = .file(file)
+        case SidebarItem.aboutYou.storageKey: selection = .aboutYou
+        default: selection = .home
         }
-    }
-
-    /// Whether mull assembles the whole of this file — the same rule `buildTree` and
-    /// `contextFiles` apply, stated once so a restored file cannot come back editable
-    /// when the sidebar considers it read-only.
-    ///
-    /// Note which question this is: `isMullWritten`, not `refusesWholesaleWrite`. A
-    /// file under `projects/` or `corrections/` is `.shared` — mull rewrites the
-    /// blocks it stamped and everything else in it is the reader's — so it opens in
-    /// the editor like any other note, and the Curator protects what they type.
-    private func isAutoGenerated(_ url: URL) -> Bool {
-        VaultOwnership.isMullWritten(path: url.path)
-    }
-
-    /// Which vault folders are open, by path. Held in defaults so the shape you left
-    /// the sidebar in is the shape you find it in.
-    private var expandedFolders: Binding<Set<String>> {
-        Binding(
-            get: {
-                guard let data = storedExpandedFolders.data(using: .utf8),
-                      let paths = try? JSONDecoder().decode([String].self, from: data)
-                else { return [] }
-                return Set(paths)
-            },
-            set: { open in
-                guard let data = try? JSONEncoder().encode(open.sorted()),
-                      let text = String(data: data, encoding: .utf8) else { return }
-                storedExpandedFolders = text
-            }
-        )
     }
 
     // MARK: - Notice bar
@@ -473,99 +246,29 @@ struct FullWindowView: View {
         }
     }
 
-    // MARK: - Watching the vault
-
-    /// Poll the vault's *shape* every few seconds and rebuild the sidebar when it
-    /// moves. Shape means the set of paths, and nothing else — adding, renaming,
-    /// moving or removing a note changes it; typing inside one does not. That is what
-    /// keeps the list from reshuffling under the cursor while you write. The signature
-    /// itself is `vaultSignature`, which explains why mtimes are not in it.
-    private func startTreeWatch() {
-        stopTreeWatch()
-        let root = mullDir
-        treeWatchTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
-            // Off the main thread: this walks the whole vault.
-            DispatchQueue.global(qos: .utility).async {
-                let signature = Self.vaultSignature(root: root)
-                DispatchQueue.main.async {
-                    guard signature != treeSignature else { return }
-                    refreshFileTree()
-                }
-            }
-        }
-    }
-
-    private func stopTreeWatch() {
-        treeWatchTimer?.invalidate()
-        treeWatchTimer = nil
-    }
-
-    private nonisolated static func vaultSignature(root: URL) -> String {
-        // Relative paths only — no mtimes. Folder mtimes looked like a cheap "did
-        // the shape move" bit, but every atomic save (write temp + rename, which is
-        // how both the 0.8s autosave and mull's own 60s context pass write) bumps
-        // the parent folder's mtime. So the signature moved while you typed, and the
-        // sidebar rebuilt and reshuffled under the cursor — the exact thing it was
-        // built to prevent. A path changes exactly when the shape changes: a note or
-        // folder added, removed, renamed, or moved. Typing inside one changes none.
-        guard let enumerator = FileManager.default.enumerator(
-            at: root, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]) else { return "" }
-        let rootPath = root.path
-        var parts: [String] = []
-        while let url = enumerator.nextObject() as? URL {
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
-            let isDir = values?.isDirectory == true
-            guard isDir || url.pathExtension == "md" else { continue }
-            var rel = url.path
-            if rel.hasPrefix(rootPath) { rel = String(rel.dropFirst(rootPath.count)) }
-            if isDir {
-                parts.append(rel + "/")
-            } else if url.lastPathComponent == "index.md" {
-                // The one file whose *content* changes the shape of the tree: a folder
-                // is drawn only when something in it has a body, and an untouched
-                // `index.md` has none (`countsAsContent`). Without its size in here,
-                // the folder that just received its first block would stay hidden until
-                // the next ⌘R or relaunch — the signature would not have moved, because
-                // no path did.
-                //
-                // Size and not mtime, for the reason the note above gives: mull rewrites
-                // every index.md on the 5-minute filler pass with a fresh `ts=`, which
-                // is the same number of digits, so the length only moves when the words
-                // do.
-                parts.append(rel + "#\(values?.fileSize ?? 0)")
-            } else {
-                parts.append(rel)
-            }
-        }
-        // Enumeration order is the filesystem's business, not a change in shape.
-        return parts.sorted().joined(separator: "|")
-    }
-
     // MARK: - Sidebar
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header — utility actions only (the window title already says "mull").
-            //
-            // Three icon-only buttons used to sit in one undifferentiated run, and
-            // they are not one kind of thing: the first two act on ~/mull, the third
-            // opens the app's own settings. A rule between them says where the
-            // subject changes, so the row can be read rather than memorised.
+            // The first acts on ~/mull, the second opens the app's own settings, and
+            // a rule between them says where the subject changes.
             HStack(spacing: DS.xs) {
                 Spacer()
-                sidebarButton(
-                    icon: DS.Glyph.refresh,
-                    label: String(localized: "Reread your mull folder"),
-                    hint: String(localized: "Reloads ~/mull from disk, picking up edits made outside mull"),
-                    help: String(localized: "Reread ~/mull from disk (⌘R)")
-                ) { refreshFileTree(force: true) }   // asked for by hand: always rebuild
-                    .keyboardShortcut("r", modifiers: .command)
-                sidebarButton(
-                    icon: DS.Glyph.folder,
-                    label: String(localized: "Reveal your mull folder in Finder"),
-                    help: String(localized: "Reveal ~/mull in Finder")
-                ) { NSWorkspace.shared.open(mullDir) }
+                Menu {
+                    Button { revealVault() } label: { Label("Reveal in Finder", systemImage: DS.Glyph.folder) }
+                    Button { exportVault() } label: { Label("Export mull Folder (.zip)…", systemImage: "square.and.arrow.up") }
+                } label: {
+                    Image(systemName: DS.Glyph.folder)
+                        .font(DS.iconBody)
+                        .iconHitTarget()
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .foregroundStyle(DS.inkDim)
+                .help("Your mull folder — reveal or export")
+                .accessibilityLabel("Your mull folder")
+                .accessibilityHint("Reveal ~/mull in Finder, or export it as a zip")
 
                 Divider()
                     .frame(height: 16)
@@ -593,21 +296,16 @@ struct FullWindowView: View {
             // this List draws the *selected* row, so the loudest thing in the sidebar
             // was a button that looked like the current selection. Two different
             // meanings cannot share one appearance: the accent belongs to "you are
-            // here", and this is "press me". It keeps the lifted surface and the
-            // hairline every other pressable card in the app wears (`mullCard`), which
-            // is affordance enough at this size.
+            // here", and this is "press me".
             Button {
                 appState.copyContextToClipboard()
             } label: {
                 HStack(spacing: DS.sm) {
                     Image(systemName: DS.Glyph.copy)
                         .font(DS.iconSmall)
-                    // One line, always. The column is drag-resizable now, so this
-                    // label has to survive being narrowed: left to wrap it broke
-                    // "Copy context" across four lines — one word per line, then one
-                    // syllable per line — and took the row's height with it. A button
-                    // gets to be the width it needs; the shortcut beside it is the
-                    // part that may go if there is no room.
+                    // One line, always. The column is drag-resizable, so this label
+                    // has to survive being narrowed: left to wrap it broke "Copy
+                    // context" across four lines and took the row's height with it.
                     Text("Copy context")
                         .font(DS.bodyMedium)
                         .lineLimit(1)
@@ -632,8 +330,6 @@ struct FullWindowView: View {
             .foregroundStyle(DS.ink)
             .padding(.horizontal, DS.sm)
             .padding(.vertical, DS.xs)
-            // It had neither a tooltip nor a spoken label — the one control in this
-            // column that said nothing about itself beyond its own two words.
             .help("Copy your me.md, now.md and current context to the clipboard (⇧⌘C)")
             .accessibilityLabel("Copy context")
             .accessibilityHint("Puts mull's picture of your current work on the clipboard, ready to paste into an agent")
@@ -641,65 +337,24 @@ struct FullWindowView: View {
             Divider()
 
             List(selection: $selection) {
-                // ── The app: primary surfaces ──
                 // A `Label` list sizes its icon column to the widest glyph in it, so
-                // the two-bubble compound this last row used to carry indented all
-                // four titles to make room for one of them. Four one-unit glyphs
-                // (`DS.Glyph.chat` is a single bubble) put the titles back on the
-                // margin the file rows below use.
-                Section {
-                    Label("Home", systemImage: DS.Glyph.home).tag(SidebarItem.home)
-                    Label("Calendar", systemImage: DS.Glyph.calendar).tag(SidebarItem.calendar)
-                    Label("Live", systemImage: DS.Glyph.live).tag(SidebarItem.live)
-                    Label("Chat", systemImage: DS.Glyph.chat).tag(SidebarItem.chat)
-                }
-
-                // ── Your files: the ~/mull vault — arbitrary nesting, editable,
-                //    and openable in Obsidian/Finder (it's just a folder of md). ──
-                Section {
-                    // Core context, pinned at the top.
-                    ForEach(contextFiles, id: \.path) { file in
-                        fileRow(file).tag(SidebarItem.file(file))
-                    }
-                    // The rest of the vault: nested folders + notes, recursively.
-                    // A recursive View struct (NOT OutlineGroup) so leaf rows inside
-                    // folders stay selectable in the List — OutlineGroup's selection
-                    // model doesn't honor per-row .tag the way DisclosureGroup does.
-                    ForEach(fileTree) { node in
-                        VaultNode(node: node,
-                                  path: node.name,
-                                  expandedFolders: expandedFolders,
-                                  rowFor: { file in fileRow(file) },
-                                  folderMenu: { AnyView(folderContextMenu($0)) },
-                                  onDropInto: { path, urls in
-                                      // Into the folder it was dropped on when that is
-                                      // the user's own space; anywhere else it would be
-                                      // filing into a generator's output, so it goes to
-                                      // `notes/` and the notice says where it went.
-                                      let dir = MullDirectory.url(for: path)
-                                      importURLs(urls, into: isUserCategory(dir) ? path : "notes")
-                                  })
-                    }
-                } header: { filesHeader }
+                // every row here carries a one-unit glyph.
+                Label("Home", systemImage: DS.Glyph.home).tag(SidebarItem.home)
+                Label("Calendar", systemImage: DS.Glyph.calendar).tag(SidebarItem.calendar)
+                Label("Live", systemImage: DS.Glyph.live).tag(SidebarItem.live)
+                Label("Chat", systemImage: DS.Glyph.chat).tag(SidebarItem.chat)
+                Label("About you", systemImage: DS.Glyph.file).tag(SidebarItem.aboutYou)
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            // Drag files/folders from Finder onto the vault to import them.
-            .dropDestination(for: URL.self) { urls, _ in importURLs(urls); return true }
         }
         // `.ignoresSafeArea()` on the fill, not on the sidebar.
         //
         // A plain `.background(DS.canvas)` paints the VStack's bounds, and the VStack
         // is laid out *inside* the column's safe area. The column itself is bigger
         // than that: on macOS 26 the sidebar is an inset panel that runs the whole
-        // height of the window, up behind the title bar and down past the bottom
-        // inset. So the ivory stopped where the content's safe area stopped and the
-        // panel's own material showed through beyond it — the sidebar read as cut
-        // off part-way rather than as a single surface.
-        //
-        // Ignoring the safe area on the *colour* extends only the fill; the content
-        // above keeps its insets, so nothing slides under the traffic lights. The
-        // panel clips the rectangle to its own rounded shape.
+        // height of the window. So the ivory stopped where the content's safe area
+        // stopped and the panel's own material showed through beyond it.
         //
         // (`containerBackground(_:for: .navigation)` would be the direct way to say
         // this. `.navigation` is iOS-only — it does not compile on macOS.)
@@ -708,17 +363,17 @@ struct FullWindowView: View {
 
     /// The search field, in one fixed place.
     ///
-    /// It used to be `.searchable(placement: .toolbar)`, which on macOS is a *collapsing*
-    /// toolbar item: unfocused it is a magnifier glyph, and the click meant to focus it
-    /// is the click that expands it into a field — so the control slid out from under the
-    /// pointer at the moment it was aimed at. A box you have to catch is worse than one
-    /// that is simply always there, and the sidebar has the room. So it lives here and it
-    /// does not move: same size focused or not, same place whatever the detail shows.
+    /// It used to be `.searchable(placement: .toolbar)`, which on macOS is a
+    /// *collapsing* toolbar item: unfocused it is a magnifier glyph, and the click
+    /// meant to focus it is the click that expands it into a field — so the control
+    /// slid out from under the pointer at the moment it was aimed at. A box you have
+    /// to catch is worse than one that is simply always there.
     private var searchField: some View {
         HStack(spacing: DS.sm) {
-            // ⌘K rides on the visible glyph rather than on a hidden, empty-titled button
-            // in the window's background: a command with no affordance is one only its
-            // author knows about, and VoiceOver read the old one out as an unnamed button.
+            // ⌘K rides on the visible glyph rather than on a hidden, empty-titled
+            // button in the window's background: a command with no affordance is one
+            // only its author knows about, and VoiceOver read the old one out as an
+            // unnamed button.
             Button { beginSearch() } label: {
                 Image(systemName: DS.Glyph.search)
                     .font(DS.iconSmall)
@@ -731,19 +386,11 @@ struct FullWindowView: View {
             .accessibilityLabel("Search")
             .accessibilityHint("Results appear on Home. Esc clears the query and puts you back.")
 
-            // The placeholder has to fit the column it lives in — at the *narrowest*
-            // the reader can drag it to, which is 220pt (see
-            // `navigationSplitViewColumnWidth` above) and leaves this field about
-            // 145pt of text once the two glyphs and their padding are taken out.
-            // "Search projects, files, keywords…" measures 203pt at the base text
-            // size, so it was cut mid-word — the field read "Search projects, files,
-            // keyw", with no ellipsis to say it had been cut. A prompt the box is too
-            // small to say is not a prompt. "Search your records…" measures ~118pt
-            // and survives the narrow end of the range.
-            //
-            // "your records" is the phrase the results view already uses while it
-            // is searching, and it is the honest one: this searches projects, the
-            // activity timeline and daily summaries, not only files.
+            // The placeholder has to fit the column at its narrowest. "Search
+            // projects, files, keywords…" was cut mid-word, with no ellipsis to say
+            // it had been cut; "your records" is the phrase the results view already
+            // uses, and the honest one — this searches projects, the activity
+            // timeline and daily summaries.
             TextField("Search your records…", text: $searchQuery)
                 .textFieldStyle(.plain)
                 .font(DS.bodyFont)
@@ -752,8 +399,7 @@ struct FullWindowView: View {
                 .accessibilityLabel("Search")
 
             // Hidden rather than absent while there is nothing to clear: taking the
-            // button out of the layout would resize the field the moment you typed,
-            // which is the same twitch this whole change is here to remove.
+            // button out of the layout would resize the field the moment you typed.
             Button { endSearch() } label: {
                 Image(systemName: DS.Glyph.clearField)
                     .font(DS.iconSmall)
@@ -774,23 +420,20 @@ struct FullWindowView: View {
             .strokeBorder(searchFocused ? DS.moon.opacity(0.4) : DS.hairline, lineWidth: 0.75))
     }
 
-    /// Open the macOS Settings window. The app is a menu-bar app whose main window
-    /// is a custom NSWindow (outside the SwiftUI scene), so we open Settings via the
-    /// AppKit action rather than SettingsLink/openSettings (which need the App scene env).
+    /// Open the macOS Settings window. The app is a menu-bar app whose main window is
+    /// a custom NSWindow (outside the SwiftUI scene), so we open Settings via the
+    /// AppKit action rather than SettingsLink/openSettings.
     private func openSettingsWindow() {
         AppDelegate.shared?.showSettings()
     }
 
-    /// `help:` is a mouse tooltip and nothing else — it never reaches VoiceOver.
-    /// An icon-only button therefore needs `label`/`hint` as well, which is why
-    /// these are separate parameters rather than one string reused for both: the
-    /// tooltip can carry the key equivalent ("⌘R"), the spoken label should not.
+    /// `help:` is a mouse tooltip and nothing else — it never reaches VoiceOver. An
+    /// icon-only button therefore needs `label`/`hint` as well, which is why these
+    /// are separate parameters rather than one string reused for both: the tooltip
+    /// can carry the key equivalent, the spoken label should not.
     private func sidebarButton(
         icon: String,
         label: String,
-        // Only where the hint has something the label and tooltip don't already say.
-        // A hint that paraphrases its own label is read aloud as a second sentence
-        // that carries no second fact.
         hint: String = "",
         help: String,
         action: @escaping () -> Void
@@ -807,50 +450,6 @@ struct FullWindowView: View {
         .accessibilityHint(hint)
     }
 
-    /// A file row — a document icon + name. Who wrote the file is said once, by the
-    /// "auto-generated" badge in the editor header; a second marker in the sidebar
-    /// spent an icon on a bit the user has already been told.
-    private func fileRow(_ file: mullFile) -> some View {
-        Label {
-            Text(displayName(file))
-                .font(DS.bodyFont)
-                .lineLimit(1)
-                .help(displayName(file))
-        } icon: {
-            Image(systemName: DS.Glyph.file)
-                .foregroundStyle(fileAccent(file))
-        }
-        .contextMenu { fileContextMenu(file: file) }
-    }
-
-    private var filesHeader: some View {
-        HStack(spacing: DS.xs) {
-            Text("Files")
-            Spacer(minLength: 0)
-            Menu {
-                Button { startNew(.note) } label: { Label("New Note", systemImage: "doc.badge.plus") }
-                Button { startNew(.folder) } label: { Label("New Folder", systemImage: "folder.badge.plus") }
-                Divider()
-                Button { importFiles() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
-                Button { exportVault() } label: { Label("Export mull Folder (.zip)…", systemImage: "square.and.arrow.up") }
-                Button { revealVault() } label: { Label("Reveal in Finder", systemImage: DS.Glyph.folder) }
-            } label: {
-                // A quiet, header-scaled plus — thin, tobacco, sitting flush with the
-                // "Files" baseline. 24 rather than the standard 30: this is a sidebar
-                // section header, and a 30pt control sets the header's height, which
-                // would push the whole file list down for the sake of one glyph.
-                Image(systemName: DS.Glyph.add)
-                    .font(DS.iconMini.weight(.semibold))
-                    .foregroundStyle(DS.moon)
-                    .iconHitTarget(24)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .help("New · import · export · reveal")
-            .accessibilityLabel("File actions")
-        }
-    }
-
     // MARK: - Vault actions (it's just a folder of md — Obsidian/Finder open it too)
 
     /// Reveal the whole ~/mull vault in Finder — the bridge to Obsidian/Bear/etc.
@@ -858,79 +457,8 @@ struct FullWindowView: View {
         NSWorkspace.shared.activateFileViewerSelecting([mullDir])
     }
 
-    /// Import files/folders into the vault (copied under notes/, names de-duped).
-    private func importFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Import"
-        if panel.runModal() == .OK { importURLs(panel.urls) }
-    }
-
-    /// Copy the chosen items into ~/mull/notes and say what happened. Silence used to
-    /// cover both outcomes equally: a file that copied and a file that didn't looked
-    /// exactly the same from the outside.
-    private func importURLs(_ urls: [URL], into parent: String = "notes") {
-        let fm = FileManager.default
-        let dest = mullDir.appendingPathComponent(parent)
-        do {
-            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-        } catch {
-            appState.postNotice("Couldn't import into ~/mull/notes",
-                                detail: error.localizedDescription, isProblem: true)
-            return
-        }
-
-        var imported: [URL] = []
-        var failures: [String] = []
-        for url in urls {
-            let target = uniqueURL(dest.appendingPathComponent(url.lastPathComponent))
-            do {
-                try fm.copyItem(at: url, to: target)
-                imported.append(target)
-            } catch {
-                failures.append("\(url.lastPathComponent) — \(error.localizedDescription)")
-            }
-        }
-        refreshFileTree(force: true)
-
-        let names = imported.map(\.lastPathComponent)
-        if failures.isEmpty {
-            guard !imported.isEmpty else { return }
-            appState.postNotice(
-                imported.count == 1 ? String(localized: "Imported \(names[0])") : String(localized: "Imported \(imported.count) items"),
-                detail: String(localized: "Copied into ~/mull/notes — still plain files, still yours."),
-                revealURL: imported.first)
-        } else if imported.isEmpty {
-            appState.postNotice("Nothing was imported",
-                                detail: failures.joined(separator: "\n"), isProblem: true)
-        } else {
-            appState.postNotice("Imported \(imported.count) of \(urls.count)",
-                                detail: "Couldn't copy:\n" + failures.joined(separator: "\n"),
-                                revealURL: imported.first, isProblem: true)
-        }
-    }
-
-    private func uniqueURL(_ url: URL) -> URL {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else { return url }
-        let ext = url.pathExtension
-        let base = url.deletingPathExtension().lastPathComponent
-        let dir = url.deletingLastPathComponent()
-        var i = 1
-        while true {
-            let name = ext.isEmpty ? "\(base)-\(i)" : "\(base)-\(i).\(ext)"
-            let candidate = dir.appendingPathComponent(name)
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-            i += 1
-        }
-    }
-
-    /// Export the whole vault as a .zip. The zip is built off the main thread (a large
-    /// vault used to freeze the window on `waitUntilExit`), into a temporary file
-    /// beside the destination — so a failed export can neither destroy a zip that was
-    /// already there nor end with Finder proudly revealing an empty folder.
+    /// Take the whole vault away as a zip. The one export the app has, and the reason
+    /// Settings does not offer a second one (see `SettingsView`).
     private func exportVault() {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "mull-folder.zip"
@@ -1024,1296 +552,21 @@ struct FullWindowView: View {
             ChatPanelView(chat: appState.chat)
                 .environmentObject(appState)
 
-        case .file(let file):
-            fileEditor(file: file)
+        case .aboutYou:
+            AboutYouView()
+                .environmentObject(appState)
 
         case nil:
             VStack(spacing: DS.lg) {
                 Image(systemName: DS.Glyph.file)
                     .font(DS.iconHero.weight(.thin))
                     .foregroundStyle(DS.inkFaint)
-                Text("Select a file or view")
+                Text("Select a view")
                     .font(DS.titleFont)
                     .foregroundStyle(DS.inkFaint)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.canvas)
-        }
-    }
-
-    // MARK: - File Editor
-
-    private func fileEditor(file: mullFile) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Toolbar
-            HStack(spacing: DS.md) {
-                HStack(spacing: DS.md) {
-                    Circle().fill(fileAccent(file)).frame(width: 8, height: 8)
-                    Text(displayName(file))
-                        .font(DS.titleFont)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityValue(fileRole(file))
-
-                if file.isAutoGenerated {
-                    // Read-only is a fact about who may write here, not a decorative
-                    // tag — it says so in words, with the lock, at reading size.
-                    // No tooltip: every auto-generated file carries a custode note under
-                    // this header that says the same thing at reading size, and for me.md
-                    // hands over the button that acts on it.
-                    Label("Written by mull · read-only", systemImage: DS.Glyph.locked)
-                        .font(DS.captionMedium)
-                        .foregroundStyle(DS.inkDim)
-                }
-
-                Spacer()
-
-                // A newer version of a read-only file is ready, but the user is
-                // mid-page — showing it is their call, not a timer's (see
-                // `startAutoRefreshIfNeeded`).
-                if file.isAutoGenerated, pendingAutoUpdate != nil {
-                    Button {
-                        applyPendingAutoUpdate()
-                    } label: {
-                        Label("Show update", systemImage: "arrow.down.circle")
-                            .font(DS.captionMedium)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(DS.moon)
-                    .help("A newer version is ready. Your place on the page is kept until you ask for it.")
-                }
-
-                if !file.isAutoGenerated {
-                    Text(editorStats)
-                        .font(DS.microFont)
-                        .foregroundStyle(DS.inkFaint)
-                        .help("Live word and character count for this note")
-                }
-
-                Text(file.sizeFormatted)
-                    .font(DS.microFont)
-                    .foregroundStyle(DS.inkFaint)
-
-                if !file.isAutoGenerated {
-                    if let saveError {
-                        // The write failed. Say so, keep Save enabled, and never let
-                        // the badge imply the text is safely on disk.
-                        Text("Not saved")
-                            .font(DS.captionFont)
-                            .foregroundStyle(DS.error)
-                            .help("mull couldn't write this file: \(saveError)\n\nYour text is still here. Try Save again, or copy it out.")
-                    } else if externalChange {
-                        // Someone else (MCP, Obsidian, Finder) rewrote this file while
-                        // it was open. Autosave has stopped writing so their text is
-                        // safe; the banner below offers both ways out.
-                        Text("Changed on disk")
-                            .font(DS.captionFont)
-                            .foregroundStyle(DS.error)
-                            .help("This file changed outside mull. Choose which version to keep — the other one is set aside, not lost.")
-                    } else if isDirty {
-                        Text("Edited")
-                            .font(DS.captionFont)
-                            .foregroundStyle(DS.paused)
-                    }
-
-                    // ⌘S during a conflict must not quietly erase the other writer's
-                    // text: it goes through the same keep-mine path as the banner,
-                    // which copies the disk version aside first.
-                    Button("Save") {
-                        if externalChange { resolveConflict(file, keepMine: true) }
-                        else { saveFile(file, force: true) }
-                    }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .disabled(!isDirty)
-                        .keyboardShortcut("s", modifiers: .command)
-                }
-
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(editorContent, forType: .string)
-                } label: {
-                    Image(systemName: DS.Glyph.copy)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .accessibilityLabel("Copy content")
-                .accessibilityHint("Copies the whole of \(displayName(file)) to the clipboard")
-                .help("Copy content")
-            }
-            .padding(.horizontal, DS.xl)
-            .padding(.vertical, DS.sm)
-
-            Divider()
-
-            if externalChange, !file.isAutoGenerated {
-                conflictBanner(file: file)
-            }
-
-            if file.isAutoGenerated {
-                // Read-only: render the display layer (表示層), measure-capped & centered.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: DS.lg) {
-                        custodeNote(for: file)
-                        MarkdownView(editorContent,
-                                     sourcePath: vaultRelativePath(of: file),
-                                     onOpenVaultFile: openVaultFile)
-                            .textSelection(.enabled)
-                        if file.name == "me.md" { pinnedEditor }
-                    }
-                    .frame(maxWidth: DS.readMeasure, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, DS.readMargin)
-                    .padding(.top, DS.lg)
-                    .padding(.bottom, 160)
-                    // Where the page has been scrolled to. Used only to decide whether
-                    // a background regeneration may replace the text under the reader.
-                    .background(
-                        GeometryReader { proxy in
-                            let offset = proxy.frame(in: .named(Self.readScrollSpace)).minY
-                            Color.clear
-                                .onChange(of: offset) { _, new in readScrolledAway = new < -8 }
-                        }
-                    )
-                }
-                .coordinateSpace(name: Self.readScrollSpace)
-                // A fresh page per file, exactly as the editor gets one. Without this the
-                // same ScrollView is reused from one read-only file to the next, and it
-                // keeps the scroll offset it had: leave me.md scrolled to the bottom, open
-                // MEMORY.md, and it opens at the bottom too — or partway down a page you
-                // have never seen. A file opens at its top.
-                .id(file.path)
-                // Moving the pointer over the page is the cheapest available signal
-                // that someone is actually reading it (a text selection is invisible
-                // to SwiftUI). It only ever delays an update; it never blocks one.
-                .onContinuousHover { phase in
-                    if case .active = phase { lastReadInteraction = Date() }
-                }
-            } else {
-                if file.name == Curator.pinnedFileName {
-                    custodeNote(for: file)
-                        .frame(maxWidth: DS.readMeasure, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.horizontal, DS.readMargin)
-                        .padding(.top, DS.lg)
-                }
-                // Editable: Bear-style live decoration over plain markdown. The buffer on
-                // disk stays byte-identical (原則6); only its on-screen appearance is
-                // enriched. Typography/colours live inside the NSTextView, so the measure
-                // cap and margins are all that's left here.
-                // Sized from the room available, never from the length of the note.
-                //
-                // An NSScrollView holding an `isVerticallyResizable` NSTextView answers
-                // "how big would you like to be?" with the full laid-out height of the
-                // text, and that answer used to travel all the way up: the VStack took
-                // it, and so did the whole NavigationSplitView. Measured on a 914pt
-                // window — a 1610pt split view whose top sat 374pt above the title bar,
-                // carrying *both* columns up out of view. The sidebar's search field,
-                // "Copy context", Home/Calendar/Live/Chat and the Files header were all
-                // off the top of the screen, the traffic lights ended up drawn over the
-                // file list, and the note's own header row was gone. Selecting a long
-                // enough note was all it took; the read-only files, which render through
-                // a SwiftUI ScrollView instead, were never affected.
-                //
-                // A GeometryReader is what breaks the chain: it always takes the size it
-                // is offered and never reports a child's appetite upward. `maxHeight:
-                // .infinity` and the representable's own `sizeThatFits` were both tried
-                // first and neither held — the ideal size still escaped.
-                GeometryReader { room in
-                    MarkdownTextEditor(text: $editorContent, sourcePath: vaultRelativePath(of: file))
-                        // Fresh editor per file: switching notes rebuilds the NSTextView,
-                        // so content swaps can never fight a live editing session (and
-                        // the undo stack no longer bleeds across files).
-                        .id(file.path)
-                        .frame(width: min(room.size.width, DS.readMeasure),
-                               height: room.size.height)
-                        .frame(width: room.size.width, alignment: .center)
-                }
-                .padding(.horizontal, DS.readMargin)
-                .padding(.top, DS.lg)
-                .onChange(of: editorContent) { _, _ in editorChanged() }
-            }
-        }
-        .background(DS.canvas)
-        .onAppear {
-            loadFile(file)
-            startAutoRefreshIfNeeded(file)
-        }
-        .onDisappear {
-            flushPendingEdit()   // never lose an edit on close
-            stopAutoRefresh()
-        }
-        .onChange(of: selection) { _, newVal in
-            if case .file(let newFile) = newVal {
-                loadFile(newFile)
-                startAutoRefreshIfNeeded(newFile)
-            } else {
-                // Leaving the editor for Home/Calendar/…: .onDisappear is not
-                // guaranteed to run before the buffer is torn down, so flush here too.
-                flushPendingEdit()
-                stopAutoRefresh()
-            }
-        }
-        // Autosave is a 0.8s debounce and .onDisappear does not run on quit, so ⌘Q
-        // within that window used to drop the last keystrokes. Terminate and window
-        // close are the two remaining exits — flush on both.
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            flushPendingEdit()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
-            flushPendingEdit()
-        }
-    }
-
-    /// Word · character count for the open buffer, shown in the editor toolbar.
-    /// Words are ICU word segments (`.byWords`), so Japanese text — which has no
-    /// spaces for a naive split to find — counts correctly. Above a size no real
-    /// mull note reaches, the per-keystroke enumeration is dropped and only the
-    /// character count remains.
-    private var editorStats: String {
-        let chars = editorContent.count
-        guard chars <= 100_000 else { return "\(chars.formatted()) chars" }
-        var words = 0
-        editorContent.enumerateSubstrings(in: editorContent.startIndex...,
-                                          options: [.byWords, .substringNotRequired]) { _, _, _, _ in
-            words += 1
-        }
-        return "\(words.formatted()) words · \(chars.formatted()) chars"
-    }
-
-    /// Write the buffer to the file it was loaded from, if it has unsaved changes.
-    private func flushPendingEdit() {
-        flushPinnedEdit()
-        guard isDirty, let file = loadedFile else { return }
-        saveFile(file)
-    }
-
-    /// Keep a read-only file current — without yanking the page out from under the
-    /// person reading it.
-    ///
-    /// This used to reassign `editorContent` every 5 seconds regardless, which
-    /// rebuilds the rendered markdown: scroll position back to the top, any text
-    /// selection gone, mid-sentence. Now an unchanged file is left completely alone,
-    /// and a changed one is only swapped in when the reader is demonstrably not in
-    /// the middle of the page. Otherwise the new text waits behind a quiet "show"
-    /// button in the header — mull offers, the reader decides.
-    private func startAutoRefreshIfNeeded(_ file: mullFile) {
-        stopAutoRefresh()
-        pendingAutoUpdate = nil
-        guard file.isAutoGenerated else { return }
-        autoRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
-            guard case .file(let current) = selection, current == file else { return }
-            let content = displayContent(of: file)
-            guard content != editorContent else {
-                pendingAutoUpdate = nil   // whatever was pending is now what's on screen
-                return
-            }
-            if isReadingActively {
-                pendingAutoUpdate = content
-            } else {
-                editorContent = content
-                pendingAutoUpdate = nil
-            }
-        }
-    }
-
-    /// Scrolled off the top, or the pointer moved over the page in the last 20s.
-    private var isReadingActively: Bool {
-        readScrolledAway || Date().timeIntervalSince(lastReadInteraction) < 20
-    }
-
-    private func applyPendingAutoUpdate() {
-        guard let content = pendingAutoUpdate else { return }
-        editorContent = content
-        pendingAutoUpdate = nil
-    }
-
-    private func stopAutoRefresh() {
-        autoRefreshTimer?.invalidate()
-        autoRefreshTimer = nil
-        pendingAutoUpdate = nil
-    }
-
-    // MARK: - Conflicts (never destroy either version)
-
-    /// Someone else wrote this file while it was open in mull. Both texts are real
-    /// work; whichever one loses the file is written beside it and the user is told
-    /// where it went. Nothing is discarded on the user's behalf.
-    private func conflictBanner(file: mullFile) -> some View {
-        VStack(alignment: .leading, spacing: DS.sm) {
-            Text("\(file.name) changed outside mull")
-                .font(DS.bodyMedium)
-                .foregroundStyle(DS.ink)
-            Text("Something else — the MCP server, Obsidian, Finder — rewrote this file while you were editing it. Both versions still exist. Whichever one you set aside is kept as a file next to this one; mull throws neither of them away.")
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkDim)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: DS.sm) {
-                Button("Keep my version") { resolveConflict(file, keepMine: true) }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                Button("Take the version on disk") { resolveConflict(file, keepMine: false) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-        }
-        .padding(.horizontal, DS.xl)
-        .padding(.vertical, DS.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DS.moon.opacity(0.06))
-        .overlay(alignment: .bottom) { Divider() }
-    }
-
-    private static let conflictStamp: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd-HHmmss"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    private func resolveConflict(_ file: mullFile, keepMine: Bool) {
-        let disk = (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
-        let mine = editorContent
-
-        // Write the losing version beside the file BEFORE anything is overwritten.
-        var sidecar: URL?
-        if disk != mine {
-            let losing = keepMine ? disk : mine
-            let label = keepMine ? "from-disk" : "your-edit"
-            let base = file.url.deletingPathExtension().lastPathComponent
-            let ext = file.url.pathExtension.isEmpty ? "md" : file.url.pathExtension
-            let name = "\(base).conflict-\(Self.conflictStamp.string(from: Date()))-\(label).\(ext)"
-            let target = uniqueURL(file.url.deletingLastPathComponent().appendingPathComponent(name))
-            do {
-                try losing.write(to: target, atomically: true, encoding: .utf8)
-                FilePrivacy.protectFile(at: target)
-                sidecar = target
-            } catch {
-                // Couldn't preserve the other side — so don't destroy it either.
-                appState.postNotice("Couldn't set the other version aside",
-                                    detail: "\(error.localizedDescription)\n\nNothing was overwritten. Copy your text out, or open the file in Finder, before choosing again.",
-                                    revealURL: file.url, isProblem: true)
-                return
-            }
-        }
-
-        if keepMine {
-            do {
-                try mine.write(to: file.url, atomically: true, encoding: .utf8)
-                FilePrivacy.protectFile(at: file.url)
-            } catch {
-                appState.postNotice("Couldn't write \(file.name)",
-                                    detail: error.localizedDescription, isProblem: true)
-                return
-            }
-            savedContent = mine
-        } else {
-            editorContent = disk
-            savedContent = disk
-        }
-
-        loadedModified = modificationDate(of: file.url)
-        externalChange = false
-        saveError = nil
-        isDirty = false
-        refreshFileTree()
-
-        let detail: String
-        if let sidecar {
-            detail = keepMine
-                ? String(localized: "The version that was on disk is safe in \(sidecar.lastPathComponent).")
-                : String(localized: "Your edit is safe in \(sidecar.lastPathComponent).")
-        } else {
-            detail = String(localized: "Both versions were identical — there was nothing to set aside.")
-        }
-        appState.postNotice(keepMine ? String(localized: "Kept your version") : String(localized: "Took the version on disk"),
-                            detail: detail, revealURL: sidecar)
-    }
-
-    // MARK: - Custode notes (who may write here, and how you correct it)
-
-    /// A short, plain explanation above a file mull owns — and, for me.md, the way
-    /// out: the pinned file is the user's means of correction, so it gets a real
-    /// invitation rather than a lock icon and silence.
-    /// Your own corrections, editable in place under mull's reading of you.
-    ///
-    /// A plain `TextEditor`, not the markdown editor used for notes: this file is a
-    /// short list of statements, and the markdown editor is an NSScrollView whose
-    /// height would have to be negotiated inside a scroll view that already has one.
-    /// A fixed box inside the page is the honest shape for it.
-    ///
-    /// It writes the file raw, which is lossless here — me.pinned.md carries no
-    /// provenance markers (that is the whole reason it is a separate file from
-    /// me.md). Onboarding's delimited section is ordinary text in this buffer and
-    /// survives a round trip, exactly as it does when the file is opened in Obsidian.
-    private var pinnedEditor: some View {
-        VStack(alignment: .leading, spacing: DS.sm) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("What you've told mull yourself")
-                    .font(DS.bodyMedium)
-                    .foregroundStyle(DS.ink)
-                Spacer()
-                if let pinnedSaveError {
-                    Text("Not saved")
-                        .font(DS.captionFont)
-                        .foregroundStyle(DS.error)
-                        .help("mull couldn't write \(Curator.pinnedFileName): \(pinnedSaveError)\n\nYour text is still here. Keep typing, or copy it out.")
-                } else if pinnedBuffer != pinnedSaved {
-                    Text("Edited")
-                        .font(DS.captionFont)
-                        .foregroundStyle(DS.paused)
-                }
-            }
-
-            Text("These lines are placed above everything mull works out on its own. Use them for what it gets wrong, or could not know. Saved as you type, to \(Curator.pinnedFileName).")
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkDim)
-                .fixedSize(horizontal: false, vertical: true)
-
-            TextEditor(text: $pinnedBuffer)
-                .font(DS.bodyFont)
-                .foregroundStyle(DS.ink)
-                .scrollContentBackground(.hidden)
-                .focused($pinnedFocused)
-                .frame(height: 260)
-                .padding(DS.sm)
-                .background(RoundedRectangle(cornerRadius: DS.radiusSm).fill(DS.surface))
-                .overlay(RoundedRectangle(cornerRadius: DS.radiusSm)
-                    .strokeBorder(pinnedFocused ? DS.moon.opacity(0.45) : DS.hairline, lineWidth: 0.75))
-                .onChange(of: pinnedBuffer) { _, _ in schedulePinnedSave() }
-                .accessibilityLabel("Facts you have told mull yourself")
-                .accessibilityHint("Written to \(Curator.pinnedFileName). Placed above mull's own guesses in About Me.")
-        }
-        .padding(.top, DS.md)
-    }
-
-    /// Load the pinned file into its own buffer. Called when About Me is opened.
-    private func loadPinnedBuffer() {
-        _ = Curator.pinnedFacts()   // lays the scaffold down if this is the first time
-        let raw = MullDirectory.read(Curator.pinnedFileName) ?? ""
-        pinnedBuffer = raw
-        pinnedSaved = raw
-        pinnedSaveError = nil
-        pinnedAutosaveTimer?.invalidate()
-        pinnedAutosaveTimer = nil
-    }
-
-    private func schedulePinnedSave() {
-        pinnedAutosaveTimer?.invalidate()
-        guard pinnedBuffer != pinnedSaved else { return }
-        pinnedAutosaveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
-            savePinnedBuffer()
-        }
-    }
-
-    /// Write the buffer out. A failed write must never look like a successful one:
-    /// the buffer stays different from `pinnedSaved`, so the header keeps saying so.
-    private func savePinnedBuffer() {
-        pinnedAutosaveTimer?.invalidate()
-        pinnedAutosaveTimer = nil
-        guard pinnedBuffer != pinnedSaved else { return }
-        if MullDirectory.write(pinnedBuffer, to: Curator.pinnedFileName) {
-            pinnedSaved = pinnedBuffer
-            pinnedSaveError = nil
-        } else {
-            pinnedSaveError = String(localized: "mull could not write to ~/mull.")
-        }
-    }
-
-    private func flushPinnedEdit() {
-        guard pinnedBuffer != pinnedSaved else { return }
-        savePinnedBuffer()
-    }
-
-    @ViewBuilder
-    private func custodeNote(for file: mullFile) -> some View {
-        switch file.name {
-        case "me.md":
-            // No "correct this over there" button any more: what it pointed at is
-            // now at the foot of this same page (`pinnedEditor`). The two sidebar
-            // rows were one subject cut in half, and the halves did not say which
-            // was which.
-            Text("What mull inferred about you, rewritten on every update. That is why this part can't be edited: the next update would overwrite what you typed. What you write at the bottom of this page is kept as fact and shown above this.")
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkDim)
-                .fixedSize(horizontal: false, vertical: true)
-
-        case Curator.pinnedFileName:
-            Text("You own this file. mull reads it and never writes to it — every line that isn't a comment is placed above mull's own guesses in About Me.")
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkDim)
-                .fixedSize(horizontal: false, vertical: true)
-
-        default:
-            // Nothing. This slot used to hold "Copy it, move it, open it in
-            // anything — it's plain markdown either way", under a file the reader
-            // is already looking at in a markdown viewer. It reassured; it did not
-            // let anyone decide anything.
-            EmptyView()
-        }
-    }
-
-
-    // MARK: - File Operations
-
-    private func loadFile(_ file: mullFile) {
-        // Flush the OUTGOING file explicitly. By the time .onChange(of: selection)
-        // calls us, `selection` is already the new file — deriving the save target
-        // from it wrote the previous buffer over the newly opened note.
-        //
-        // If that flush FAILS, the outgoing text exists nowhere but in `editorContent`,
-        // and the next line is about to overwrite it. Stay on the file that didn't
-        // save, with the error showing, rather than navigating over the user's words.
-        if isDirty, let previous = loadedFile, previous != file {
-            guard saveFile(previous) else {
-                selection = .file(previous)
-                return
-            }
-        }
-        // Nothing to load when the buffer already *is* this file and holds words
-        // that are not on disk. Reading the file back here would destroy them, and
-        // every route into that is a route this view takes on its own:
-        //
-        //   - the refusal above assigns `selection`, which re-fires
-        //     .onChange(of: selection) and calls straight back in with the file
-        //     whose save just failed. The flush guard cannot catch it (`previous ==
-        //     file`), so the next line would overwrite exactly the text it had just
-        //     refused to navigate away from;
-        //   - leaving for Home and coming back does the same thing a slower way,
-        //     because the flush on the way out is allowed to fail quietly.
-        //
-        // Both used to end with the conflict banner gone and the edits with it.
-        if isDirty, loadedFile == file { return }
-        editorContent = displayContent(of: file)
-        savedContent = editorContent   // baseline: a freshly loaded file is never dirty
-        loadedFile = file
-        loadedModified = modificationDate(of: file.url)
-        externalChange = false
-        saveError = nil   // a previous file's write failure isn't this file's problem
-        isDirty = false
-        // About Me carries the pinned file's editor at its foot, in its own buffer.
-        // Loaded here rather than in the view so it is read once per open, not on
-        // every re-render of a page that redraws on AppState's 3s republish.
-        if file.name == "me.md" { loadPinnedBuffer() } else { flushPinnedEdit() }
-        // A fresh page: nothing held back, nothing scrolled, no reading in progress.
-        pendingAutoUpdate = nil
-        readScrolledAway = false
-        lastReadInteraction = .distantPast
-    }
-
-    /// Coordinate space for the read-only page, so its scroll offset can be observed.
-    private static let readScrollSpace = "mull.readScroll"
-
-    private func modificationDate(of url: URL) -> Date? {
-        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
-    }
-
-    /// The editor changed. Dirty is measured against the loaded baseline (so the
-    /// programmatic load assignment doesn't count), and we schedule a debounced
-    /// autosave so data is never lost — Crane MD principle 5 (速度と信頼が美意識).
-    private func editorChanged() {
-        isDirty = (editorContent != savedContent)
-        autosaveTimer?.invalidate()
-        guard isDirty, let file = loadedFile else { return }
-        autosaveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
-            // Captured, not re-derived: the timer must write to the file this buffer
-            // belongs to even if the user has since selected another note.
-            saveFile(file)
-        }
-    }
-
-    /// A file's path relative to the vault root, which is the frame every link in
-    /// these documents is written in. Nil for anything outside ~/mull.
-    private func vaultRelativePath(of file: mullFile) -> String? {
-        vaultRelativePath(of: file.url)
-    }
-
-    private func vaultRelativePath(of url: URL) -> String? {
-        let root = mullDir.standardizedFileURL.path + "/"
-        let path = url.standardizedFileURL.path
-        guard path.hasPrefix(root) else { return nil }
-        return String(path.dropFirst(root.count))
-    }
-
-    /// Is this folder inside `notes/`, i.e. one the user made?
-    ///
-    /// mull never creates a folder under `notes/`. `New Folder` does, importing does,
-    /// and the numbered-folder migration did when it swept a user's own files out of a
-    /// retired folder — all of them the user's doing. So a folder there is a category
-    /// they decided on, and an empty one is a category they have not filled *yet*.
-    ///
-    /// This replaced a session-scoped set of "folders to keep showing anyway". That
-    /// set was written when mull still owned the vault's categories, and it stopped
-    /// being enough the moment DIRECTION §6.1 made the categories theirs: you could
-    /// make a folder, not put anything in it, close the window, and find it gone —
-    /// still on disk, no longer reachable. Being on the filesystem rather than in
-    /// `@State`, this survives a relaunch, which is also what makes §6.1's own
-    /// retraction test ("has the user cut any folders under notes/?") answerable.
-    private func isUserCategory(_ url: URL) -> Bool {
-        guard let relative = vaultRelativePath(of: url) else { return false }
-        if relative.hasPrefix("notes/") { return true }
-        // `notes/` itself only once something is on the shelf. Empty, it is chrome;
-        // holding an imported PDF, it is the only thing pointing at where that PDF
-        // went — and a PDF is not a row this tree can draw.
-        guard relative == "notes" else { return false }
-        let entries = try? FileManager.default.contentsOfDirectory(atPath: url.path)
-        return entries?.contains { !$0.hasPrefix(".") } ?? false
-    }
-
-    /// Is there anything behind this row — i.e. does its folder earn a place in the
-    /// sidebar because of it?
-    ///
-    /// A sub-folder qualifies by having got into `children` at all: `buildTree` only
-    /// appends one that passed this same test. A note qualifies by existing — the
-    /// user or mull wrote it, and whether it says much is not the sidebar's business.
-    ///
-    /// The exception is `index.md`. mull no longer writes one — the numbered folders
-    /// that each got a scaffold at first launch were retired on 2026-08-09
-    /// (DIRECTION §6.1) — but the check stays, because the failure it caught is
-    /// generic: a file whose whole body is front matter, a title and a house note
-    /// makes a folder *look* occupied while leading nowhere.
-    private func countsAsContent(_ node: mullFileNode) -> Bool {
-        if node.isDirectory { return true }
-        guard let file = node.file else { return false }
-        guard file.name == "index.md" else { return true }
-        return Self.hasReadableBody(at: file.url)
-    }
-
-    /// Anything a reader would see, once the chrome is taken off: a curated block
-    /// with content in it, or prose in the header region that isn't the front matter,
-    /// the `#` title or the leading promise. `MarkdownDoc.body` strips exactly what
-    /// `MarkdownDoc.header` emits, which is what `FolderOntology.indexHeader` builds
-    /// these files out of — so an untouched scaffold reduces to the empty string, and
-    /// one line written under it does not.
-    private static func hasReadableBody(at url: URL) -> Bool {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return false }
-        let (header, blocks) = ContextBlockFile.parse(raw)
-        if blocks.contains(where: { !$0.content.isEmpty }) { return true }
-        return !MarkdownDoc.body(of: header).isEmpty
-    }
-
-    /// Follow a link into another vault file: select it in the sidebar and open it,
-    /// exactly as clicking it there would. `MEMORY.md` is an index of these, and an
-    /// index whose entries send you to Finder is not an index.
-    private func openVaultFile(_ relativePath: String) {
-        let url = MullDirectory.url(for: relativePath).standardizedFileURL
-        guard url.path.hasPrefix(mullDir.standardizedFileURL.path + "/"),
-              let file = makeFile(url: url, autoGenerated: isAutoGenerated(url)) else { return }
-        selection = .file(file)
-    }
-
-    /// Content to show in the editor. Auto-generated files (me.md, MEMORY.md, …)
-    /// are read-only and keep Curator provenance markers on disk — strip those
-    /// markers for display so the user sees clean text, not internal metadata.
-    private func displayContent(of file: mullFile) -> String {
-        let raw = (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
-        return file.isAutoGenerated ? ContextBlockFile.stripMarkers(raw) : raw
-    }
-
-    /// Write the buffer to `file` — always the file the buffer was loaded from,
-    /// never whatever is selected right now. `force` is the user pressing Save,
-    /// which is allowed to win a conflict with an outside writer.
-    /// Returns false when the buffer is NOT safely on disk, so callers that are about
-    /// to discard it (switching files, closing) can refuse.
-    @discardableResult
-    private func saveFile(_ file: mullFile, force: Bool = false) -> Bool {
-        autosaveTimer?.invalidate()
-        // 原則6 (Round-trip safety) — three guards:
-        // 1. Auto-generated files carry Curator markers we STRIP for display; writing
-        //    the stripped buffer back would destroy them. They're read-only. Refuse.
-        guard !file.isAutoGenerated else { isDirty = false; return true }
-        // 2. No-op write guard: if the buffer is byte-identical to disk, don't touch
-        //    the file at all — no mtime churn, no chance of altering bytes the user
-        //    never edited. A load→save with no change is a true no-op.
-        let onDisk = try? String(contentsOf: file.url, encoding: .utf8)
-        guard onDisk != editorContent else {
-            savedContent = editorContent
-            loadedModified = modificationDate(of: file.url)
-            externalChange = false
-            saveError = nil
-            isDirty = false
-            return true
-        }
-        // 3. Clobber guard: the editor deliberately refuses to sync an external write
-        //    into a first-responder text view (IME safety), so the buffer can be stale.
-        //    If the file's mtime moved since we loaded it, someone else (MCP write_note,
-        //    Obsidian) owns the newer text — an automatic save must not erase it. The
-        //    user's edit stays in the buffer, and an explicit Save can still override.
-        if !force, file == loadedFile, let loadedAt = loadedModified,
-           let current = modificationDate(of: file.url), current > loadedAt.addingTimeInterval(0.5) {
-            externalChange = true
-            return false   // the buffer is not on disk — do not let a caller discard it
-        }
-        // 4. A failed write must never look like a successful one. This used to be
-        //    `try?` followed unconditionally by `isDirty = false`, so a full disk or a
-        //    revoked folder permission cleared the "Edited" badge and greyed out Save
-        //    while the text existed nowhere but in memory — the user closed the window
-        //    and lost it. Keep the buffer dirty and say what went wrong.
-        do {
-            try editorContent.write(to: file.url, atomically: true, encoding: .utf8)
-            FilePrivacy.protectFile(at: file.url)
-        } catch {
-            saveError = error.localizedDescription
-            return false
-        }
-        saveError = nil
-        savedContent = editorContent
-        if file == loadedFile {
-            loadedModified = modificationDate(of: file.url)
-            externalChange = false
-            isDirty = false
-        }
-        return true
-    }
-
-    // MARK: - New File Sheet
-
-    private var newFileSheet: some View {
-        VStack(alignment: .leading, spacing: DS.md) {
-            Text("New Note").font(DS.titleFont)
-            TextField("filename", text: $dialogName)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { createNote() }
-            Text(newNotePathPreview(dialogName))
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkFaint)
-                .confirmationDialog(
-                    "\"\(pendingOverwriteName ?? "")\" already exists",
-                    isPresented: Binding(
-                        get: { pendingOverwriteName != nil },
-                        set: { if !$0 { pendingOverwriteName = nil } }
-                    )
-                ) {
-                    Button("Open the existing note") {
-                        if let name = pendingOverwriteName { openExistingNote(fileName: name) }
-                        pendingOverwriteName = nil
-                    }
-                    Button("Replace it", role: .destructive) {
-                        if let name = pendingOverwriteName {
-                            let url = mullDir.appendingPathComponent(newItemParent)
-                                .appendingPathComponent(name)
-                            writeNewNote(at: url, fileName: name)
-                        }
-                        pendingOverwriteName = nil
-                    }
-                    Button("Cancel", role: .cancel) { pendingOverwriteName = nil }
-                } message: {
-                    Text("Replacing it discards everything that note currently contains. This cannot be undone.")
-                }
-            HStack {
-                Button("Cancel") { showNewFile = false }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Create") { createNote() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(dialogName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(DS.xl)
-        .frame(width: 300)
-    }
-
-    private func createNote() {
-        let fileName = noteFileName(dialogName)
-        guard !fileName.isEmpty else {
-            appState.postNotice("That name can't be used",
-                                detail: String(localized: "A note needs at least one character that can go in a file name."),
-                                isProblem: true)
-            return
-        }
-        let notesDir: URL
-        do {
-            notesDir = try newItemDirectory()
-        } catch {
-            appState.postNotice("Couldn't create ~/mull/\(newItemParent)",
-                                detail: error.localizedDescription, isProblem: true)
-            return
-        }
-        let filePath = notesDir.appendingPathComponent(fileName)
-        // Creating a note twice under the same name used to overwrite the first one
-        // with an empty stub — no warning, no undo, the note simply gone. Ask.
-        if FileManager.default.fileExists(atPath: filePath.path) {
-            pendingOverwriteName = fileName
-            return
-        }
-        writeNewNote(at: filePath, fileName: fileName)
-    }
-
-    /// The actual creation, shared by the first-time path and the "open the existing
-    /// one" path so both end up selecting the same file.
-    private func writeNewNote(at filePath: URL, fileName: String) {
-        let content = "# \(dialogName.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
-        do {
-            try content.write(to: filePath, atomically: true, encoding: .utf8)
-            FilePrivacy.protectFile(at: filePath)
-        } catch {
-            // The sheet stays open, and the failure is said out loud — `saveError`
-            // alone only shows in the editor header, which isn't on screen yet.
-            saveError = error.localizedDescription
-            appState.postNotice("Couldn't create \(fileName)",
-                                detail: error.localizedDescription, isProblem: true)
-            return
-        }
-        showNewFile = false
-        dialogName = ""
-        refreshFileTree()
-        let file = mullFile(name: fileName, url: filePath, size: Int64(content.utf8.count), modified: Date(), isAutoGenerated: false)
-        selection = .file(file)
-    }
-
-    /// Open the note that already carries this name, instead of creating a second one.
-    private func openExistingNote(fileName: String) {
-        let url = mullDir.appendingPathComponent(newItemParent).appendingPathComponent(fileName)
-        showNewFile = false
-        dialogName = ""
-        refreshFileTree()
-        if let file = makeFile(url: url, autoGenerated: false) {
-            selection = .file(file)
-        }
-    }
-
-    private var newFolderSheet: some View {
-        VStack(alignment: .leading, spacing: DS.md) {
-            Text("New Folder").font(DS.titleFont)
-            TextField("folder name", text: $dialogName)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { createFolder() }
-            Text("~/mull/\(newItemParent)/"
-                 + (sanitized(dialogName).isEmpty ? "…" : "\(sanitized(dialogName))/"))
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkFaint)
-            HStack {
-                Button("Cancel") { showNewFolder = false }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Create") { createFolder() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(dialogName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(DS.xl)
-        .frame(width: 300)
-    }
-
-    private func createFolder() {
-        let name = sanitized(dialogName)
-        guard !name.isEmpty else {
-            appState.postNotice("That name can't be used",
-                                detail: String(localized: "A folder needs at least one character that can go in a folder name."),
-                                isProblem: true)
-            return
-        }
-        let dir = mullDir.appendingPathComponent(newItemParent).appendingPathComponent(name)
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch {
-            appState.postNotice("Couldn't create \(name)",
-                                detail: error.localizedDescription, isProblem: true)
-            return
-        }
-        showNewFolder = false
-        dialogName = ""
-        refreshFileTree(force: true)
-    }
-
-    // MARK: - Rename
-
-    private func renameSheet(for target: RenameTarget) -> some View {
-        VStack(alignment: .leading, spacing: DS.md) {
-            Text(target.isDirectory ? "Rename Folder" : "Rename Note").font(DS.titleFont)
-            TextField("name", text: $renameName)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { performRename(target) }
-            Text(renamePreview(target))
-                .font(DS.captionFont)
-                .foregroundStyle(DS.inkFaint)
-            HStack {
-                Button("Cancel") { renameTarget = nil }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Rename") { performRename(target) }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(renamedURL(for: target) == nil)
-            }
-        }
-        .padding(DS.xl)
-        .frame(width: 320)
-    }
-
-    /// The name the item will actually get, or nil when there is nothing to do —
-    /// an empty name, or the name it already has.
-    private func renamedURL(for target: RenameTarget) -> URL? {
-        let name = target.isDirectory ? sanitized(renameName) : noteFileName(renameName)
-        guard !name.isEmpty, name != target.currentName else { return nil }
-        return target.url.deletingLastPathComponent().appendingPathComponent(name)
-    }
-
-    private func renamePreview(_ target: RenameTarget) -> String {
-        guard let url = renamedURL(for: target),
-              let relative = vaultRelativePath(of: url) else {
-            return "~/mull/" + (vaultRelativePath(of: target.url) ?? target.currentName)
-        }
-        return "~/mull/" + relative + (target.isDirectory ? "/" : "")
-    }
-
-    private func performRename(_ target: RenameTarget) {
-        guard let destination = renamedURL(for: target) else { return }
-        // Whatever is in the buffer belongs to the OLD path. Write it there before the
-        // file moves out from under it; if that write fails, the rename does not happen
-        // — moving the file would strand the text with nowhere to save it.
-        if isDirty, let open = loadedFile, open.url == target.url, !saveFile(open) { return }
-
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            appState.postNotice("\(destination.lastPathComponent) already exists",
-                                detail: String(localized: "Nothing was renamed. Pick another name, or open the one that is already there."),
-                                isProblem: true)
-            return
-        }
-        do {
-            try FileManager.default.moveItem(at: target.url, to: destination)
-        } catch {
-            appState.postNotice("Couldn't rename \(target.currentName)",
-                                detail: error.localizedDescription, isProblem: true)
-            return
-        }
-        renameTarget = nil
-        refreshFileTree(force: true)
-        // Follow the file. Selection holds a path, so leaving it on the old one would
-        // open an editor onto something that is no longer there.
-        if case .file(let open) = selection, open.url == target.url,
-           let moved = makeFile(url: destination, autoGenerated: isAutoGenerated(destination)) {
-            selection = .file(moved)
-        }
-    }
-
-    private func beginRename(url: URL, isDirectory: Bool) {
-        let target = RenameTarget(url: url, isDirectory: isDirectory)
-        renameName = isDirectory ? target.currentName
-                                 : String(target.currentName.dropLast(3))   // without ".md"
-        renameTarget = target
-    }
-
-    // MARK: - Context Menu
-
-    @ViewBuilder
-    private func fileContextMenu(file: mullFile) -> some View {
-        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
-        Button("Copy content") {
-            if let content = try? String(contentsOf: file.url, encoding: .utf8) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(content, forType: .string)
-            }
-        }
-        if !file.isAutoGenerated {
-            Divider()
-            Button("Rename…") { beginRename(url: file.url, isDirectory: false) }
-            Button("Move to Trash", role: .destructive) { pendingDelete = file }
-        }
-    }
-
-    /// A folder's menu. The three mutating entries are offered only inside `notes/`:
-    /// everywhere else is a destination mull writes (`projects/`, `corrections/`,
-    /// `daily/`, `memory/`), and a note filed into one of those is a note sitting in
-    /// the path of a generator.
-    @ViewBuilder
-    private func folderContextMenu(_ url: URL) -> some View {
-        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-        if isUserCategory(url), let relative = vaultRelativePath(of: url) {
-            Divider()
-            Button("New Note Here") { startNew(.note, in: relative) }
-            Button("New Folder Here") { startNew(.folder, in: relative) }
-            Divider()
-            Button("Rename…") { beginRename(url: url, isDirectory: true) }
-        }
-    }
-
-    /// Deleting used to be one unconfirmed click straight to `removeItem` — no
-    /// dialog, no Trash, no undo, and a silent no-op when it failed. The vault is
-    /// the user's own writing; it gets the same treatment Finder would give it.
-    private func trash(_ file: mullFile) {
-        do {
-            try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
-        } catch {
-            // Not `saveError`: that renders as the "Not saved" badge in the *open*
-            // file's header, so a failed trash either accused a different, perfectly
-            // saved note of being unwritten, or — with no file open — was reported
-            // nowhere at all, which is the silent no-op this method exists to end.
-            appState.postNotice(
-                "Couldn't move \(file.name) to the Trash",
-                detail: error.localizedDescription,
-                isProblem: true
-            )
-            return
-        }
-        if case .file(let open) = selection, open == file { selection = .home }
-        refreshFileTree()
-    }
-
-    // MARK: - File Discovery
-
-    /// Lay down `me.pinned.md` if it isn't there yet, so the sidebar has something to
-    /// list. Once per window, on appear — the file is the user's, and deciding whether
-    /// to write it is not something to do again every time the sidebar draws.
-    private func scaffoldPinnedFile() {
-        _ = Curator.pinnedFacts()
-    }
-
-    /// The root files the sidebar pins above the vault tree — in the order it shows
-    /// them, and who writes each one.
-    ///
-    /// One table, because this list used to be spelled out by hand in three places and
-    /// one of them spelled it short: `buildTree`'s skip set named me.md, now.md and
-    /// MEMORY.md but not `me.pinned.md`, so that file was drawn **twice** — once in the
-    /// pinned section and again down among the root files of the tree. Both rows carry
-    /// the same `.tag`, so selecting it highlighted two rows for one file and the List
-    /// scrolled off to the second one, which is what "the sidebar moves" looked like.
-    /// A list that three call sites have to agree about is a list that belongs in one
-    /// place.
-    /// Note what this table no longer carries: whether mull writes the file. That is
-    /// `VaultOwnership`'s answer now, for every file in the vault and not just these
-    /// four — a second copy of it here is how `full.md`, `mull.md`, `proactive.md` and
-    /// the folder `index.md` files came to be offered as editable notes.
-    private static let pinnedRootFiles: [(name: String, showsInSidebar: Bool)] = [
-        ("me.md", true),
-        // Yours. It has no row of its own: the two entries were one subject split
-        // across two lines of the sidebar, and which of them to open to correct a
-        // fact was never obvious from the names. It is edited in place at the foot
-        // of About Me instead. Still a plain file in the vault — Finder, Obsidian
-        // and the MCP tools see it exactly as before.
-        (Curator.pinnedFileName, false),
-        ("now.md", true),
-        ("MEMORY.md", true),
-    ]
-
-    /// Every name the root of the tree must skip — including the one with no row of
-    /// its own, which the About Me page owns rather than the sidebar. Left out of
-    /// this set it would be drawn down among the loose root files, which is where
-    /// the duplicate row came from.
-    private static let pinnedRootNames = Set(pinnedRootFiles.map(\.name))
-
-    private var contextFiles: [mullFile] {
-        // me.md is mull's read-only guess. me.pinned.md sits right under it and IS
-        // editable — it's how you correct/lock facts mull got wrong. mull places its
-        // non-comment lines at the top of me.md and never overwrites them.
-        // The scaffolding this used to do lives in `scaffoldPinnedFile()` now. It is
-        // a *write* — `Curator.readPinned()` lays the template down when the file is
-        // missing or still untouched — and this property is read from inside `body`,
-        // which re-runs on AppState's 3s republish and on every search keystroke.
-        // Disk reads and a conditional file write, on the main thread, as a side
-        // effect of drawing a sidebar.
-        Self.pinnedRootFiles.filter(\.showsInSidebar).compactMap {
-            let url = mullDir.appendingPathComponent($0.name)
-            return makeFile(url: url, autoGenerated: isAutoGenerated(url))
-        }
-    }
-
-    private func makeFile(url: URL, autoGenerated: Bool) -> mullFile? {
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-        return mullFile(
-            name: url.lastPathComponent,
-            url: url,
-            size: attrs?[.size] as? Int64 ?? 0,
-            modified: attrs?[.modificationDate] as? Date ?? Date(),
-            isAutoGenerated: autoGenerated
-        )
-    }
-
-    /// Rebuild the sidebar from disk — but only when the vault's *shape* actually
-    /// moved, unless the user asked for it by hand (⌘R).
-    ///
-    /// Rebuilding unconditionally is not free: `buildTree` sorts every folder's notes
-    /// by modification date, and mull rewrites its own files all day (now.md and me.md
-    /// on the 60s pass, the daily file, memory/…). So a rebuild that found no new note
-    /// still handed the List a *differently ordered* array — rows moved under the
-    /// pointer and the table scrolled to keep the selection in view.
-    ///
-    /// The worst possible moment for that is the window becoming key, because the click
-    /// that activates mull from another app is the same click that is about to land on
-    /// a row: the list re-sorted between the mouse going down and the row being chosen.
-    /// The signature guard is the one the tree watch already applies (see
-    /// `vaultSignature`); this path used to be the hole in it.
-    private func refreshFileTree(force: Bool = false) {
-        let signature = Self.vaultSignature(root: mullDir)
-        guard force || signature != treeSignature else { return }
-        fileTree = buildTree(mullDir, isRoot: true)
-        treeSignature = signature
-        pruneExpandedFolders()
-    }
-
-    /// Forget the open/closed state of folders that are no longer there.
-    ///
-    /// The set is `@AppStorage` and nothing ever removed from it, so it only grew —
-    /// every folder ever opened, including the eight numbered ones DIRECTION §6.1
-    /// retired. Harmless to look at, but it means a folder you delete and later make
-    /// again under the same name comes back already open, which reads as the sidebar
-    /// remembering something you did not tell it.
-    private func pruneExpandedFolders() {
-        var live: Set<String> = []
-        func walk(_ nodes: [mullFileNode], prefix: String) {
-            for node in nodes where node.isDirectory {
-                let path = prefix.isEmpty ? node.name : prefix + "/" + node.name
-                live.insert(path)
-                walk(node.children, prefix: path)
-            }
-        }
-        walk(fileTree, prefix: "")
-        let stored = expandedFolders.wrappedValue
-        let kept = stored.intersection(live)
-        if kept != stored { expandedFolders.wrappedValue = kept }
-    }
-
-    /// Walk the vault recursively: folders (with their nested children) then md
-    /// files. At the root, the pinned context files are skipped (shown above).
-    private func buildTree(_ dir: URL, isRoot: Bool = false) -> [mullFileNode] {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]) else { return [] }
-
-        var folders: [mullFileNode] = []
-        var files: [mullFileNode] = []
-        let pinned = Self.pinnedRootNames
-        for url in entries {
-            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            if isDir {
-                let children = buildTree(url)
-                // A folder with no row under it is not a row.
-                //
-                // This tree draws `.md` files and nothing else, so a folder holding
-                // only other kinds of file expands into blank space — it says a
-                // location exists and then refuses to say what is in it. The shipped
-                // vault had nine such rows out of about twenty-five: `_raw/` and its
-                // six connector folders (seeded with a `.keep` and filled, if ever,
-                // with `.ndjson`), `reports/` (whose only contents are the hidden
-                // `.drafts`), and `notes/` before the first note is written. Every one
-                // of them was permanently, structurally empty.
-                //
-                // Except inside `notes/`, which is the user's own territory: an empty
-                // folder there is a category they made and have not filled yet, and it
-                // is not mull's to hide (see `isUserCategory`).
-                //
-                // "Holds an .md" is not the test. mull used to write a scaffold
-                // `index.md` into eight numbered folders whether or not it had anything
-                // to put in them, and five of those folders were passing on the strength
-                // of a file that is front matter, an `#` title and one line of house
-                // promise — each expanded to exactly one note that said nothing. Those
-                // folders are gone (DIRECTION §6.1); the check is kept because a row
-                // that leads to an empty page is the same lie as a folder that expands
-                // into nothing, and it takes one more click to find out.
-                guard children.contains(where: countsAsContent) || isUserCategory(url) else { continue }
-                folders.append(mullFileNode(name: url.lastPathComponent, isDirectory: true,
-                                            file: nil, children: children))
-            } else if url.pathExtension == "md" {
-                if isRoot && pinned.contains(url.lastPathComponent) { continue }
-                if let f = makeFile(url: url, autoGenerated: isAutoGenerated(url)) {
-                    files.append(mullFileNode(name: f.name, isDirectory: false, file: f, children: []))
-                }
-            }
-        }
-        folders.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        // By NAME, never by modification date. Date order meant that writing in a note
-        // moved it: the row you were working in jumped to the top of its folder the
-        // next time the tree was rebuilt, and everything below it slid down. A sidebar
-        // is a place you learn where things are — a note has to stay where you left it,
-        // and the one you are editing least of all should move.
-        //
-        // `daily/` is the exception that keeps its sense of time, and gets it for free:
-        // its files are named yyyy-MM-dd, so descending by name IS newest-first, and it
-        // is stable because a name only changes when the file does.
-        let newestFirst = dir.lastPathComponent == "daily"
-        files.sort {
-            let order = $0.name.localizedStandardCompare($1.name)
-            return newestFirst ? order == .orderedDescending : order == .orderedAscending
-        }
-        return folders + files
-    }
-
-    // MARK: - Helpers
-
-    /// The vault's rule for a safe file name, which the memory writer needs too.
-    private func sanitized(_ name: String) -> String { MullDirectory.safeFileName(name) }
-
-    /// The file name a note will actually get — ".md" appended only when it isn't
-    /// already there, so "foo.md" stays "foo.md" instead of becoming "foo.md.md".
-    private func noteFileName(_ raw: String) -> String {
-        let base = sanitized(raw)
-        guard !base.isEmpty else { return "" }
-        return base.lowercased().hasSuffix(".md") ? base : base + ".md"
-    }
-
-    /// The path the note will really be written to, shown before it is.
-    private func newNotePathPreview(_ raw: String) -> String {
-        let name = noteFileName(raw)
-        return "~/mull/\(newItemParent)/" + (name.isEmpty ? "…" : name)
-    }
-
-    private static let dailyFileNameFormat: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    private static let dailyDisplayFormat: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("EEE d MMM yyyy")
-        return f
-    }()
-
-    /// What to call a file in the UI.
-    ///
-    /// Only files mull generates get a friendlier name. A note the user named is
-    /// shown exactly as it sits on disk: the old rule title-cased it, swapped its
-    /// hyphens for spaces and stripped ".md" — so "iOS-notes.md" appeared as
-    /// "Ios Notes", which is neither the file's name nor anything you could search
-    /// Finder for. On-disk names are never touched by any of this.
-    private func displayName(_ file: mullFile) -> String {
-        switch file.name {
-        case "me.md": return String(localized: "About Me")
-        // No sidebar row of its own any more, but it can still be reached (a search hit,
-        // a restored window, Reveal in Finder), and when it is it should name itself as
-        // the thing the About Me page calls it.
-        case Curator.pinnedFileName: return "What you've told mull yourself"
-        case "now.md": return String(localized: "Current Context")
-        case "MEMORY.md": return String(localized: "Memory Index")
-        default:
-            // A generated daily summary is named for its date — read it back as one.
-            if file.isAutoGenerated, file.name.hasSuffix(".md"),
-               let date = Self.dailyFileNameFormat.date(from: String(file.name.dropLast(3))) {
-                return Self.dailyDisplayFormat.string(from: date)
-            }
-            return file.name
-        }
-    }
-
-    /// The words for what `fileAccent` says in colour. The dot beside the file name
-    /// is the only thing distinguishing "mull wrote this" from "you wrote this", so
-    /// the distinction has to exist as text too or it does not exist for anyone
-    /// using VoiceOver — or, for that matter, anyone who cannot separate slate from
-    /// tobacco at 8 points.
-    private func fileRole(_ file: mullFile) -> String {
-        switch file.name {
-        case "me.md": return String(localized: "Your profile, written by mull")
-        case Curator.pinnedFileName: return String(localized: "Your own edits to your profile")
-        case "now.md": return String(localized: "Current context, written by mull")
-        case "MEMORY.md": return String(localized: "Memory index, written by mull")
-        default:
-            if file.isAutoGenerated { return String(localized: "Written by mull") }
-            return String(localized: "Your note")
-        }
-    }
-
-    private func fileAccent(_ file: mullFile) -> Color {
-        switch file.name {
-        case "me.md": return DS.slate
-        case Curator.pinnedFileName: return DS.moon
-        case "now.md": return DS.recording
-        case "MEMORY.md": return DS.paused
-        default:
-            if file.isAutoGenerated { return DS.moon.opacity(0.5) }
-            return DS.inkFaint
         }
     }
 }
@@ -2724,100 +977,3 @@ struct FlowLayout: Layout {
     }
 }
 
-// MARK: - Data Types
-
-struct mullFile: Identifiable, Hashable {
-    let name: String
-    let url: URL
-    let size: Int64
-    let modified: Date
-    let isAutoGenerated: Bool
-    var id: String { url.path }
-    var path: String { url.path }
-    var sizeFormatted: String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
-    func hash(into hasher: inout Hasher) { hasher.combine(url.path) }
-    static func == (lhs: mullFile, rhs: mullFile) -> Bool { lhs.url.path == rhs.url.path }
-}
-
-struct mullFileNode: Identifiable {
-    let name: String
-    let isDirectory: Bool
-    let file: mullFile?
-    let children: [mullFileNode]
-    var id: String { name + (isDirectory ? "/" : "") + (file?.path ?? "") }
-}
-
-/// One row of the vault tree. A recursive View *struct* (a concrete type can refer
-/// to itself, unlike an opaque `some View` function) so folders nest to any depth.
-/// The leaf's `.tag` is on a concrete row, so List selection works inside folders —
-/// which OutlineGroup did not.
-private struct VaultNode<Row: View>: View {
-    let node: mullFileNode
-    /// This folder's path within the vault — the identity its open/closed state is
-    /// remembered under. Assembled from the names of its parents rather than taken from
-    /// `node.id`, because two folders in different parts of the tree may share a name
-    /// and must not share a disclosure state.
-    let path: String
-    @Binding var expandedFolders: Set<String>
-    let rowFor: (mullFile) -> Row
-    /// The folder row's own menu and its own drop target. Plain closures rather than
-    /// a second `@ViewBuilder` generic: this type is already generic over the leaf
-    /// row, and a second parameter would have to be threaded through every recursive
-    /// call for one menu.
-    let folderMenu: (URL) -> AnyView
-    let onDropInto: (String, [URL]) -> Void
-
-    /// The folder is a drop target while something is over it. Without the highlight
-    /// the sidebar accepts a drag with no sign of which row will take it — and until
-    /// this existed every drop went to `notes/` regardless of where it landed.
-    @State private var isDropTarget = false
-
-    /// Open/closed as a binding, so the chevron and the label drive the same state
-    /// from two places instead of two copies of the same set arithmetic.
-    private var isExpanded: Binding<Bool> {
-        Binding(
-            get: { expandedFolders.contains(path) },
-            set: { isOpen in
-                if isOpen { expandedFolders.insert(path) } else { expandedFolders.remove(path) }
-            }
-        )
-    }
-
-    var body: some View {
-        if let file = node.file {
-            rowFor(file).tag(FullWindowView.SidebarItem.file(file))
-        } else {
-            DisclosureGroup(isExpanded: isExpanded) {
-                ForEach(node.children) { child in
-                    VaultNode(node: child,
-                              path: path + "/" + child.name,
-                              expandedFolders: $expandedFolders,
-                              rowFor: rowFor,
-                              folderMenu: folderMenu,
-                              onDropInto: onDropInto)
-                }
-            } label: {
-                // The name opens the folder, and so does the empty space beside it.
-                // Why that has to be said at all, and why it is a Button rather than a
-                // tap gesture: `DisclosureLabel`. `OutlineGroup` would give this for
-                // free and is not an option here — its selection model does not honour
-                // the per-row `.tag` the leaf rows need, which is why this type exists.
-                DisclosureLabel(isExpanded: isExpanded) {
-                    Label(node.name, systemImage: DS.Glyph.folder)
-                        .font(DS.bodyFont)
-                        .foregroundStyle(DS.moon.opacity(0.75))
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.radiusSm)
-                                .fill(isDropTarget ? DS.moon.opacity(0.18) : .clear)
-                                .padding(.vertical, -2)
-                        )
-                }
-                .contextMenu { folderMenu(MullDirectory.url(for: path)) }
-                .dropDestination(for: URL.self) { urls, _ in
-                    onDropInto(path, urls)
-                    return true
-                } isTargeted: { isDropTarget = $0 }
-            }
-        }
-    }
-}

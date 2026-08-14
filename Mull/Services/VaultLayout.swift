@@ -52,6 +52,25 @@ enum VaultLayout {
     /// there has only ever been one thing in it.
     static let inboxFile = "inbox.md"
 
+    /// The day's own record — `MullEngine.writeDailyFile`, once the day is over.
+    static let daily = "daily"
+
+    /// `daily/YYYY/MM/YYYY-MM-DD.md`, the file a given day is written to.
+    ///
+    /// One formula, three callers: the run that writes the day, the forget path that
+    /// deletes it, and the migration that replaces what used to be here. It was two
+    /// copies before, one of them a comment saying it mirrored the other.
+    ///
+    /// The day comes from the summary being written, never from `Date()`. A run
+    /// catching up on a day mull was closed for happens on a later date than the one
+    /// it describes, and the old snapshot — which stamped "now" — would have filed
+    /// yesterday's record under today.
+    static func dailyPath(for day: Date) -> String {
+        let dir = DateFormatter(); dir.dateFormat = "yyyy/MM"
+        let file = DateFormatter(); file.dateFormat = "yyyy-MM-dd"
+        return "\(daily)/\(dir.string(from: day))/\(file.string(from: day)).md"
+    }
+
     // MARK: - The raw zone (territory)
 
     /// `_raw/<connector>/` — the immutable source layer (MAP-ARCHITECTURE 法則①).

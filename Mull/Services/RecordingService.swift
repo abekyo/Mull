@@ -171,11 +171,15 @@ final class RecordingService {
 
         startBrowserURLMonitor()
 
-        // A tap that cannot be created means keystroke capture is dead from the
-        // first second. The health check would notice, but only on its 10s tick,
-        // and it used to seed itself as healthy regardless — so the UI said
-        // "Recording" over nothing for the first ten seconds of every launch.
-        let tapAlive = startKeystrokeCapture()
+        // Keystroke capture is opt-in and off by default (`Preferences`), so mull runs
+        // in full without an Input Monitoring grant and never installs a tap nobody
+        // asked for. Off, there is nothing here to be unhealthy about.
+        //
+        // On, a tap that cannot be created means keystroke capture is dead from the
+        // first second. The health check would notice, but only on its 10s tick, and it
+        // used to seed itself as healthy regardless — so the UI said "Recording" over
+        // nothing for the first ten seconds of every launch.
+        let tapAlive = Preferences.keystrokeCaptureEnabled ? startKeystrokeCapture() : true
 
         startWakeMonitor()
         startHealthCheck(initialHealth: tapAlive)
@@ -187,15 +191,9 @@ final class RecordingService {
         isRunning = false
 
         // Keystrokes
-        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes) }
-        eventTap = nil
-        runLoopSource = nil
-        keystrokeFlushTimer?.invalidate()
-        keystrokeFlushTimer = nil
+        teardownKeystrokeCapture()
         healthCheckTimer?.invalidate()
         healthCheckTimer = nil
-        flushKeystrokeBuffer()
 
         // Other monitors
         if let obs = appSwitchObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
@@ -297,6 +295,55 @@ final class RecordingService {
             self?.flushKeystrokeBuffer()
         }
         return true
+    }
+
+    /// Take the tap down and keep what it had already buffered.
+    ///
+    /// Shared by `stop()` and by turning keystroke capture off in Settings, because
+    /// those two must leave the process in the same state. The flush is deliberate:
+    /// the characters already in the buffer were captured under a grant that was live
+    /// at the time, and discarding them would lose the last few seconds of work rather
+    /// than protect anything that has not already been read.
+    private func teardownKeystrokeCapture() {
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes) }
+        eventTap = nil
+        runLoopSource = nil
+        keystrokeFlushTimer?.invalidate()
+        keystrokeFlushTimer = nil
+        flushKeystrokeBuffer()
+    }
+
+    /// Bring the tap into line with `Preferences.keystrokeCaptureEnabled`, without a
+    /// restart. Settings calls this when the toggle moves.
+    ///
+    /// Turning it on is the only place in mull that can raise the Input Monitoring
+    /// prompt, which is the point: the prompt now follows a switch the user just
+    /// pressed, instead of arriving during onboarding attached to nothing.
+    func reconfigureKeystrokeCapture() {
+        guard isRunning else { return }
+        let wanted = Preferences.keystrokeCaptureEnabled
+
+        if wanted, eventTap == nil {
+            let alive = startKeystrokeCapture()
+            // A tap created while paused must not start listening: `setPaused(true)`
+            // disabled the old one on purpose and this one has never been told.
+            if isPaused, let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
+            report(health: alive)
+        } else if !wanted, eventTap != nil {
+            teardownKeystrokeCapture()
+            // Whatever the tap's last verdict was, there is no longer a tap to be
+            // broken. Leaving `false` here would leave the UI reporting a fault
+            // against a channel the user just switched off.
+            report(health: true)
+        }
+    }
+
+    /// Push a health verdict out, only when it changes.
+    private func report(health: Bool) {
+        guard health != lastHealthStatus else { return }
+        lastHealthStatus = health
+        onHealthStatusChanged?(health)
     }
 
     /// Maximum buffer size in characters. If IME or a stuck timer causes the buffer
@@ -795,6 +842,12 @@ final class RecordingService {
             // destroyed tap below would re-enable it too.
             guard let self, self.isRunning, !self.isPaused else { return }
 
+            // Keystroke capture off: there is no tap to keep alive, and the recreate
+            // branch below would install one — raising the Input Monitoring prompt
+            // every ten seconds for a channel the user declined. Nothing else in this
+            // timer concerns the other five channels, so the whole tick is skipped.
+            guard Preferences.keystrokeCaptureEnabled else { return }
+
             var isHealthy = true
 
             if let tap = self.eventTap {
@@ -820,10 +873,7 @@ final class RecordingService {
             }
 
             // Notify UI only when status changes
-            if isHealthy != self.lastHealthStatus {
-                self.lastHealthStatus = isHealthy
-                self.onHealthStatusChanged?(isHealthy)
-            }
+            self.report(health: isHealthy)
         }
     }
 

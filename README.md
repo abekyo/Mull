@@ -1,7 +1,8 @@
 # mull
 
-mull records what you actually do on your Mac: what you type, what you copy, and what files
-and pages you have open. Your coding agent can then look it up.
+mull records what you actually do on your Mac: the files and pages you have open, the text on
+screen in them, and what you copy. Your coding agent can then look it up. It can read your
+keyboard too, but only if you switch that on.
 
 Without mull:
 
@@ -190,7 +191,7 @@ re-record yesterday, so this is the one place where being thorough now actually 
 
 | Signal | Method | Notes |
 |--------|--------|-------|
-| Keystrokes | CGEvent tap | Everything typed, IME romaji included, 3s flush |
+| Keystrokes | CGEvent tap | **Off by default.** On, everything typed, IME romaji included, 3s flush |
 | Clipboard | NSPasteboard polling (0.5s) | Post-IME, high signal, up to 40,000 chars |
 | Window titles | Accessibility API (5s) | Which file / page / tab |
 | Window body | Accessibility API (30s, 5min while untouched) | The work itself, not just its title |
@@ -299,13 +300,19 @@ no file. See [DIRECTION.md](DIRECTION.md) §6.2.
 record.** Guessing someone's job from their app list is a claim, not an observation. The code
 that inferred role, tech stack and domain was removed in 2026-07 for exactly this reason.
 
-The rule now binds what mull writes. It did not reach back for what mull had already written:
-on 2026-08-14 the author's own `me.md` still carried `- Software developer` under the block id
-`mem:user-role`, from a `memory_entries` row stamped 2026-06-02 (`Senior iOS developer`) that
-predates the cut and has been handed to every agent since. Deleting the extractor stopped the
-production of such lines and did nothing about the stock of them. Purging the rows the old rule
-produced is open work, and it is stated here rather than fixed quietly because a promise a
-reader can falsify by opening one file costs more than the line it was protecting (§7.4).
+The rule binds what mull writes. It did not reach back for what was already written: on
+2026-08-14 the author's own `me.md` still carried `- Software developer` under the block id
+`mem:user-role`, and had been handing it to every agent since. It came from a `memory_entries`
+row stamped 2026-06-02 05:15:42, 73 seconds before five daily summaries with 5-byte bodies and
+event counts of 10, 20, 30, 40 — seeded demo data, not an inference about anybody. The row was
+deleted on 2026-08-15 and the block went with it on the next pass (`mem:` is a Curator-managed
+prefix). It is recorded here rather than fixed quietly because a promise a reader can falsify by
+opening one file costs more than the line it was protecting (§7.4).
+
+What remains open is narrower and worth stating: this rule is enforced in the rule-based
+extractor, and nothing enforces it on the path the nightly model writes. A model that decides to
+record what you *are* rather than what you did would land in the same place, and mull would serve
+it.
 
 ---
 
@@ -376,13 +383,20 @@ matter what else is configured. Set `MULL_DEVELOPER_ID_IDENTITY`, `MULL_TEAM_ID`
 
 | Permission | What it enables | Required? |
 |-----------|-------------|-----------|
-| **Input Monitoring** | Keystroke capture | Yes |
 | **Accessibility** | Window titles and focused-window text | Yes |
+| **Input Monitoring** | Keystroke capture | No — off by default |
 | **Calendar** | Today's schedule | Optional |
 | **Automation** | Browser URLs, Mail subjects | Optional, prompted on first use |
 
-Installed from the .dmg, mull asks for these itself during onboarding and links straight to the
-right System Settings pane. Clipboard monitoring needs no permission at all.
+Installed from the .dmg, mull asks for Accessibility during onboarding and links straight to
+the right System Settings pane. Clipboard monitoring needs no permission at all.
+
+Input Monitoring is not part of setting mull up. Keystroke capture is off until you turn it on
+under Settings → Data → Optional sources, and macOS asks you at that point rather than during
+onboarding. Measured over 75 days it was 3.0% of the text mull captured against 80.6% for the
+Accessibility-driven window reader, and four fifths of it was editor text already visible
+through that reader — so it is not the permission the product stands on, and it no longer
+behaves like one.
 
 > **Running from Xcode:** add Xcode to Input Monitoring, not mull. mull runs as a child
 > process of Xcode.
@@ -517,10 +531,13 @@ holding that day's record — and gives up being a place to edit the vault. Your
 markdown in a folder; Finder, Obsidian and VS Code are already better at editing it than mull
 will ever be. The files do not change, only the editor over them goes.
 
-**The Files tab is still in the shipped app.** The ruling is a decision, not a completion
-report, and it is sequenced behind two repairs so the deletion is not made while the thing it
-replaces is broken. [DIRECTION.md](DIRECTION.md) §6.2 is the source of truth for the reasoning,
-the order of work, and what would reverse it.
+The tab went on 2026-08-15, behind the two repairs it was sequenced after, so the deletion was
+not made while the thing it replaces was broken. `FullWindowView` is 979 lines rather than 2,823;
+`MarkdownTextEditor`, the 1,408-line editor built for it, had no call sites left and went too.
+One page survived: **About you**, which is `me.md` with `me.pinned.md` editable at its foot. That
+one is not a file browser — it is the only place you can correct mull's reading of you while
+looking at the reading. [DIRECTION.md](DIRECTION.md) §6.2 has the reasoning and what would
+reverse it.
 
 ---
 

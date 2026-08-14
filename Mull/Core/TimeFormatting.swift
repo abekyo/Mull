@@ -63,6 +63,16 @@ enum TimeFormat {
         return f.string(from: date)
     }
 
+    /// `2026-08-15`. The same reasoning as `machine` above, and the same locale: a
+    /// front-matter key is read by whatever opens the file next, not by a person
+    /// deciding whether the month comes first.
+    static func machineDay(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+
     /// A formatter carrying the *fields* wanted, leaving their order, separators and
     /// spelling to the reader's locale.
     private static func template(_ pattern: String) -> DateFormatter {

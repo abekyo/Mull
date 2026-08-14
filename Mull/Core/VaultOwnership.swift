@@ -26,7 +26,10 @@ enum VaultOwnership {
     /// `projects/*.md` (DeliberationEngine's briefings) and `corrections/*.md` are
     /// genuinely both: mull owns the blocks it stamped, and `Curator.merge` promotes
     /// any block a human edits to `.human` and never touches it again — so the file
-    /// is safe to type into, and the Files tab shows it with an editor and a Save.
+    /// is safe to type into, wherever it is opened. (It used to be opened in mull's
+    /// own Files tab; since 2026-08-15 that is Finder, Obsidian or an editor —
+    /// DIRECTION §6.2. The ownership answer is the same either way, which is the
+    /// point of it living here rather than in a view.)
     ///
     /// Distinct from `.user` because an *agent* may not write it wholesale: a raw
     /// `write_note` would flatten the provenance markers and take the user's edits
@@ -125,7 +128,8 @@ enum VaultOwnership {
         return String(path.dropFirst(root.count))
     }
 
-    /// Does mull assemble the whole of this file? The Files tab shows these read-only.
+    /// Does mull assemble the whole of this file? Typing into one is pointless — the
+    /// next pass rewrites it — which is what `AboutYouView` says in words over me.md.
     static func isMullWritten(path: String) -> Bool { of(path: path) == .mull }
 
     /// Must a wholesale write (an agent's `write_note`) be refused?

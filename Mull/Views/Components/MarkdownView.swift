@@ -31,9 +31,13 @@ struct MarkdownView: View {
     /// (`memory/x.md`) can be resolved against the folder it was written in.
     var sourcePath: String? = nil
     /// Called with a vault-relative path when the reader clicks a link that points
-    /// inside `~/mull`. Surfaces that can navigate (the Files tab) open the file;
-    /// where this is nil the file is revealed in Finder instead, because doing
-    /// nothing is what this whole change is about.
+    /// inside `~/mull`. Where this is nil the file is revealed in Finder instead,
+    /// because doing nothing is what this whole change is about.
+    ///
+    /// Every caller passes nil now: the Files tab was the one surface that could
+    /// open a vault file in place, and it went on 2026-08-15 (DIRECTION §6.2). The
+    /// parameter stays because the fallback is the interesting half — a link that
+    /// lands in Finder is a link that worked.
     var onOpenVaultFile: ((String) -> Void)? = nil
 
     /// Parsed once per instance rather than per `body` call. The whole point of the

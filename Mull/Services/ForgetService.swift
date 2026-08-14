@@ -287,12 +287,9 @@ enum ForgetService {
         return days
     }
 
-    /// Mirrors `LiveContextGenerator.snapshotDaily`'s layout.
-    static func snapshotPath(for day: Date) -> String {
-        let dir = DateFormatter(); dir.dateFormat = "yyyy/MM"
-        let file = DateFormatter(); file.dateFormat = "yyyy-MM-dd"
-        return "daily/\(dir.string(from: day))/\(file.string(from: day)).md"
-    }
+    /// Where the day's record lives. `VaultLayout` owns the formula; this stays as
+    /// the name the deletion planner has always called it by.
+    static func snapshotPath(for day: Date) -> String { VaultLayout.dailyPath(for: day) }
 
     /// Drop the index lines that link to memory files being deleted, leaving the
     /// rest of MEMORY.md byte-identical. Returns `false` when the pruned index
