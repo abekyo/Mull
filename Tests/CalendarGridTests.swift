@@ -6,6 +6,62 @@ import XCTest
 /// only ever be noticed by looking very carefully at the screen.
 final class CalendarGridTests: XCTestCase {
 
+    // MARK: - The month grid both the month view and the picker draw
+
+    /// Six rows, always. A grid that is five rows in February and six in March changes
+    /// height as you page — in the toolbar's Jump-to popover that moves the day you
+    /// were about to click out from under the pointer.
+    func testAMonthGridIsAlwaysSixWeeks() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.firstWeekday = 1
+        for month in 1...12 {
+            let first = cal.date(from: DateComponents(year: 2026, month: month, day: 1))!
+            XCTAssertEqual(CalendarGrid.monthGridDays(of: first, calendar: cal).count, 42,
+                           "month \(month) drew a grid of a different height")
+        }
+        // February 2027 begins on a Monday and has 28 days: the one month that fits in
+        // four rows, and the case a "just enough rows" grid gets wrong.
+        let feb = cal.date(from: DateComponents(year: 2027, month: 2, day: 1))!
+        XCTAssertEqual(CalendarGrid.monthGridDays(of: feb, calendar: cal).count, 42)
+    }
+
+    func testTheGridStartsOnTheSystemsFirstWeekday() {
+        var sunday = Calendar(identifier: .gregorian)
+        sunday.firstWeekday = 1
+        var monday = Calendar(identifier: .gregorian)
+        monday.firstWeekday = 2
+
+        // 1 August 2026 is a Saturday.
+        let august = sunday.date(from: DateComponents(year: 2026, month: 8, day: 1))!
+
+        XCTAssertEqual(sunday.component(.weekday, from: CalendarGrid.monthGridDays(of: august, calendar: sunday)[0]),
+                       1, "a Sunday-first calendar must open the grid on a Sunday")
+        XCTAssertEqual(monday.component(.weekday, from: CalendarGrid.monthGridDays(of: august, calendar: monday)[0]),
+                       2, "a Monday-first calendar must open the grid on a Monday")
+    }
+
+    func testAnyInstantInTheMonthGivesTheSameGrid() {
+        // The picker holds a whole date and the month view holds the first of the month.
+        // Both must land on the same 42 days, or the two grids disagree about a month.
+        let cal = Calendar(identifier: .gregorian)
+        let first = cal.date(from: DateComponents(year: 2026, month: 8, day: 1))!
+        let middle = cal.date(from: DateComponents(year: 2026, month: 8, day: 19, hour: 14, minute: 30))!
+
+        XCTAssertEqual(CalendarGrid.monthGridDays(of: first, calendar: cal),
+                       CalendarGrid.monthGridDays(of: middle, calendar: cal))
+    }
+
+    func testTheGridCoversEveryDayOfTheMonth() {
+        let cal = Calendar(identifier: .gregorian)
+        let first = cal.date(from: DateComponents(year: 2026, month: 8, day: 1))!
+        let days = CalendarGrid.monthGridDays(of: first, calendar: cal)
+        let inMonth = days.filter { cal.isDate($0, equalTo: first, toGranularity: .month) }
+
+        XCTAssertEqual(inMonth.count, 31, "August has 31 days and all of them must be reachable")
+        XCTAssertEqual(cal.component(.day, from: inMonth.first!), 1)
+        XCTAssertEqual(cal.component(.day, from: inMonth.last!), 31)
+    }
+
     private let hour: CGFloat = 60          // one hour = 60pt, so 1pt = 1 minute
     private let minSpan: CGFloat = 18
     private let gap: CGFloat = 1

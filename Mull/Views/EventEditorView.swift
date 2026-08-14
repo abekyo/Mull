@@ -361,11 +361,23 @@ struct EventEditor: View {
             .buttonStyle(.plain)
             .pointingHandCursor()
             .accessibilityLabel("Pick a date")
+            // The same grid the toolbar's Jump-to opens, for the same reason: two
+            // date popovers on one screen must not come from two design systems.
             .popover(isPresented: showingCalendar, arrowEdge: .bottom) {
-                DatePicker("", selection: value, displayedComponents: .date)
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .padding(DS.md)
+                MonthPicker(selection: value.wrappedValue) { day in
+                    // Keep the clock. This grid answers "which day"; the stepper field
+                    // beside it owns the time, and moving a 14:30 meeting to Thursday
+                    // must not silently make it midnight. A bound `DatePicker` limited
+                    // to `.date` preserved the time by construction — doing it by hand
+                    // is the price of drawing the grid ourselves.
+                    let cal = Calendar.current
+                    let clock = cal.dateComponents([.hour, .minute, .second], from: value.wrappedValue)
+                    value.wrappedValue = cal.date(bySettingHour: clock.hour ?? 0,
+                                                  minute: clock.minute ?? 0,
+                                                  second: clock.second ?? 0,
+                                                  of: day) ?? day
+                    showingCalendar.wrappedValue = false
+                }
             }
         }
     }

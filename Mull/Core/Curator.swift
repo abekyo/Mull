@@ -176,6 +176,22 @@ enum Curator {
         return f.string(from: date)
     }
 
+    /// The day a line in me.md was last observed, for the reader to judge it by.
+    ///
+    /// Unambiguous and short: `2026-06-10`, not `10/06/2026`, for the same reason
+    /// `timestamp` above is ISO — the primary audience is a model, and half the
+    /// world's readers would take the other one to mean October 6th.
+    ///
+    /// Built per call, like every other formatter here: `DateFormatter` is a
+    /// reference type with mutable state, and both writers of me.md are on
+    /// different queues.
+    static var observationDayFormatter: DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }
+
     /// The three contract files' headers, built to the one house style
     /// (MarkdownDoc): front matter for the housekeeping, a single H1, and one
     /// line of orientation only where a reader needs it to edit safely.

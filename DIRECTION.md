@@ -298,10 +298,75 @@ CLAUDE.md §7.3 は「日報自動生成がコモディティ化したため主�
 3. ✅ `CurrentState.recentActions` を修正。コピーは「コピーした」と書かれ、ラベルではなく
    文書の断片（切り詰めが必要な長さ）は落ち、アプリ名を繰り返すだけのタイトルも落ちます
 4. ✅ Files タブを撤去。`FullWindowView` は 2,823行から 979行に、未使用になった
-   `MarkdownTextEditor`（1,408行）も削除。`me.pinned.md` の編集だけは
-   `AboutYouView` として残しました。訂正の口はファイルブラウザではないからです
+   `MarkdownTextEditor`（1,408行）も削除。サイドバーは Home / Calendar / Live / Chat の4行です。
 
-**撤回基準**（契約3）:
+   `me.pinned.md` の編集のために `AboutYouView` を一度残しましたが、**同日中に取り下げました。**
+   Settings › General「Your answers」が既にそのファイルを持っていた（編集・リセット・
+   保留行の表示）ためで、固有機能は重複でした。残っていたのはエージェント向けに書かれた
+   me.md を、それについて書かれている本人に見せる画面です。1つのファイルに編集口を2つ置くのは、
+   この窓が繰り返してきた誤りでした
+
+5. ✅ **その過程で me.md の中身が実際に悪いことが分かり、直しました。** §7.1 の線がここでは
+   守られていませんでした。詳細は下の §6.3
+
+### 6.3 「Who I am」は観測を人格にしない（2026-08-15）
+
+**本節が正本です。** §7.1（観測できないことを主張しない）の、me.md における具体形です。
+
+§6.2 の作業中に画面を開いて分かりました。me.md は4行あり、そのうち3行が**1日の観測を
+恒常的な性質に昇格させたもの**で、しかも日付が落ちていました。証拠は同じ DB 行の中に
+最初からありました。`content` が「today」と言い、`description` が「regularly」と言い、
+me.md が描くのは `description` のほうです。
+
+| me.md の行 | 元の `content` | createdAt → updatedAt |
+|---|---|---|
+| Regularly uses LINE for messaging. | LINE was used extensively **today** (high activity on **10 June 2026**) | 06-10 → 06-10 |
+| Often does heavy video editing and coding in afternoons. | **Today** (10 June 2026) shows a pattern: … | 06-10 → 06-10 |
+| Prefers Claude for AI assistance; used frequently (updated 11 Aug 2026) | Used Claude repeatedly today for coding help | 06-10 → **08-11** |
+| 通知が多すぎて操作の邪魔になると感じた（2026-08-09） | 日中に通知が頻繁に発生して作業の邪魔になった | 08-09 → 08-09 |
+
+上2行は 66日間一度も再観測されないまま、「この人はこういう人だ」として全エージェントに
+配られ続けていました。
+
+**決定**: 判定は `createdAt == updatedAt`（一度書かれ、二度と確認されていない）です。
+言語解析もモデルも要りません。再観測された記憶は残り、一度きりの観測は30日で識別を失います。
+そして**残る行はすべて、最後に観測された日を持ちます**。読み手が判断できる形にするのが
+§7.1 の要求だからです（説明文が既に年を含むときは足しません。1行に日付が2つあるのは
+0個より悪い）。
+
+実装は `MemoryEntry.isIdentity` / `identityLine` で、me.md を書く2つの経路
+（`LiveContextGenerator.generateMe` と `MullEngine.generateLayerA`）が同じ規則を通ります。
+固定しているのは `Tests/IdentityLineTests.swift` で、フィクスチャは上の表の実データそのものです。
+
+実データでの結果: KEEP 2件（Claude / 通知）、DROP 2件（LINE / 午後の編集）。
+
+**生成側も直しました（同日）。** 上の規則は「確認されないものは人格にしない」だけで、
+モデルが最初に一般化を書くこと自体は止めていませんでした。原因はプロンプトにあり、
+**mull が明示的に「working patterns の記憶を作れ」と指示していました。** 1日しか見せていない
+モデルにパターンを書けと言えば、証拠のない一般化が返ってきます。「Often does heavy video
+editing…」はその指示の産物です。
+
+書き換えた点は2つです。
+
+1. **観測を書かせる。** 「あなたが見ているのは1日で、他の日は見えていない。
+   *usually / often / regularly / prefers / tends to* は、見せられていない日についての主張です」
+2. **繰り返しは Confirm させる。** 今日が既存の記憶と同じことを示したら、
+   新しい情報が無くても `update` を出す。これが**上の規則と対になっています**。
+   日数を数えるのは mull の仕事で、「今日は先週の火曜と同じことだ」と気付けるのはモデルだけです。
+   既存記憶の一覧には最終確認日を添えるようにしました（`seen once, on 2026-06-10` /
+   `first seen …, last confirmed …`）。それが無ければ「また」の意味が決まりません。
+
+固定は `Tests/ConsolidationPromptTests.swift`。旧文言（`working patterns`）が復活しないことも
+含めて見ています。
+
+**残っている限界**（プロンプトは保証ではありません）: モデルが Confirm を一度も出さなければ、
+すべての記憶が単発観測のまま30日で識別を失い、me.md の mull 側は空になります。これは
+故障ではなく、この設計での正しい振る舞いです。**何も確認されていないなら、mull は
+その人について何も主張しない。**空の me.md は、間違った me.md より §7.1 に忠実です。
+
+---
+
+**撤回基準**（契約3。§6.2 の決定について）:
 
 | | |
 |---|---|

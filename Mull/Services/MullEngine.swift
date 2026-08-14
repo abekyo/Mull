@@ -329,7 +329,11 @@ final class MullEngine {
         return parseConsolidationResponse(response)
     }
 
-    private func buildConsolidationPrompt(data: GatheredData, memories: [MemoryEntry]) -> String {
+    /// Internal, not private, so `ConsolidationPromptTests` can read it. The two
+    /// rules that keep me.md honest — write the observation, and confirm a repeat
+    /// rather than generalising from one day — live in this string and nowhere else,
+    /// which makes it the only place they can be checked.
+    func buildConsolidationPrompt(data: GatheredData, memories: [MemoryEntry]) -> String {
         let dateStr = DateFormatter.localizedString(from: Date(), dateStyle: .long, timeStyle: .none)
 
         // The same fidelity machinery the understudy's daily report uses. Without it
@@ -345,8 +349,15 @@ final class MullEngine {
         if memories.isEmpty {
             existingMemoriesBlock = "(No existing memories yet.)"
         } else {
+            // Last seen, and whether anything has ever confirmed it. The model is
+            // being asked to recognise a repeat, and it cannot do that without
+            // knowing what "again" would mean — see the Confirm rule in Phase 3.
+            let day = Curator.observationDayFormatter
             existingMemoriesBlock = memories.map { mem in
-                "- [\(mem.memoryType.rawValue)] **\(mem.name)**: \(mem.description)\n  Content: \(String(mem.content.prefix(200)))"
+                let seen = mem.isSingleObservation
+                    ? "seen once, on \(day.string(from: mem.updatedAt))"
+                    : "first seen \(day.string(from: mem.createdAt)), last confirmed \(day.string(from: mem.updatedAt))"
+                return "- [\(mem.memoryType.rawValue)] **\(mem.name)** (\(seen)): \(mem.description)\n  Content: \(String(mem.content.prefix(200)))"
             }.joined(separator: "\n")
         }
 
@@ -413,14 +424,28 @@ final class MullEngine {
         ### Memory Updates
         Based on today's activity and existing memories, identify updates:
 
-        - **Create** new memories for: user preferences, project context, working patterns,
-          or references discovered today that aren't already captured
-        - **Update** existing memories that have new information (e.g., project status changed)
+        - **Create** new memories for: something the user did or decided today, project
+          context, or a reference they turned up — that isn't already captured
+        - **Confirm** — output an `update` for an existing memory whenever today shows the
+          same thing again, even with nothing new to add, keeping the description as it is.
+          This is the important one. **You are seeing ONE day.** mull decides what is
+          durable by counting how many separate days confirmed it, so a habit you never
+          confirm expires, and one you confirm stands. Recognising a repeat is a thing only
+          you can do here; counting is mull's job, not yours.
+        - **Update** an existing memory that has new information (e.g., project status changed)
         - **Delete** memories that today's activity contradicts or proves outdated
           (e.g., a memory says "uses CGEvent tap" but today switched to Accessibility API)
 
         **Rules for memory updates:**
-        - Convert relative dates to absolute: "today" → "\(dateStr)", "yesterday" → specific date
+        - **Write what you observed, not what the person is.** You are looking at one day
+          and cannot see the others, so you cannot know what is typical. "Used LINE heavily
+          on \(dateStr)" — not "Regularly uses LINE for messaging." Words like *usually*,
+          *often*, *regularly*, *prefers*, *tends to* are claims about days you have not
+          been shown. If today looks like a pattern, that is a `Confirm` on an existing
+          memory, not an adverb in a new one.
+        - Convert relative dates to absolute: "today" → "\(dateStr)", "yesterday" → specific
+          date. In the description as well as the content — the description is the line that
+          gets read, and one that says "recently" is unreadable a month later
         - Keep each memory description under 150 characters
         - Memory types: "user" (who they are), "feedback" (how they work), "project" (what they're doing), "reference" (where to find things)
         - Do NOT create memories for information derivable from code or git history
@@ -845,16 +870,21 @@ final class MullEngine {
     private func generateLayerA(memories: [MemoryEntry], timestamp: String) throws {
         var agentBlocks: [ContextBlock] = []
 
-        for mem in memories where mem.memoryType == .user {
+        // Only what may stand as identity, and every line says when it was last
+        // seen — see `MemoryEntry.isIdentity`. Both writers of me.md apply this;
+        // the rule lives on the model so they cannot answer differently.
+        let day = Curator.observationDayFormatter
+
+        for mem in memories where mem.memoryType == .user && mem.isIdentity() {
             agentBlocks.append(ContextBlock(
                 id: Curator.memoryBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: "- \(mem.description)", agentHash: nil))
+                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
         }
 
-        for mem in memories.filter({ $0.memoryType == .feedback }).prefix(5) {
+        for mem in memories.filter({ $0.memoryType == .feedback && $0.isIdentity() }).prefix(5) {
             agentBlocks.append(ContextBlock(
                 id: Curator.feedbackBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: "- \(mem.description)", agentHash: nil))
+                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
         }
 
         // The header is a whole-file property and both passes write it, so it comes

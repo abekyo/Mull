@@ -891,6 +891,17 @@
         }
       }
     },
+    "Bars are drawn against a full working day of 8 hours": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "棒の高さは、1日8時間を基準に描かれています"
+          }
+        }
+      }
+    },
     "Base URL": {
       "extractionState": "manual",
       "localizations": {

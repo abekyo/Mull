@@ -142,6 +142,59 @@ struct MemoryEntry: Codable, FetchableRecord, PersistableRecord, Identifiable {
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
     }
+
+    // MARK: - What may be asserted as identity
+    //
+    // me.md is headed "Who I am" and is described as the timeless layer, safe to
+    // include in every prompt. On 2026-08-15 it held four lines, and three of them
+    // were one day's observation promoted to a standing trait, with the day removed:
+    //
+    //   "Regularly uses LINE for messaging."
+    //     ← "LINE was used extensively TODAY (high activity on 10 June 2026)"
+    //   "Often does heavy video editing and coding in afternoons."
+    //     ← "TODAY (10 June 2026) shows a pattern: concentrated video editing…"
+    //
+    // Both rows were written on 10 June and never touched again — 66 days of not
+    // happening, still being handed to every agent as who this person is. The
+    // evidence was in the row the whole time: `content` says "today", `description`
+    // says "regularly", and me.md renders `description`.
+    //
+    // The rule below needs no language analysis and no model. `createdAt ==
+    // updatedAt` means the nightly pass wrote this once and never confirmed it (the
+    // "update" action bumps `updatedAt` — see `MullEngine.applyMemoryAction`). A
+    // behaviour seen on one day and not since is an observation, and CLAUDE.md §7.1
+    // is exactly about not printing one of those as a claim.
+
+    /// Seen once, and never seen again since.
+    var isSingleObservation: Bool {
+        Calendar.current.isDate(createdAt, inSameDayAs: updatedAt)
+    }
+
+    /// How long a once-seen behaviour may stand as identity before it has to be
+    /// confirmed. A month of not recurring is the answer to "is this who they are".
+    static let unconfirmedLifetime: TimeInterval = 30 * 24 * 60 * 60
+
+    /// May this line be printed under "Who I am"?
+    ///
+    /// Re-observed memories always may — that is what re-observation is. A
+    /// single-day one may for a month, because the day it was seen is recent enough
+    /// that "this is what they do" is still a fair reading of it.
+    func isIdentity(asOf now: Date = Date()) -> Bool {
+        guard isSingleObservation else { return true }
+        return now.timeIntervalSince(updatedAt) < Self.unconfirmedLifetime
+    }
+
+    /// The line as it goes into me.md: the claim, and the day it was last seen.
+    ///
+    /// The date is appended only when the description does not already carry a year.
+    /// The nightly model writes one about half the time ("(updated 11 Aug 2026)",
+    /// "（2026-08-09）"), and two dates on one line is worse than none.
+    func identityLine(dateFormatter: DateFormatter) -> String {
+        guard description.range(of: #"20\d\d"#, options: .regularExpression) == nil else {
+            return "- \(description)"
+        }
+        return "- \(description) (\(dateFormatter.string(from: updatedAt)))"
+    }
 }
 
 // MARK: - Knowledge Entries

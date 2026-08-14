@@ -166,8 +166,14 @@ enum LiveContextGenerator {
     private static func generateMe(memories: [MemoryEntry], analytics: AnalyticsEngine, database: DatabaseService, timestamp: String) throws {
         var agentBlocks: [ContextBlock] = []
 
+        // Only what may stand as identity, and every line says when it was last
+        // seen — see `MemoryEntry.isIdentity`. The nightly pass in `MullEngine`
+        // applies the same rule; the rule lives on the model so the two writers of
+        // this file cannot answer differently.
+        let day = Curator.observationDayFormatter
+
         // From mull memories (if they exist from past LLM runs)
-        for mem in memories where mem.memoryType == .user {
+        for mem in memories where mem.memoryType == .user && mem.isIdentity() {
             // Skip stale/invalid project references. Same shape gate as everywhere
             // else — this was a fourth, shorter, differently-worded blocklist.
             if mem.description.hasPrefix("Working on:") {
@@ -177,7 +183,7 @@ enum LiveContextGenerator {
             }
             agentBlocks.append(ContextBlock(
                 id: Curator.memoryBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: "- \(mem.description)", agentHash: nil))
+                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
         }
 
         // NOTE: rule-based FactExtractor facts (language %, role, busiest day,
@@ -188,10 +194,10 @@ enum LiveContextGenerator {
         // `search` MCP tools, not pre-digested by rule-based engines here.
 
         // Preferences from feedback memories
-        for mem in memories.filter({ $0.memoryType == .feedback }).prefix(3) {
+        for mem in memories.filter({ $0.memoryType == .feedback && $0.isIdentity() }).prefix(3) {
             agentBlocks.append(ContextBlock(
                 id: Curator.feedbackBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: "- \(mem.description)", agentHash: nil))
+                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
         }
 
         // me.md was the one contract file with no title at all: it opened with three

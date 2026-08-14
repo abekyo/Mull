@@ -320,27 +320,21 @@ extension CalendarWeekView {
         .accessibilityHint("Opens a date picker. Left and right arrows step by one period.")
         .pointingHandCursor()
         .popover(isPresented: $showingDatePicker, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: DS.sm) {
-                Text("Jump to")
-                    .font(DS.captionMedium)
-                    .foregroundStyle(DS.inkDim)
-                // Unbounded in both directions. It used to stop at today, on the
-                // grounds that nothing is recorded past this moment — but the
-                // calendar half of the grid knows perfectly well what is coming.
-                DatePicker("", selection: $pickerDate, displayedComponents: .date)
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
-                    .accessibilityLabel("Jump to date")
-                    .onChange(of: pickerDate) { _, date in
-                        // The picker opens seeded with the date already on screen,
-                        // and that seeding is itself a change — without this guard
-                        // it closes the popover on the same pass that opened it.
-                        guard !Calendar.current.isDate(date, inSameDayAs: anchorDate) else { return }
-                        jump(to: date)
-                        showingDatePicker = false
-                    }
+            // `MonthPicker`, not `DatePicker(.graphical)`. The stock control drew
+            // itself in the system accent and its own type, so opening the calendar's
+            // own navigation put a panel from a different design system in the middle
+            // of it. See the note on `MonthPicker`; the grid it draws is the one the
+            // month and year views already draw.
+            //
+            // The seeding guard the old version needed is gone with it: `onPick` fires
+            // on a click and on nothing else, where a bound `DatePicker` counted its
+            // own initial value as a change and closed the popover on open.
+            MonthPicker(selection: pickerDate) { date in
+                pickerDate = date
+                jump(to: date)
+                showingDatePicker = false
             }
-            .padding(DS.md)
+            .accessibilityLabel("Jump to date")
         }
     }
 
@@ -496,26 +490,25 @@ extension CalendarWeekView {
         return f.string(from: date)
     }
 
-    /// The actual span of the displayed week, not merely its month — the old label
-    /// said "September 2025" for all five of September's weeks. Parts the two ends
-    /// share are said once: "15 – 21 September 2025", "29 September – 5 October 2025".
+    /// The month the displayed week sits in. It used to spell the span out —
+    /// "10 – 16 August 2026" — and the dates in it were saying again what the seven
+    /// day headers underneath already say, one number per column. The month is the
+    /// only part of that label the grid doesn't carry, so the month is what is left.
     ///
-    /// The three patterns are templates, not literal formats: `d MMMM yyyy` is fixed
-    /// British order and read wrongly on a Japanese machine, whereas the template is
-    /// rearranged by the locale into 2025年9月21日.
+    /// `MMMM` is a template, not a literal format: the locale spells and orders it,
+    /// so a Japanese machine reads 8月 rather than August.
+    ///
+    /// A week that straddles two months names both, because neither one alone is
+    /// true of what is on screen.
     var weekRangeLabel: String {
         let (start, end) = weekRange
         let cal = Calendar.current
-        let day = Self.templateFormatter("d")
-        let dayMonth = Self.templateFormatter("dMMMM")
-        let full = Self.templateFormatter("dMMMMy")
+        let month = Self.templateFormatter("MMMM")
 
-        let sameYear = cal.component(.year, from: start) == cal.component(.year, from: end)
-        let sameMonth = sameYear && cal.component(.month, from: start) == cal.component(.month, from: end)
-
-        if sameMonth { return "\(day.string(from: start)) – \(full.string(from: end))" }
-        if sameYear { return "\(dayMonth.string(from: start)) – \(full.string(from: end))" }
-        return "\(full.string(from: start)) – \(full.string(from: end))"
+        if cal.isDate(start, equalTo: end, toGranularity: .month) {
+            return month.string(from: start)
+        }
+        return "\(month.string(from: start)) – \(month.string(from: end))"
     }
 
     /// A formatter carrying the *fields* a label needs, leaving their order, their

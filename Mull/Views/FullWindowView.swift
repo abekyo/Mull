@@ -3,13 +3,12 @@ import UniformTypeIdentifiers
 
 /// The mull window.
 ///
-/// Left sidebar: the five things a person opens. Right main area: the one selected.
+/// Left sidebar: the four things a person opens. Right main area: the one selected.
 ///
 ///   Home      your portrait and today's draft
 ///   Calendar  what you planned beside what you did
 ///   Live      the record arriving, as it arrives
 ///   Chat      ask the record something
-///   About you what mull works out about you, and where you correct it
 ///
 /// **This used to be a vault browser too**, and about two thirds of this file was
 /// that: a file tree over `~/mull`, a markdown editor, import, rename, trash, new
@@ -19,9 +18,14 @@ import UniformTypeIdentifiers
 /// `memory/` names two of them. What mull owes the reader is the record, not an
 /// editor for it.
 ///
-/// `About you` is the exception, and the reason it is a row here rather than a file:
-/// `me.pinned.md` is how a person corrects mull's reading of them, and it only makes
-/// sense next to the reading it corrects. See `AboutYouView`.
+/// An `About you` page survived the first cut, on the reasoning that `me.pinned.md`
+/// is how a person corrects mull's reading of them and only makes sense beside the
+/// reading it corrects. It lasted a few hours. Settings › General › "Your answers"
+/// already owned that file — an editor, a reset, and the lines mull is declining to
+/// publish — so the page's one irreplaceable job had a home, and what was left was
+/// me.md rendered read-only: a file written for an agent, shown to the person it is
+/// about, on a screen in a calendar app. Two ways to edit one file is the mistake
+/// this window kept making; this is the last of them.
 struct FullWindowView: View {
     @EnvironmentObject var appState: AppState
 
@@ -30,7 +34,6 @@ struct FullWindowView: View {
         case calendar
         case live
         case chat
-        case aboutYou
 
         /// A stable string to remember this item by between launches.
         var storageKey: String {
@@ -39,7 +42,6 @@ struct FullWindowView: View {
             case .calendar: return "calendar"
             case .live: return "live"
             case .chat: return "chat"
-            case .aboutYou: return "aboutYou"
             }
         }
     }
@@ -188,7 +190,6 @@ struct FullWindowView: View {
         case SidebarItem.calendar.storageKey: selection = .calendar
         case SidebarItem.live.storageKey: selection = .live
         case SidebarItem.chat.storageKey: selection = .chat
-        case SidebarItem.aboutYou.storageKey: selection = .aboutYou
         default: selection = .home
         }
     }
@@ -343,7 +344,6 @@ struct FullWindowView: View {
                 Label("Calendar", systemImage: DS.Glyph.calendar).tag(SidebarItem.calendar)
                 Label("Live", systemImage: DS.Glyph.live).tag(SidebarItem.live)
                 Label("Chat", systemImage: DS.Glyph.chat).tag(SidebarItem.chat)
-                Label("About you", systemImage: DS.Glyph.file).tag(SidebarItem.aboutYou)
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
@@ -550,10 +550,6 @@ struct FullWindowView: View {
 
         case .chat:
             ChatPanelView(chat: appState.chat)
-                .environmentObject(appState)
-
-        case .aboutYou:
-            AboutYouView()
                 .environmentObject(appState)
 
         case nil:

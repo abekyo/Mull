@@ -534,10 +534,14 @@ will ever be. The files do not change, only the editor over them goes.
 The tab went on 2026-08-15, behind the two repairs it was sequenced after, so the deletion was
 not made while the thing it replaces was broken. `FullWindowView` is 979 lines rather than 2,823;
 `MarkdownTextEditor`, the 1,408-line editor built for it, had no call sites left and went too.
-One page survived: **About you**, which is `me.md` with `me.pinned.md` editable at its foot. That
-one is not a file browser — it is the only place you can correct mull's reading of you while
-looking at the reading. [DIRECTION.md](DIRECTION.md) §6.2 has the reasoning and what would
-reverse it.
+An **About you** page survived the first cut — `me.md` with `me.pinned.md` editable at its foot —
+on the reasoning that correcting mull's reading of you only makes sense beside the reading. It
+lasted a few hours. Settings › General › "Your answers" already owned that file, so the page's
+one irreplaceable job had a home, and what was left was a file written for an agent, shown to the
+person it is about, on a screen in an app about your day.
+
+The sidebar is Home, Calendar, Live, Chat. [DIRECTION.md](DIRECTION.md) §6.2 has the reasoning
+and what would reverse it.
 
 ---
 

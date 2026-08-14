@@ -128,8 +128,9 @@ enum VaultOwnership {
         return String(path.dropFirst(root.count))
     }
 
-    /// Does mull assemble the whole of this file? Typing into one is pointless — the
-    /// next pass rewrites it — which is what `AboutYouView` says in words over me.md.
+    /// Does mull assemble the whole of this file? Typing into one is pointless: the
+    /// next pass rewrites it. For me.md the way in is `me.pinned.md`, which Settings
+    /// › General › "Your answers" edits and mull never overwrites (CLAUDE.md §7.4).
     static func isMullWritten(path: String) -> Bool { of(path: path) == .mull }
 
     /// Must a wholesale write (an agent's `write_note`) be refused?

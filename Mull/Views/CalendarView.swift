@@ -655,16 +655,9 @@ extension CalendarWeekView {
         CalendarWeekView.templateFormatter("MMMMy").string(from: displayedMonth)
     }
 
-    /// 42 days (6 weeks) covering the month, starting on the first weekday of the
-    /// week the 1st falls in — whichever day the system says that is.
-    var monthGridDays: [Date] {
-        let cal = Calendar.current
-        let firstOfMonth = displayedMonth
-        let weekday = cal.component(.weekday, from: firstOfMonth)
-        let lead = (weekday - cal.firstWeekday + 7) % 7
-        guard let start = cal.date(byAdding: .day, value: -lead, to: firstOfMonth) else { return [] }
-        return (0..<42).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
-    }
+    /// The 42 days this grid draws. Shared with `MonthPicker` — see
+    /// `CalendarGrid.monthGridDays`.
+    var monthGridDays: [Date] { CalendarGrid.monthGridDays(of: displayedMonth) }
 
     /// Up to 42 day analyses plus one EventKit fetch — the heaviest load in the
     /// calendar. Detached for the same reason as the week.

@@ -373,4 +373,25 @@ enum CalendarGrid {
         guard symbols.count == 7 else { return symbols }
         return (0..<7).map { symbols[(firstWeekday - 1 + $0) % 7] }
     }
+
+    /// The 42 days a month grid draws: six weeks, starting on the first weekday of the
+    /// week the 1st falls in, whichever day the system says that is.
+    ///
+    /// Six rows always, never five — a grid whose height depends on where the 1st lands
+    /// changes size as you page through the year, and in a popover that moves the day
+    /// you were about to click out from under the pointer.
+    ///
+    /// One copy, read by the month view and by `MonthPicker`. They had a line-for-line
+    /// identical version each, which is two places for the first-weekday arithmetic to
+    /// be got right in and one place for it to be got wrong.
+    ///
+    /// - Parameter firstOfMonth: any instant in the month; only its year and month are read.
+    static func monthGridDays(of firstOfMonth: Date, calendar: Calendar = .current) -> [Date] {
+        guard let first = calendar.date(from: calendar.dateComponents([.year, .month], from: firstOfMonth))
+        else { return [] }
+        let weekday = calendar.component(.weekday, from: first)
+        let lead = (weekday - calendar.firstWeekday + 7) % 7
+        guard let start = calendar.date(byAdding: .day, value: -lead, to: first) else { return [] }
+        return (0..<42).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+    }
 }
