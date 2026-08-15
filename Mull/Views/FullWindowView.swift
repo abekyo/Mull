@@ -241,7 +241,7 @@ struct FullWindowView: View {
                 RoundedRectangle(cornerRadius: DS.radiusMd)
                     .strokeBorder(notice.isProblem ? DS.error.opacity(0.35) : DS.hairline, lineWidth: 0.75)
             )
-            .shadow(color: DS.ink.opacity(0.12), radius: 14, y: 5)
+            .shadow(color: DS.shadow, radius: 14, y: 5)
             .padding(DS.xl)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Dossier aliases & serif (Cucinelli, in daylight)
+// MARK: - Dossier aliases & serif (Cucinelli)
 //
 // This block used to be a second palette: it re-declared the ivory page, the
 // espresso ink, the tobacco accent and the hairline as fresh literals, several of
@@ -8,24 +8,42 @@ import SwiftUI
 // truth for the same colour, and the accent in particular would have drifted the
 // first time anyone tuned one of them.
 //
-// The app-wide palette moved to daylight, so the duplicates are now plain aliases
-// onto the canonical DS tokens, and the shades that are just an opacity of a
-// canonical colour are expressed that way. Only the genuinely new things — the
-// raised paper, the luxurious rhythm, the serif — are declared here.
+// The duplicates are now plain aliases onto the canonical DS tokens, and the
+// shades that are just an opacity of a canonical colour are expressed that way.
+// Only the genuinely new things — the pressed paper, the luxurious rhythm, the
+// serif — are declared here.
+//
+// Aliasing is also what got the dossier dark mode for free: the tokens it points
+// at each carry a daylight and a lamplight value, so this screen followed the
+// system flip without a line changing. `paperBgRaised` is the single exception,
+// and it is the single literal that was left.
 extension DS {
 
-    // Warm ivory page — the cream of fine paper / undyed cashmere.
+    // The warm page — ivory by day, espresso by lamp.
     static let paperBg = canvas                                              // = DS.canvas
-    /// The one shade with no DS equivalent: a *darker* paper, where `surface` is lighter.
-    static let paperBgRaised = Color(red: 0.925, green: 0.902, blue: 0.847)  // #ECE6D8
+    /// The one shade with no DS equivalent: a well pressed *into* the page, where
+    /// `surface` is a card lifted off it. Darker than the page in daylight, and
+    /// darker again in lamplight — a recess is a recess in both rooms, so this is
+    /// the one token whose two values move the same direction rather than
+    /// mirroring. Both sit 2.4 L\* below their own canvas.
+    static let paperBgRaised = adaptive(
+        light: (0.925, 0.902, 0.847, 1),   // #ECE6D8
+        dark:  (0.074, 0.063, 0.049, 1)    // #13100D
+    )
 
-    // Espresso ink — warm, never harsh black.
+    // The ink — warm, never harsh black, and never harsh white either.
     static let umberInk   = ink                                              // = DS.ink
     // Held one notch under the canonical text tiers, but no longer under the
     // contrast floor: these were 0.60 (3.53:1) and 0.34 (1.92:1) on the ivory page,
     // which is a watermark, not body copy. See the budget on `DS.inkDim`.
-    static let umberDim   = ink.opacity(0.76)   // 5.47:1 on canvas — a hair under DS.inkDim (0.78)
-    static let umberFaint = ink.opacity(0.70)   // 4.61:1 on canvas — = DS.inkFaint
+    //
+    // These were `ink.opacity(0.76)` and `ink.opacity(0.70)`, which was right
+    // while the ink was one colour and wrong the moment it became two: the same
+    // alpha buys 5.47:1 on ivory and 6.78:1 on espresso, and `umberFaint`'s
+    // claim to equal `DS.inkFaint` broke outright in lamplight (5.94 vs 4.61).
+    // `inkTier` takes the two alphas that hit the *same* ratio in both rooms.
+    static let umberDim   = inkTier(light: 0.76, dark: 0.66)   // 5.47:1 — a hair under DS.inkDim
+    static let umberFaint = inkFaint                           // = DS.inkFaint, in both rooms
 
     // Tobacco / camel — the single accent. A thread, never a fill.
     static let tobacco    = moon                                             // = DS.moon

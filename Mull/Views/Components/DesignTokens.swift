@@ -238,21 +238,109 @@ enum DS {
     static let radiusMd: CGFloat = 12
     static let radiusLg: CGFloat = 16
 
-    // MARK: - Daylight — espresso ink on ivory (Cucinelli)
+    // MARK: - Two pages, one palette — daylight and lamplight (Cucinelli)
     //
-    // The app lives on a warm ivory page: Umbrian daylight, undyed cashmere, the
-    // cream of a fine book. Espresso ink, one tobacco accent, hairlines like a
-    // faint pencil rule. Type-led, lots of air. (Replaces the cool Nocturne;
-    // these are the same token names so every call site flips in one place.)
+    // The app lives on a warm page: Umbrian daylight by day, the same room by
+    // lamp at night. Espresso ink on ivory, or ivory ink on espresso — one
+    // tobacco accent either way, hairlines like a faint pencil rule. Type-led,
+    // lots of air. (The dark side is NOT the old cool "Nocturne": DESIGN.md rules
+    // out cold colour outright, so lamplight is the *warm* inversion — the page
+    // goes to espresso, and the ivory that was the page becomes the ink.)
+    //
+    // **Every token below keeps its name.** Dark mode is a change to what the
+    // tokens resolve to, not to what the app asks for, so no call site moved.
 
-    /// The ivory page — everything sits on this. Warm cream.
-    static let canvas = Color(red: 0.949, green: 0.929, blue: 0.882)   // #F2EDE1
-    /// A surface lifted off the page (cards, sidebar wells) — barely lighter.
-    static let surface = Color(red: 0.969, green: 0.953, blue: 0.918)  // #F7F3EA
+    // MARK: The adaptive primitive
+    //
+    // The tokens are `static let`s that views read directly, so they cannot be
+    // computed from `@Environment(\.colorScheme)` without touching all 27 files
+    // that draw with them. A dynamic `NSColor` resolves per-appearance at draw
+    // time instead, which keeps every token a plain stored constant — and works
+    // in AppKit too, which matters because `AppDelegate` paints three windows'
+    // `backgroundColor` from `canvasNS`.
+    //
+    // `NSColor(someDynamicColor)` does survive the round trip with its provider
+    // intact — that was assumed to freeze, and the test written to pin the
+    // freeze failed (`testNSColorRoundTripStaysDynamic`). The `…NS` tokens exist
+    // anyway, because an AppKit call site asking for an AppKit colour should not
+    // have to go out through SwiftUI and back to get one.
+
+    private static func adaptiveNS(
+        light: (r: Double, g: Double, b: Double, a: Double),
+        dark: (r: Double, g: Double, b: Double, a: Double)
+    ) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let c = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
+        }
+    }
+
+    /// Internal rather than private so the dossier's `paperBgRaised` — the one
+    /// token declared outside this file — can be built the same way. It is for
+    /// *declaring tokens*, not for mixing colours at a call site: a view that
+    /// needs a colour should ask for a token, not invent one.
+    static func adaptive(
+        light: (r: Double, g: Double, b: Double, a: Double),
+        dark: (r: Double, g: Double, b: Double, a: Double)
+    ) -> Color {
+        Color(nsColor: adaptiveNS(light: light, dark: dark))
+    }
+
+    /// The ink itself, before any tier picks an opacity off it. Private so there
+    /// is exactly one pair of literals for it in the app: the text tiers, the
+    /// hairline and the dossier's `umberDim` are all opacities of *this*, and
+    /// when they were written out longhand the dossier's copy had already
+    /// drifted into claiming a daylight-only ratio.
+    private static let inkLight = (r: 0.224, g: 0.192, b: 0.149)   // #393127 espresso
+    private static let inkDark  = (r: 0.810, g: 0.793, b: 0.753)   // #CFCAC0 warm ivory
+
+    /// A tier of the ink. The two alphas are independent because the same alpha
+    /// does not buy the same contrast against opposite pages — see the ladder on
+    /// `ink`, where every lamplight alpha was solved backwards from its daylight
+    /// ratio rather than copied across.
+    static func inkTier(light: Double, dark: Double) -> Color {
+        adaptive(light: (inkLight.r, inkLight.g, inkLight.b, light),
+                 dark:  (inkDark.r, inkDark.g, inkDark.b, dark))
+    }
+
+    /// The page — everything sits on this. Warm ivory by day, espresso by lamp.
+    static let canvasNS = adaptiveNS(
+        light: (0.949, 0.929, 0.882, 1),   // #F2EDE1
+        dark:  (0.106, 0.090, 0.071, 1)    // #1B1712
+    )
+    static let canvas = Color(nsColor: canvasNS)
+    /// A surface lifted off the page (cards, sidebar wells) — barely lifted.
+    /// Lighter than the page in daylight, lighter than it in lamplight too: a
+    /// card is *raised*, and raised reads as nearer the light in both rooms.
+    static let surface = adaptive(
+        light: (0.969, 0.953, 0.918, 1),   // #F7F3EA
+        dark:  (0.145, 0.125, 0.098, 1)    // #252019
+    )
+    /// A cast shadow.
+    ///
+    /// **Never write a shadow as `ink.opacity()`.** That is what the notice bar
+    /// did, and it was correct for exactly as long as the ink was espresso: the
+    /// moment the ink inverted to ivory, the drop shadow under a floating panel
+    /// became an ivory halo around it.
+    ///
+    /// A shadow is the absence of light, so both values are the same near-black
+    /// — this is the one token that does *not* mirror. The lamplight value is
+    /// carried much further because a soft dark shadow on a dark page has almost
+    /// no room to be seen: 0.12 over espresso is invisible, 0.50 reads.
+    static let shadow = adaptive(
+        light: (0.224, 0.192, 0.149, 0.12),
+        dark:  (0.031, 0.024, 0.016, 0.50)
+    )
+
     /// A surface on hover / selection.
-    static let surfaceHi = Color(red: 0.988, green: 0.976, blue: 0.949) // #FCF9F2
-    /// Hairline rule — warm umber at low opacity. The structural signature.
-    static let hairline = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.12)
+    static let surfaceHi = adaptive(
+        light: (0.988, 0.976, 0.949, 1),   // #FCF9F2
+        dark:  (0.192, 0.169, 0.133, 1)    // #312B22
+    )
+    /// Hairline rule — the ink at low opacity. The structural signature.
+    /// Both sides land at 1.23:1 against their own page, so the rule is exactly
+    /// as present in one room as the other.
+    static let hairline = inkTier(light: 0.12, dark: 0.10)
 
     /// Tobacco — the single accent. A thread, never a fill.
     ///
@@ -260,18 +348,41 @@ enum DS {
     /// "Nocturne" palette. It is kept only so every call site did not have to
     /// change when the app moved to daylight. Read `moon` as "the accent" —
     /// warm lamplight on paper, never a cool night blue.
-    static let moon = Color(red: 0.580, green: 0.447, blue: 0.196)     // #945F32
-    static let moonDim = Color(red: 0.46, green: 0.36, blue: 0.18)
+    ///
+    /// The lamplight value is the same tobacco lifted to L\*55 (4.74:1 rather
+    /// than the 4.00:1 the daylight value scores on espresso). It is lifted
+    /// because this is the token `mullChrome()` hands to `.tint`, so it has to
+    /// carry native controls, and because `nowLine` is it.
+    static let moon = adaptive(
+        light: (0.580, 0.447, 0.196, 1),   // #947232
+        dark:  (0.626, 0.497, 0.253, 1)    // #A07F41
+    )
+    /// The accent's quieter partner (list bullets in `MarkdownView`). "Dim" means
+    /// *nearer the page* — so it is deeper than `moon` on ivory and darker than
+    /// `moon` on espresso. Non-text by use; 3.20:1 in lamplight.
+    static let moonDim = adaptive(
+        light: (0.46, 0.36, 0.18, 1),      // #755C2E
+        dark:  (0.490, 0.394, 0.221, 1)    // #7D6438
+    )
 
-    /// Text tiers (warm espresso, never pure black).
+    /// Text tiers (warm espresso on ivory, warm ivory on espresso — never pure
+    /// black, never pure white).
     ///
     /// The opacities are contrast budgets, not taste. Composited over `canvas`
-    /// (#F2EDE1) and measured against WCAG 2.1 AA (4.5:1 for text this size):
+    /// and measured against WCAG 2.1 AA (4.5:1 for text this size):
     ///
-    ///     ink       1.00  #393127  10.94:1  ✅
-    ///     inkDim    0.78  #625A4F   5.79:1  ✅
-    ///     inkFaint  0.70  #71695E   4.61:1  ✅
-    ///     inkGhost  0.22  #C9C4B8   1.49:1  ❌ — non-text only, by contract
+    ///                 daylight                    lamplight
+    ///     ink       1.00  #393127  10.94:1 ✅   1.00  #CFCAC0  10.94:1 ✅
+    ///     inkDim    0.78  #625A4F   5.79:1 ✅   0.69  #97928A   5.79:1 ✅
+    ///     inkFaint  0.70  #71695E   4.61:1 ✅   0.59  #858179   4.61:1 ✅
+    ///     inkGhost  0.22  #C9C4B8   1.49:1 ❌   0.17  #3A3630   1.49:1 ❌
+    ///
+    /// **The two columns are the same ladder.** The lamplight alphas were solved
+    /// backwards from the daylight ratios rather than picked, so the hierarchy a
+    /// reader learns in one appearance is the hierarchy they get in the other.
+    /// That is also why `ink` is #CFCAC0 and not the full ivory of the page:
+    /// ivory-on-espresso measures 15.25:1, which is more contrast than the app
+    /// has ever asked for and reads as halation at body size.
     ///
     /// `inkDim` was 0.62 (3.72:1) and `inkFaint` was 0.36 (1.99:1). Neither was an
     /// accent: `inkFaint` is what `sectionLabel()` paints every section header in
@@ -280,24 +391,47 @@ enum DS {
     /// legible lightnesses of one hue on ivory — so the hierarchy under `ink`
     /// leans on weight, case and tracking (as `sectionLabel()` already did) rather
     /// than on fading toward the page.
-    ///
-    /// The palette is daylight-only (`mullChrome()` pins `.preferredColorScheme(.light)`),
-    /// so these are single fixed values with no dark-mode counterpart to check.
-    static let ink = Color(red: 0.224, green: 0.192, blue: 0.149)            // #393127
-    static let inkDim = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.78)
-    static let inkFaint = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.70)
+    static let ink = inkTier(light: 1.00, dark: 1.00)
+    static let inkDim = inkTier(light: 0.78, dark: 0.69)
+    static let inkFaint = inkTier(light: 0.70, dark: 0.59)
     /// The fourth tier — the warm answer to `.quaternary`. Axis ticks, disabled
     /// glyphs, decoration that must be present without being read. **Never text**:
     /// at 1.49:1 it is below every readability threshold there is, which is the
     /// point — it is a rule or a tick, and it is exempt from AA because it carries
     /// no information a reader has to recover.
-    static let inkGhost = Color(red: 0.224, green: 0.192, blue: 0.149).opacity(0.22)
+    static let inkGhost = inkTier(light: 0.22, dark: 0.17)
 
     // MARK: - Earth palette (one harmonious family — warm, muted, low-sat)
     //
     // Cucinelli is not a rainbow. Every accent is a natural dye drawn from the
     // same earth as the tobacco anchor: ochre, olive, clay, plum, taupe.
     // Nothing competes with the ink or the page; the whole screen reads tonal.
+    //
+    // **These seven do not adapt, and that is measured rather than skipped.**
+    // Every one of them is a mid-tone — L\* 43.7 to 60.4, all of it between the
+    // two pages — so each dye is darker than ivory *and* lighter than espresso
+    // without moving. Against its own page in each appearance:
+    //
+    //             daylight   lamplight
+    //     camel      2.68        5.70
+    //     olive      4.16        3.66
+    //     clay       4.20        3.63
+    //     slate      3.66        4.17
+    //     plum       4.82        3.17
+    //     dustyRose  3.29        4.64
+    //     taupe      3.23        4.72
+    //
+    // The floor across both rooms is 2.68:1 (camel in daylight) — which is the
+    // value this palette already shipped, unchanged. Nothing here is text: these
+    // dye an app's tag, an event-type dot, a language bar. `langJapanese` (clay)
+    // is the closest to being read as text and it sits at 3.63:1 in lamplight,
+    // under AA — it is a 9pt legend beside a bar whose length carries the number,
+    // so the colour is a label for the bar and not the datum.
+    //
+    // Giving them dark counterparts was tried and rejected: matching each dye's
+    // *contrast* across the flip makes it darker than its daylight self on a
+    // near-black page (camel #B88A3D → #7A6034), which goes to mud. Contrast
+    // parity is the wrong invariant when the background changes polarity.
 
     static let camel     = Color(red: 0.72, green: 0.54, blue: 0.24)  // #B88A3D — lighter tobacco
     static let olive     = Color(red: 0.43, green: 0.46, blue: 0.29)  // #6E7549 — greyed green
@@ -337,11 +471,17 @@ enum DS {
     static let langCode = olive
 
     // MARK: - Gradients (tobacco)
+    //
+    // Both stops adapt. The deep stop is the reason: at #735726 it scores 2.64:1
+    // on espresso, so in lamplight the gradient's far end sank into the page and
+    // the ramp read as a fade-out rather than a shape.
 
     static let accentGradient = LinearGradient(
         colors: [
-            Color(red: 0.62, green: 0.49, blue: 0.24),   // Tobacco
-            Color(red: 0.45, green: 0.34, blue: 0.15)    // Deeper tobacco
+            adaptive(light: (0.62, 0.49, 0.24, 1),    // #9E7D3D — tobacco
+                     dark:  (0.667, 0.545, 0.302, 1)), // #AA8B4D
+            adaptive(light: (0.45, 0.34, 0.15, 1),    // #735726 — deeper tobacco
+                     dark:  (0.514, 0.408, 0.216, 1))  // #836837
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
@@ -398,7 +538,14 @@ enum DS {
 
     /// Muted-dye saturation range — a natural dye, not a crayon.
     private static let warmSaturation: ClosedRange<Double> = 0.16...0.34
-    /// Brightness range that stays readable on the ivory page.
+    /// Brightness range that stays readable on **either** page.
+    ///
+    /// Like the hand-picked dyes above, the band is a mid-tone one and does not
+    /// flip. Measured at all eight corners of the (hue × saturation × brightness)
+    /// box, the worst case is 2.49:1 in daylight and 2.37:1 in lamplight — the
+    /// two rooms are within 0.12 of each other, so widening the band for one of
+    /// them would cost the other more than it gained. These dye an unknown app's
+    /// tag or an imported calendar's tint; none of them is text.
     private static let warmBrightness: ClosedRange<Double> = 0.44...0.60
 
     /// Fold a position on the full colour wheel (0..<1) into the warm band.
@@ -513,16 +660,21 @@ extension View {
     /// root of each scene makes "the accent is tobacco" true by construction:
     /// there is no screen left that can forget.
     ///
-    /// `.preferredColorScheme(.light)` rides along for the same reason — the
-    /// palette is daylight-only, and it was previously repeated at every root.
+    /// It no longer pins `.preferredColorScheme(.light)`. That pin was correct
+    /// while the palette had one page; now every colour token resolves per
+    /// appearance, so pinning here would be the one line overriding all of them.
+    /// **Nothing in the app sets `preferredColorScheme` or `NSAppearance` any
+    /// more** — the window follows the system, and the tokens follow the window.
     func mullChrome() -> some View {
         self
             .tint(DS.moon)
-            .preferredColorScheme(.light)
     }
 
     /// A faint tobacco wash behind a hero element — warm lamplight falling across
-    /// the page from the top-left, not a glow in the dark.
+    /// the page from the top-left. It reads as light on the page rather than as
+    /// an emitted glow, which is what keeps it out of Nocturne territory now that
+    /// there *is* a dark page for it to fall on: the wash is the same tobacco in
+    /// both rooms, and `DS.moon` carries it.
     func moonGlow(_ intensity: Double = 0.16) -> some View {
         self.background(
             RadialGradient(

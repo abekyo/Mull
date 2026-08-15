@@ -153,10 +153,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
 
-        // Daylight: the whole app lives on a warm ivory page, regardless of the
-        // system light/dark setting.
-        NSApp.appearance = NSAppearance(named: .aqua)
-
+        // No `NSApp.appearance` pin. The app used to force `.aqua` here because
+        // the palette had a single ivory page; every DS colour token is now a
+        // dynamic NSColor with a daylight and a lamplight value, so leaving this
+        // nil is what lets them resolve. Setting it — to either name — would
+        // freeze the whole app in one appearance again.
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
         let openFirstWindow: () -> Void
@@ -217,11 +218,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         window.title = ""
         window.contentViewController = controller
-        // Ivory page + a quiet, integrated title bar with no visible title text.
-        window.backgroundColor = NSColor(DS.canvas)
+        // The page + a quiet, integrated title bar with no visible title text.
+        // `DS.canvasNS` is the AppKit form of the same dynamic colour, so this
+        // window's background follows the system flip like everything drawn
+        // inside it. (`NSColor(DS.canvas)` would also work — the round trip
+        // keeps the provider, which `testNSColorRoundTripStaysDynamic` pins —
+        // but there is no reason to go out through SwiftUI and back.)
+        window.backgroundColor = DS.canvasNS
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.appearance = NSAppearance(named: .aqua)
         window.center()
         window.setFrameAutosaveName("MullMainWindow")
         window.isReleasedWhenClosed = false
@@ -295,8 +300,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         window.title = "Settings"
         window.contentViewController = controller
-        window.backgroundColor = NSColor(DS.canvas)
-        window.appearance = NSAppearance(named: .aqua)
+        window.backgroundColor = DS.canvasNS
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -335,8 +339,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let window = NSWindow(contentViewController: controller)
         window.styleMask = [.titled, .closable, .resizable]
         window.title = "Welcome to mull"
-        window.backgroundColor = NSColor(DS.canvas)
-        window.appearance = NSAppearance(named: .aqua)
+        window.backgroundColor = DS.canvasNS
         window.center()
         window.isReleasedWhenClosed = false
         // The red button is a real exit and has to run the real teardown.
