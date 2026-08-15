@@ -696,6 +696,36 @@ final class MCPServerTests: XCTestCase {
         }
     }
 
+    /// What the two whole-file paths (`get_user_context`, `resources/read`) are
+    /// allowed to put in front of an agent.
+    ///
+    /// me.md was arriving as front matter, then `# Who I am`, then "Rewrite a block
+    /// and mull stops touching it." — housekeeping and an instruction for somebody
+    /// editing the raw file, occupying the two lines where the first fact about this
+    /// person belongs. full.md's own embed had stripped exactly that since it was
+    /// written, so the same text was clean by one road and not by the other.
+    ///
+    /// Pure function, so this holds the rule without reading the user's vault.
+    func testTheContractFilesReachAnAgentWithoutTheirChrome() {
+        let me = Curator.meHeader(timestamp: "2026-08-15T17:51+08:00")
+            + "\n\n<!-- mull:block id=mem:x src=agent hash=abc ts=1 -->\n- a fact"
+        let read = MCPServer.agentReadable("me.md", me)
+
+        XCTAssertEqual(read, "# \(VaultText.t("Who I am", "私について"))\n\n- a fact")
+        XCTAssertFalse(read.contains("mull:block"), "provenance is merge bookkeeping")
+    }
+
+    /// rules.md is not chrome. Its note says where its rules came from and how many
+    /// corrections are still unwritten, and mull.md's body IS the orientation — an
+    /// agent is meant to act on both, so neither goes through the same filter.
+    func testTheFrontDoorAndTheRulesKeepTheirNotes() {
+        let rules = RuleBook.header(count: 2, pending: 1) + "\n\n- a rule"
+        let read = MCPServer.agentReadable(RuleBook.path, rules)
+
+        XCTAssertTrue(read.contains("未記入の訂正が **1 件**あります"), read)
+        XCTAssertTrue(read.contains("provenance:"), "the legend the blocks are read by")
+    }
+
     func testReadFileRejectsNonMarkdownAndEscapesBeforeTouchingDisk() {
         XCTAssertTrue(callTool("read_file", ["path": "../.ssh/id_rsa"]).text
             .contains("only .md files are allowed"))

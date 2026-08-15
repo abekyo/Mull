@@ -155,6 +155,34 @@ enum MarkdownDoc {
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The `# ` line a generated document opens with, if it has one.
+    static func title(of text: String) -> String? {
+        stripFrontMatter(text)
+            .components(separatedBy: "\n")
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .flatMap { $0.hasPrefix("# ") ? $0 : nil }
+    }
+
+    /// A whole document as a reader should receive it: its title, then its content.
+    ///
+    /// `body(of:)` is for embedding, where the host file supplies the heading. This
+    /// is for handing files over intact — `get_user_context` concatenates several —
+    /// where the title is the only thing telling the reader which document a passage
+    /// belongs to.
+    ///
+    /// What goes either way is the front matter and the orientation note. Both are
+    /// about the file rather than about its subject, and both were reaching agents:
+    /// me.md arrived as `generator: "mull"`, `# Who I am`, and then "Rewrite a block
+    /// and mull stops touching it." — an instruction for somebody editing the raw
+    /// file, sitting in the position where the first fact about the user should be.
+    /// full.md's embed had been stripping exactly this since it was written; the MCP
+    /// path had not, so the same text was clean by one road and not by the other.
+    static func forReading(_ text: String) -> String {
+        let content = body(of: text)
+        guard let title = title(of: text) else { return content }
+        return content.isEmpty ? title : title + "\n\n" + content
+    }
+
     /// Push every heading down `levels`, so a document can sit under a host
     /// heading without its `##`s colliding with the host's own.
     ///

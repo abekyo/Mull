@@ -164,27 +164,11 @@ enum LiveContextGenerator {
     // Curator, so neither clobbers the other — or the human.
 
     private static func generateMe(memories: [MemoryEntry], analytics: AnalyticsEngine, database: DatabaseService, timestamp: String) throws {
-        var agentBlocks: [ContextBlock] = []
-
-        // Only what may stand as identity, and every line says when it was last
-        // seen — see `MemoryEntry.isIdentity`. The nightly pass in `MullEngine`
-        // applies the same rule; the rule lives on the model so the two writers of
-        // this file cannot answer differently.
-        let day = Curator.observationDayFormatter
-
-        // From mull memories (if they exist from past LLM runs)
-        for mem in memories where mem.memoryType == .user && mem.isIdentity() {
-            // Skip stale/invalid project references. Same shape gate as everywhere
-            // else — this was a fourth, shorter, differently-worded blocklist.
-            if mem.description.hasPrefix("Working on:") {
-                let project = mem.description.replacingOccurrences(of: "Working on: ", with: "")
-                    .trimmingCharacters(in: .whitespaces)
-                if !ProjectNames.isPlausible(project) { continue }
-            }
-            agentBlocks.append(ContextBlock(
-                id: Curator.memoryBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
-        }
+        // What may stand as identity, and what each line has to carry, is one rule
+        // shared with the nightly pass in `MullEngine` — see `Curator.identityBlocks`.
+        // Both passes prune each other's stale `mem:` blocks, so a rule either pass
+        // held privately would show up as a block appearing and vanishing.
+        let agentBlocks = Curator.identityBlocks(from: memories)
 
         // NOTE: rule-based FactExtractor facts (language %, role, busiest day,
         // inferred projects…) used to be baked in here. Removed (DIRECTION §4/§9.1):
@@ -193,23 +177,20 @@ enum LiveContextGenerator {
         // is assembled at USE-TIME by the agent via the `whats_active_now` and
         // `search` MCP tools, not pre-digested by rule-based engines here.
 
-        // Preferences from feedback memories
-        for mem in memories.filter({ $0.memoryType == .feedback && $0.isIdentity() }).prefix(3) {
-            agentBlocks.append(ContextBlock(
-                id: Curator.feedbackBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
-        }
-
         // me.md was the one contract file with no title at all: it opened with three
         // lines of prose addressed to an AI, so the human it is about met a paragraph
         // of housekeeping before a single fact. Same header as the nightly pass now,
         // via Curator — both passes write this file, and a header they disagree on is
         // a header each rewrites over the other's every minute.
         //
-        // Keep `fact:` in the managed prefixes so any rule-based facts written by
-        // earlier versions get pruned out of me.md (we no longer emit them).
-        Curator.curate(relativePath: "me.md", header: Curator.meHeader(timestamp: timestamp),
-                       pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks,
+        // Keep `fact:` and `pref:` in the managed prefixes so the rule-based facts and
+        // feedback lines earlier versions wrote get pruned out of me.md (neither is
+        // emitted any more).
+        let pinned = Curator.pinnedFacts()
+        Curator.curate(relativePath: "me.md",
+                       header: Curator.meHeader(timestamp: timestamp,
+                                                isEmpty: agentBlocks.isEmpty && pinned.isEmpty),
+                       pinnedContent: pinned, agentBlocks: agentBlocks,
                        managedPrefixes: ["fact:", "mem:", "pref:"])
     }
 

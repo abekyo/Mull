@@ -295,4 +295,31 @@ final class CuratorTests: XCTestCase {
         XCTAssertNotNil(stamp.range(of: pattern, options: .regularExpression),
                         "not ISO 8601: \(stamp)")
     }
+
+    // MARK: - What me.md says when it has nothing to say
+    //
+    // The identity layer can now legitimately empty out (`identityBlocks`), and an
+    // empty one is the correct answer when nothing has been confirmed. But "Rewrite
+    // a block and mull stops touching it" under an empty heading is advice about
+    // nothing, and the one thing that would fill the file — the answers pane, which
+    // is opt-in and was never opened on the machine this was written on — went
+    // unmentioned. So the empty state says where a fact can be stated instead.
+
+    func testTheEmptyIdentityHeaderPointsAtTheAnswersPane() {
+        let empty = Curator.meHeader(timestamp: "t", isEmpty: true)
+        // Named as this reader's own Settings window names it, not as the source
+        // writes it: "Your answers" sends a Japanese reader hunting for a control
+        // that says セットアップでの回答.
+        XCTAssertTrue(empty.contains(VaultText.t("Your answers", "セットアップでの回答")), empty)
+        XCTAssertFalse(empty.contains("Rewrite a block"),
+                       "there are no blocks to rewrite")
+    }
+
+    func testTheFilledIdentityHeaderKeepsTheEditingPromise() {
+        let filled = Curator.meHeader(timestamp: "t")
+        XCTAssertTrue(filled.contains(VaultText.t("Rewrite a block and mull stops touching it.",
+                                                  "ブロックを書き換えれば、mull はそこに触れません。")),
+                      filled)
+        XCTAssertFalse(filled.contains("Your answers"))
+    }
 }

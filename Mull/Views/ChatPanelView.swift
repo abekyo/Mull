@@ -415,12 +415,15 @@ final class ChatViewModel: ObservableObject {
     private func systemPrompt(weeklyDigest: String) -> String {
         var ctx: [String] = []
         // Curator provenance markers are merge bookkeeping, not context — strip
-        // them so the model doesn't read hashes and block ids as content.
+        // them so the model doesn't read hashes and block ids as content. Each file's
+        // own chrome goes with them (`MarkdownDoc.body`): the `=== me.md ===` label
+        // below already says which document this is, and the note under the title is
+        // an instruction for somebody editing the raw file.
         if let me = MullDirectory.read("me.md") {
-            ctx.append("=== me.md ===\n\(ContextBlockFile.stripMarkers(me))")
+            ctx.append("=== me.md ===\n\(MarkdownDoc.body(of: ContextBlockFile.stripMarkers(me)))")
         }
         if let now = MullDirectory.read("now.md") {
-            ctx.append("=== now.md ===\n\(ContextBlockFile.stripMarkers(now))")
+            ctx.append("=== now.md ===\n\(MarkdownDoc.body(of: ContextBlockFile.stripMarkers(now)))")
         }
         ctx.append("=== THIS WEEK'S RECORDED ACTIVITY (last 7 days, observed by mull) ===\n\(weeklyDigest)")
 

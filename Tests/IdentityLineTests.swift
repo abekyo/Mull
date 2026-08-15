@@ -27,8 +27,9 @@ final class IdentityLineTests: XCTestCase {
     private var aug09: Date { day(8, 9) }
 
     private func memory(_ name: String, _ description: String, _ content: String,
-                        created: Date, updated: Date) -> MemoryEntry {
-        MemoryEntry(name: name, description: description, memoryType: .user,
+                        created: Date, updated: Date,
+                        type: MemoryEntry.MemoryType = .user) -> MemoryEntry {
+        MemoryEntry(name: name, description: description, memoryType: type,
                     content: content, filePath: "memory/\(name).md",
                     createdAt: created, updatedAt: updated)
     }
@@ -126,5 +127,65 @@ final class IdentityLineTests: XCTestCase {
 
         let kept = all.filter { $0.isIdentity(asOf: now) }.map(\.name)
         XCTAssertEqual(kept, ["AI assistant preference", "通知"])
+    }
+
+    // MARK: - Who is allowed to be in the identity layer at all
+    //
+    // `isIdentity` answers "is this still true of them". These answer the question
+    // underneath it: is this the kind of thing "Who I am" is for.
+
+    /// A `feedback` memory is how somebody works, which is a rule — and CLAUDE.md
+    /// §0.1 says rules do not come out of observation. The nightly pass derives
+    /// these by watching one day, so a feedback line under "Who I am" is a rule mull
+    /// wrote about the user and then served to every agent as their own.
+    ///
+    /// The fixture is the row that was doing it: an afternoon's irritation with
+    /// notifications, printed as a standing fact about a person.
+    func testFeedbackIsNotIdentity() {
+        let feedback = memory("通知が鳴りすぎてうざい",
+                              "通知が多すぎて操作の邪魔になると感じた（2026-08-09）",
+                              "日中に通知が頻繁に発生して作業の邪魔になった。",
+                              created: aug09, updated: aug09, type: .feedback)
+
+        XCTAssertTrue(feedback.isIdentity(asOf: now), "still recent — the age rule keeps it")
+        XCTAssertTrue(Curator.identityBlocks(from: [feedback], now: now).isEmpty,
+                      "…and the type rule still keeps it out of me.md")
+    }
+
+    /// project/reference memories have their own homes in now.md and full.md.
+    func testOnlyUserMemoriesReachTheFile() {
+        let mixed = [
+            memory("AI assistant preference", "Prefers Claude; used frequently (11 Aug 2026)", "…",
+                   created: june10, updated: aug11),
+            memory("Formiq data-mirror plan", "Plan to mirror Formiq data using a Worker", "…",
+                   created: aug11, updated: aug11, type: .project),
+            memory("Obsidian food log", "Uses an Obsidian vault for meal logging", "…",
+                   created: aug11, updated: aug11, type: .reference),
+            memory("通知", "通知が多すぎて…", "…", created: aug09, updated: aug09, type: .feedback),
+        ]
+
+        XCTAssertEqual(Curator.identityBlocks(from: mixed, now: now).map(\.id),
+                       ["mem:ai-assistant-preference"])
+    }
+
+    /// One rule, not two copies of one. Both passes that write me.md call this, and
+    /// they prune each other's stale `mem:` blocks — so a rule held privately by
+    /// either one shows up as a block that appears and vanishes every minute. The
+    /// two copies had already drifted (feedback capped at 5 in the nightly pass and
+    /// 3 in the 60s one; the "Working on:" gate in one and not the other).
+    func testAnImplausibleProjectIsSkipped() {
+        let junk = memory("Working on", "Working on: ", "…", created: aug11, updated: aug11)
+        XCTAssertTrue(Curator.identityBlocks(from: [junk], now: now).isEmpty)
+    }
+
+    /// The whole point of the layer: what survives says when it was last seen.
+    func testTheBlockCarriesTheRenderedLine() {
+        let line = memory("Messaging preference", "Regularly uses LINE for messaging.", "…",
+                          created: june10, updated: june10)
+
+        // Ten days after it was written it is still standing, and dated.
+        let blocks = Curator.identityBlocks(from: [line], now: day(6, 20))
+        XCTAssertEqual(blocks.map(\.content), ["- Regularly uses LINE for messaging. (2026-06-10)"])
+        XCTAssertEqual(blocks.map(\.source), [.agent])
     }
 }

@@ -511,10 +511,11 @@ final class MCPServer {
         }
 
         let filePath = mullDir.appendingPathComponent(fileName)
-        // Strip Curator provenance markers — they are bookkeeping for the merge,
-        // not context, and now.md/full.md carry them too (not just me.md).
+        // Same reading as get_user_context gives the same file — see `agentReadable`.
+        // These two paths serve identical bytes to the same audience, and a rule
+        // applied to one of them is a rule half the clients do not get.
         let content = (try? String(contentsOf: filePath, encoding: .utf8))
-            .map(ContextBlockFile.stripMarkers)
+            .map { Self.agentReadable(fileName, $0) }
             ?? "(No data yet. mull is still recording.)"
 
         respond(id: id, result: [
@@ -527,6 +528,30 @@ final class MCPServer {
     }
 
     // MARK: - Tool Implementations
+
+    /// A vault file as an agent should receive it, for the two paths that hand whole
+    /// files over: `get_user_context` and `resources/read`.
+    ///
+    /// Provenance markers go from every file — they are bookkeeping for the merge,
+    /// not context. The chrome goes from the three curated contract files, whose
+    /// header note is addressed to whoever opens the raw file in an editor and whose
+    /// front matter is housekeeping. Neither is about the user, and both were being
+    /// served as the opening lines of "Who I am": every agent read `generator:
+    /// "mull"` and "Rewrite a block and mull stops touching it." in the position
+    /// where the first fact about this person belongs. full.md's own embed had been
+    /// stripping exactly that since it was written, so the same text was clean by one
+    /// road and not by the other.
+    ///
+    /// mull.md and rules.md are passed whole on purpose. mull.md's body IS the
+    /// orientation, and rules.md's note says where its rules came from and how many
+    /// corrections are still unwritten — content an agent is meant to act on, not
+    /// chrome.
+    static func agentReadable(_ fileName: String, _ raw: String) -> String {
+        let clean = ContextBlockFile.stripMarkers(raw)
+        return curatedContractFiles.contains(fileName) ? MarkdownDoc.forReading(clean) : clean
+    }
+
+    private static let curatedContractFiles: Set<String> = ["me.md", "now.md", "full.md"]
 
     private func getUserContext(level: String) -> String {
         var files: [String] = []
@@ -556,7 +581,7 @@ final class MCPServer {
         for file in files {
             let path = mullDir.appendingPathComponent(file)
             if let raw = try? String(contentsOf: path, encoding: .utf8), !raw.isEmpty {
-                parts.append(ContextBlockFile.stripMarkers(raw))
+                parts.append(Self.agentReadable(file, raw))
             }
         }
 

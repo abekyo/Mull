@@ -57,6 +57,31 @@ final class MarkdownDocTests: XCTestCase {
         XCTAssertTrue(MarkdownDoc.body(of: doc).contains("> a quote the user wrote"))
     }
 
+    // MARK: - Handing a whole file over (what get_user_context and resources/read do)
+
+    /// Same chrome as `body(of:)` removes, minus the title: nothing else in a
+    /// concatenation of four files says which document a passage came from.
+    func testForReadingKeepsTheTitleAndDropsTheRest() {
+        let me = Curator.meHeader(timestamp: "2026-08-15T17:51+08:00") + "\n\n- a fact"
+        let read = MarkdownDoc.forReading(me)
+
+        XCTAssertTrue(read.hasPrefix("# "), read)
+        XCTAssertTrue(read.hasSuffix("- a fact"))
+        XCTAssertFalse(read.contains("generator:"), "front matter is housekeeping")
+        XCTAssertFalse(read.contains("2026-08-15T17:51"))
+        XCTAssertFalse(read.contains("stops touching it"),
+                       "the note is addressed to whoever edits the raw file")
+        XCTAssertFalse(read.contains("mull はそこに触れません"))
+    }
+
+    /// An empty file must not come back as a bare title with nothing under it and no
+    /// trailing blank lines to trip the joiner.
+    func testForReadingOnATitleOnlyDocument() {
+        XCTAssertEqual(MarkdownDoc.forReading("---\ngenerator: \"mull\"\n---\n\n# Who I am\n\n> a note\n"),
+                       "# Who I am")
+        XCTAssertEqual(MarkdownDoc.forReading("just prose, no title"), "just prose, no title")
+    }
+
     func testEmbeddingLeavesExactlyOneH1() {
         // full.md used to append me.md and now.md whole. Reproduce that pairing
         // the correct way and assert the property that failed.

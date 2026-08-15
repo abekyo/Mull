@@ -206,7 +206,54 @@ enum Curator {
     // a key is not a sentence. Titles, values and notes are prose, and prose
     // follows the reader.
 
-    static func meHeader(timestamp: String) -> String {
+    /// The blocks that make up "Who I am" — one rule, for both writers of me.md.
+    ///
+    /// Two passes write this file (the 60s one in `LiveContextGenerator`, the
+    /// nightly one in `MullEngine`) and each prunes stale `mem:` blocks the other
+    /// left behind, so anything they disagree about flickers: one writes a block and
+    /// the other deletes it a minute later. They disagreed about two things — how
+    /// many feedback memories to print (5 or 3) and whether an implausible
+    /// "Working on:" project is skipped — so the rule lives here now, once.
+    ///
+    /// **`user` memories only.** A `feedback` memory is "how they work", which
+    /// sounds like it belongs under "Who I am" and does not. It is a rule, and
+    /// CLAUDE.md §0.1 is explicit that rules do not come out of observation: the
+    /// nightly pass derives these by watching one day, so what stood in the identity
+    /// layer was a rule mull made up about the user. Real rules arrive by the other
+    /// road — a correction, a Card, `RuleBook`, rules.md — and `get_user_context`
+    /// sends that file at every level anyway. Feedback memories are still written,
+    /// still searchable, and still printed in full.md under "Working style &
+    /// feedback"; they are only barred from standing as who somebody is.
+    ///
+    /// `pref:` stays in both callers' managed prefixes so the ones earlier versions
+    /// wrote are swept out of the file rather than left behind unowned.
+    static func identityBlocks(from memories: [MemoryEntry], now: Date = Date()) -> [ContextBlock] {
+        let day = observationDayFormatter
+        return memories.compactMap { mem -> ContextBlock? in
+            guard mem.memoryType == .user, mem.isIdentity(asOf: now) else { return nil }
+            // Skip stale/invalid project references. Same shape gate as everywhere
+            // else — this was a fourth, shorter, differently-worded blocklist.
+            if mem.description.hasPrefix("Working on:") {
+                let project = mem.description.replacingOccurrences(of: "Working on: ", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                if !ProjectNames.isPlausible(project) { return nil }
+            }
+            return ContextBlock(id: memoryBlockID(name: mem.name, description: mem.description),
+                                source: .agent,
+                                content: mem.identityLine(dateFormatter: day),
+                                agentHash: nil)
+        }
+    }
+
+    /// `isEmpty`: mull has nothing to say about this person and neither has the
+    /// person. "Rewrite a block and mull stops touching it" is addressed to somebody
+    /// looking at blocks, and under an empty heading it is advice about nothing —
+    /// while the one thing that would actually fill the file goes unmentioned. The
+    /// answers pane is the high-precision half of this file and it is opt-in, so a
+    /// vault can sit for months with an identity layer built entirely out of guesses
+    /// because nobody was told where to state a fact. Say it in the empty state,
+    /// where there is room.
+    static func meHeader(timestamp: String, isEmpty: Bool = false) -> String {
         MarkdownDoc.header(
             title: VaultText.t("Who I am", "私について"),
             meta: [("updated", timestamp)],
@@ -217,7 +264,13 @@ enum Curator {
             // strips the markers to display them, so it refuses to write the file back
             // and shows a lock instead. Say which is which, and name the place mull
             // does take corrections.
-            note: VaultText.t("Rewrite a block and mull stops touching it.",
+            note: isEmpty
+                // The pane's own names, as this reader sees them in the app: an
+                // instruction that says "Your answers" to somebody whose Settings
+                // window says セットアップでの回答 is an instruction to go looking.
+                ? VaultText.t("Nothing has been confirmed about you yet. Settings › General › Your answers is where you say what mull cannot work out on its own.",
+                              "まだ確認できたことがありません。mull に分からないことは、設定 › 一般 › セットアップでの回答 に書けます。")
+                : VaultText.t("Rewrite a block and mull stops touching it.",
                               "ブロックを書き換えれば、mull はそこに触れません。"))
     }
 
@@ -534,10 +587,9 @@ enum Curator {
         return "mem:" + ContextBlockFile.slug(key)
     }
 
-    static func feedbackBlockID(name: String, description: String) -> String {
-        let key = name.isEmpty ? description : name
-        return "pref:" + ContextBlockFile.slug(key)
-    }
+    // `feedbackBlockID` ("pref:") is gone: nothing writes a feedback memory into
+    // me.md any more (see `identityBlocks`). The prefix itself lives on in both
+    // passes' `managedPrefixes` so the blocks earlier versions wrote are pruned.
 
     /// Stable id for a FactExtractor fact. Key-only for attributes whose value changes
     /// (tech stack, language ratios → updates replace), full-line for container facts

@@ -443,17 +443,31 @@ final class MullEngine {
           *often*, *regularly*, *prefers*, *tends to* are claims about days you have not
           been shown. If today looks like a pattern, that is a `Confirm` on an existing
           memory, not an adverb in a new one.
+        - **Only write down what an agent could not find out for itself.** A memory
+          earns its place by saving the user from explaining something a second time:
+          how they want work done, what a project is actually for, a constraint that
+          is nowhere in the code. Which app they had open, which assistant they were
+          talking to, and anything readable off the screen or the repository are not
+          that. Before you create one, ask what an agent would do differently for
+          having read it. If the answer is nothing, do not create it. Two lines that
+          change an answer beat ten that describe a day.
         - Convert relative dates to absolute: "today" → "\(dateStr)", "yesterday" → specific
           date. In the description as well as the content — the description is the line that
           gets read, and one that says "recently" is unreadable a month later
         - Keep each memory description under 150 characters
-        - Memory types: "user" (who they are), "feedback" (how they work), "project" (what they're doing), "reference" (where to find things)
+        - Memory types: "user" (who they are), "feedback" (how they work), "project"
+          (what they're doing), "reference" (where to find things). Only "user" stands
+          under "Who I am" in me.md; the rest are read where they belong.
         - Do NOT create memories for information derivable from code or git history
         - Merge into existing memories rather than creating near-duplicates
 
         ## Phase 4 — Prune (keep knowledge lean)
 
         Review the MEMORY_UPDATES you're about to output:
+        - **Would you create it today?** Put the existing memories through the same
+          test as a new one. A line does not keep its place by having been written
+          earlier, and the ones written before this instruction existed have not been
+          through it once. Mark those for deletion.
         - Are any existing memories now stale or contradicted? Mark them for deletion.
         - Are any new memories redundant with existing ones? Merge instead of creating.
         - Would the total memory count exceed 50? If so, delete the least useful ones.
@@ -868,24 +882,10 @@ final class MullEngine {
     /// they were written wholesale by both passes and the nightly LLM output was
     /// destroyed by the next 60s tick.
     private func generateLayerA(memories: [MemoryEntry], timestamp: String) throws {
-        var agentBlocks: [ContextBlock] = []
-
-        // Only what may stand as identity, and every line says when it was last
-        // seen — see `MemoryEntry.isIdentity`. Both writers of me.md apply this;
-        // the rule lives on the model so they cannot answer differently.
-        let day = Curator.observationDayFormatter
-
-        for mem in memories where mem.memoryType == .user && mem.isIdentity() {
-            agentBlocks.append(ContextBlock(
-                id: Curator.memoryBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
-        }
-
-        for mem in memories.filter({ $0.memoryType == .feedback && $0.isIdentity() }).prefix(5) {
-            agentBlocks.append(ContextBlock(
-                id: Curator.feedbackBlockID(name: mem.name, description: mem.description),
-                source: .agent, content: mem.identityLine(dateFormatter: day), agentHash: nil))
-        }
+        // What may stand as identity, and what each line has to carry, is one rule
+        // shared with the 60s pass — see `Curator.identityBlocks`. It used to be
+        // written out twice, here and there, and the two copies had drifted apart.
+        let agentBlocks = Curator.identityBlocks(from: memories)
 
         // The header is a whole-file property and both passes write it, so it comes
         // from Curator — the two used to disagree (this one said "About the user
@@ -894,8 +894,11 @@ final class MullEngine {
         //
         // Nightly pass owns memory/preference blocks (NOT fact: — those belong to
         // the 60s pass), so it prunes only stale mem:/pref: and never wipes facts.
-        Curator.curate(relativePath: "me.md", header: Curator.meHeader(timestamp: timestamp),
-                       pinnedContent: Curator.pinnedFacts(), agentBlocks: agentBlocks,
+        let pinned = Curator.pinnedFacts()
+        Curator.curate(relativePath: "me.md",
+                       header: Curator.meHeader(timestamp: timestamp,
+                                                isEmpty: agentBlocks.isEmpty && pinned.isEmpty),
+                       pinnedContent: pinned, agentBlocks: agentBlocks,
                        managedPrefixes: ["mem:", "pref:"])
     }
 

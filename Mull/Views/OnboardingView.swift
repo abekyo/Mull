@@ -464,7 +464,7 @@ struct OnboardingView: View {
             VStack(spacing: DS.xs) {
                 Text("Tell mull the essentials")
                     .font(DS.headlineFont)
-                Text("Every field is optional. Skip what you like; you can correct any of it later at the foot of About Me.")
+                Text("Every field is optional. Skip what you like; you can correct any of it later in Settings › General.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
                     .multilineTextAlignment(.center)

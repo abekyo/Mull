@@ -65,6 +65,40 @@ final class ConsolidationPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains("counting is mull's job"))
     }
 
+    /// The other half of the same failure. The rules above fix *when* a memory may
+    /// be written; this one is about whether it was worth writing at all. What
+    /// survived the age rule on the day this was added was "Prefers Claude for AI
+    /// assistance; used frequently" — true, dated, confirmed, and read by Claude,
+    /// which learns nothing from being told the user talks to it.
+    func testItRefusesToAskForWhatTheAgentCanSeeForItself() {
+        let prompt = engine.buildConsolidationPrompt(data: emptyDay, memories: [])
+
+        XCTAssertTrue(prompt.contains("Only write down what an agent could not find out for itself"),
+                      prompt)
+        XCTAssertTrue(prompt.contains("what an agent would do differently for"))
+        XCTAssertTrue(prompt.contains("If the answer is nothing, do not create it"))
+    }
+
+    /// Where each type lands. `user` is the only one that stands as identity, and a
+    /// model that does not know which drawer it is filling puts a working preference
+    /// in the one labelled "Who I am" — see `IdentityLineTests.testFeedbackIsNotIdentity`.
+    func testItSaysWhichTypeReachesTheIdentityLayer() {
+        let prompt = engine.buildConsolidationPrompt(data: emptyDay, memories: [])
+        XCTAssertTrue(prompt.contains("Only \"user\" stands"), prompt)
+        XCTAssertTrue(prompt.contains("under \"Who I am\" in me.md"))
+    }
+
+    /// The test above governs what gets written. On its own it leaves everything
+    /// already in the table standing forever: a re-observed memory never expires
+    /// (`isIdentity` returns true for it by definition), so "Prefers Claude for AI
+    /// assistance" would outlive every rule written to prevent it. Phase 4 puts the
+    /// existing rows through the same question.
+    func testPruneAppliesTheSameTestToWhatIsAlreadyThere() {
+        let prompt = engine.buildConsolidationPrompt(data: emptyDay, memories: [])
+        XCTAssertTrue(prompt.contains("Would you create it today?"), prompt)
+        XCTAssertTrue(prompt.contains("does not keep its place by having been"))
+    }
+
     /// The old wording. It asked for exactly the line that had to be deleted.
     func testItNoLongerAsksForWorkingPatterns() {
         let prompt = engine.buildConsolidationPrompt(data: emptyDay, memories: [])

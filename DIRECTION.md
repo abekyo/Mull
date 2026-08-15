@@ -364,6 +364,37 @@ editing…」はその指示の産物です。
 故障ではなく、この設計での正しい振る舞いです。**何も確認されていないなら、mull は
 その人について何も主張しない。**空の me.md は、間違った me.md より §7.1 に忠実です。
 
+#### 同日の追加（作者が画面を見て「精度が低いし意味不明」と言った）
+
+上の規則を入れた直後の me.md を作者が読み、4行のうち3行が誤りだと分かりました。
+上の規則が消すのはそのうち2行で、残る2行と見出し直下の1行は別の理由で間違っていました。
+**出す行を良くするのではなく、出す資格を上げる**、が同日の追加分です。
+
+| # | 何を変えたか | なぜ |
+|---|---|---|
+| 1 | 「Who I am」に出すのは `.user` だけ（`Curator.identityBlocks`） | `.feedback` は「どう働くか」＝規則で、§0.1 の「規則は観測からは出てこない」に反します。夜間パスは1日を見て書くので、身元欄に立っていたのは mull が作った規則でした。しかも `RuleBook` はカードしか読まないので rules.md にも入らず、どこにも効いていません。feedback 自体は残り、full.md の "Working style & feedback" に出ます |
+| 2 | 記憶を作る条件に価値の線を足した（prompt） | 前の修正が直したのは「いつ観測したか」だけで、「書く価値があるか」は無いままでした。生き残った1行は "Prefers Claude for AI assistance" で、それを読む相手が Claude です。足した問いは「これを読んだエージェントは、次に何を違うことをするか」 |
+| 2b | Phase 4 の Prune に同じ問いを向けた | 2 は新規作成にしか効きません。再観測された記憶は `isIdentity` が恒久的に真を返すので、放っておくと "Prefers Claude" は規則より長生きします |
+| 3 | `get_user_context` と `resources/read` が me/now/full を `MarkdownDoc.forReading` に通す | 見出し直下の note は「生ファイルを編集する人」宛てです。それが「Rewrite a block and mull stops touching it.」として、本人についての最初の事実が来るべき位置で全エージェントに配られていました。full.md の埋め込みは最初から同じ処理をしていたので、同じ文字列が経路によって掃除されたりされなかったりしていた |
+| 4 | mull 側も pinned も空のとき、note が回答欄を指す | この機械で `onboardingProfileAnswers` は未設定でした。人が一度も名乗っていない状態で、mull が身元欄を推測で埋めていたことになります。空欄は正しい状態ですが、そこに何を書けるかは言う必要があります |
+
+固定は `IdentityLineTests`（型の線）、`ConsolidationPromptTests`（価値の線と Prune）、
+`MarkdownDocTests` / `MCPServerTests`（渡し方）、`CuratorTests`（空状態）。
+
+**この機械での実際の効き**（2026-08-15 実測）: `.user` 2件・`.feedback` 2件のうち、
+再起動後に残るのは `.user` の1件（"Prefers Claude…"）だけです。**0行にはなりません。**
+2 は新しい記憶にしか効かず、2b が効くのは夜間パスが次に回ったときだからです。
+G4 の提示で「0行になる公算が高い」と書いたのは、この区別を落としていた点で誤りでした。
+
+**撤回基準**（契約3。この追加分について）:
+
+| | |
+|---|---|
+| 期限 | 2026-09-14（30日） |
+| 観測点 | `select count(*) from memory_entries where memoryType='user'` が2件以下のまま、かつ `defaults read com.mull.app onboardingProfileAnswers` が未設定のまま。mull も人も1行も埋めていない状態 |
+| 原因の分離 | user 行が増えないのは、夜間パスが回っていないのか（`mull_lock.lastSummaryAt` と `daily_summaries` の行数で分かる）、回っているが価値の線で落としているのか（MEMORY_UPDATES に create が出ているか）。前者は §6.2 の配線の問題、後者はこの決定の問題で、打ち手が違う |
+| 戻し方 | 価値の線（2 と 2b）を prompt から外す。型の線（1）は戻しません。feedback を身元欄に出す根拠は §0.1 に無いので、空になったことは戻す理由になりません |
+
 ---
 
 **撤回基準**（契約3。§6.2 の決定について）:
