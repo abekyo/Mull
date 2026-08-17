@@ -69,13 +69,40 @@ enum CalendarMirror {
     /// where the corpus is, in `TimeBlockEngine`; this is the shape gate only, and
     /// saying so is cheaper than a reader discovering it.
     static func isPresentable(_ label: String) -> Bool {
+        presentableHead(of: label)?.whole == true
+    }
+
+    /// The leading run of a label that is fit to write, and whether that is all of it.
+    ///
+    /// `isPresentable` used to be the whole answer, and it is `allSatisfy`: one bad
+    /// segment threw away the good ones with it. What that costs is measurable rather
+    /// than theoretical. `eval/calendar/` on four real days: 103 minutes of
+    /// `Formiq iOS — オンボーディングのデザインが単調な理由を調査` went to the calendar
+    /// as **Code**, because the second segment is a clause and the first — the project,
+    /// the part somebody actually wants at 14:00 — was discarded with it. Four of the
+    /// eight fallbacks in that sample had a perfectly good project name in front of the
+    /// segment that failed.
+    ///
+    /// Leading run rather than "any surviving segment", and the direction is the whole
+    /// safety of it. `generateLabel` emits `project — detail` for an editor, so the
+    /// front of the label is the name; for a browser the front is the page. Keeping the
+    /// tail instead would have promoted `元のプロファイル` out of
+    /// `販売が集客に変わる構造・13パターン — 元のプロファイル` — the exact string the
+    /// chrome rule exists to stop. When the head fails, nothing is kept and the app's
+    /// name is the answer, which is what that case should get.
+    static func presentableHead(of label: String) -> (title: String, whole: Bool)? {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.count <= maxTitleLength else { return false }
+        guard !trimmed.isEmpty, trimmed.count <= maxTitleLength else { return nil }
         let segments = ProjectNames.segments(of: trimmed)
-        guard !segments.isEmpty else { return false }
-        return segments.allSatisfy { segment in
+        guard !segments.isEmpty else { return nil }
+        let kept = segments.prefix { segment in
             ProjectNames.isPlausible(segment) || ProjectNames.isFileName(segment)
         }
+        guard !kept.isEmpty else { return nil }
+        // Rejoined rather than sliced out of the original, so a label written with
+        // " - " or " | " comes back in one separator. Whole labels are returned
+        // verbatim, so nothing that already passed changes shape.
+        return kept.count == segments.count ? (trimmed, true) : (kept.joined(separator: " — "), false)
     }
 
     /// The title a block gets, and whether mull had to fall back to the app's name.
@@ -97,11 +124,25 @@ enum CalendarMirror {
     ///
     /// Settings promises writes are "taken from your window titles". This is the line
     /// that makes that sentence true rather than nearly true (CLAUDE.md §7.4).
-    static func title(for block: TimeBlock) -> (title: String, fellBack: Bool) {
+    ///
+    /// How much of the block's own label survived. Three answers rather than two,
+    /// because "mull wrote the project but not what you were doing in it" is a
+    /// different day from "mull wrote the name of your editor" and they used to be
+    /// counted as the same failure.
+    enum Naming: String, Equatable, Codable {
+        /// The block's own label was fit to write, whole.
+        case named
+        /// Its leading segments were. The rest was dropped.
+        case shortened
+        /// None of it was, so the event says the app's name.
+        case fellBack
+    }
+
+    static func title(for block: TimeBlock) -> (title: String, naming: Naming) {
         guard !block.label.isEmpty, block.label != block.app,
               !block.labelFromClipboard,
-              isPresentable(block.label) else { return (block.app, true) }
-        return (block.label, false)
+              let head = presentableHead(of: block.label) else { return (block.app, .fellBack) }
+        return (head.title, head.whole ? .named : .shortened)
     }
 
     // MARK: - Naming what mull wrote
@@ -182,20 +223,32 @@ enum CalendarMirror {
     /// calendar and be disappointed. §4 says the selection is measured or it is vibes;
     /// this is the same rule applied to the one output a person sees every day.
     struct Quality: Equatable, Codable {
-        /// Blocks whose own label was fit to write.
+        /// Blocks whose own label was fit to write, whole.
         var named = 0
-        /// Blocks that fell back to the app's name because their label was not.
+        /// Blocks written under the presentable front of their label, with the rest
+        /// dropped. Counted apart from `named` on purpose: this number rising is the
+        /// signal that titles are arriving half-readable, and folded into `named` it
+        /// would be invisible.
+        var shortened = 0
+        /// Blocks that fell back to the app's name because none of their label was fit.
         var fellBack = 0
         /// Settled blocks dropped for being shorter than `minimumDuration`.
         var tooShort = 0
 
-        var considered: Int { named + fellBack }
+        var considered: Int { named + shortened + fellBack }
 
-        /// How much of the range mull could actually name, 0…1. `nil` when there was
-        /// nothing to name — which is a different answer from zero.
+        /// How much of the range mull could name from what the user had open, whole or
+        /// in part, 0…1. `nil` when there was nothing to name — a different answer from
+        /// zero.
+        ///
+        /// **This measures how often the rule found a name, not whether the name was
+        /// right.** There is no gold labelling anywhere in mull for calendar titles, so
+        /// a gate that let junk through would raise this number rather than lower it.
+        /// The list in `eval/calendar/` is where correctness is read, by a person, and
+        /// it prints every title it would write for exactly that reason.
         var namedFraction: Double? {
             guard considered > 0 else { return nil }
-            return Double(named) / Double(considered)
+            return Double(named + shortened) / Double(considered)
         }
     }
 
@@ -203,17 +256,45 @@ enum CalendarMirror {
         var create: [Entry] = []
         var update: [Change] = []
         var delete: [Removal] = []
-        /// Keys mull wrote, the user removed, and mull must not write again.
+        /// Keys mull wrote, the user removed, and mull must not write again. Empty on a
+        /// press, which overrides deletions rather than honouring them.
         var tombstone: Set<String> = []
-        /// The same tombstoned blocks, carrying what mull *would* have written for
-        /// them. `tombstone` is what the ledger needs (keys, to stay silent about
-        /// them); this is what the correction loop needs (the title, to learn what
-        /// was not worth writing). One is the keys of the other — see
-        /// `correctionCards`.
+        /// Blocks mull wrote that the user removed, carrying what mull *would* have
+        /// written for them. `tombstone` is what the ledger needs (keys, to stay silent
+        /// about them); this is what the correction loop needs (the title, to learn
+        /// what was not worth writing).
+        ///
+        /// Not the keys of `tombstone`. On a reconcile the two describe the same
+        /// blocks, but a press fills this and leaves `tombstone` empty: it writes the
+        /// event again *and* records that the user had removed it, because those are
+        /// separate facts and only the second one teaches anything.
         var rejected: [Entry] = []
         var quality = Quality()
 
         var isEmpty: Bool { create.isEmpty && update.isEmpty && delete.isEmpty && tombstone.isEmpty }
+    }
+
+    /// What a run is: a timer reconciling, or somebody pressing the button.
+    ///
+    /// Both write the same events through the same marker. They differ on what an
+    /// *absent* event means. To the timer, silence is the user having deleted it, so it
+    /// tombstones and never offers it again. A press says the opposite out loud, so it
+    /// writes over a tombstone — which is the only way back for somebody who cleared a
+    /// day and changed their mind.
+    ///
+    /// What used to follow from that, and should not have: the press learned nothing.
+    /// A deletion it wrote over is still "mull proposed this, the human removed it",
+    /// the label §7.3 calls the best one there is, and the press was the only path in
+    /// use — on this Mac 56 events were written by hand and the timer had never once
+    /// met its own start condition. So the two questions are separated here. Whether to
+    /// stay silent about a key is `honoursDeletions`; whether the deletion is worth
+    /// recording is not in question, and both modes record it.
+    enum Trigger {
+        case reconcile
+        case press
+
+        /// Whether an absent event stops mull writing it again.
+        var honoursDeletions: Bool { self == .reconcile }
     }
 
     /// What this run should do.
@@ -224,12 +305,14 @@ enum CalendarMirror {
     ///   - written: keys mull has created before now — the memory that lets a missing
     ///     event be read as "the user deleted it" rather than "not written yet".
     ///   - tombstoned: keys the user has already deleted once.
+    ///   - trigger: a timer pass, or a deliberate press. See `Trigger`.
     static func plan(blocks: [TimeBlock],
                      existing: [Existing],
                      written: Set<String>,
                      tombstoned: Set<String>,
                      now: Date,
-                     resumeGap: TimeInterval) -> Plan {
+                     resumeGap: TimeInterval,
+                     trigger: Trigger = .reconcile) -> Plan {
 
         var quality = Quality()
         var desired: [Entry] = []
@@ -240,8 +323,12 @@ enum CalendarMirror {
                 quality.tooShort += 1
                 continue
             }
-            let (title, fellBack) = title(for: block)
-            if fellBack { quality.fellBack += 1 } else { quality.named += 1 }
+            let (title, naming) = title(for: block)
+            switch naming {
+            case .named:     quality.named += 1
+            case .shortened: quality.shortened += 1
+            case .fellBack:  quality.fellBack += 1
+            }
             desired.append(Entry(key: key(forBlockStartingAt: block.start),
                                  title: title,
                                  start: block.start,
@@ -256,12 +343,21 @@ enum CalendarMirror {
         plan.quality = quality
 
         // Gone from the calendar but written before and still wanted: the user took it
-        // out. That is an instruction, not a gap to fill.
+        // out. That is an instruction, not a gap to fill — and it is a correction
+        // whichever way the run treats it.
         for entry in desired where present[entry.key] == nil {
-            if written.contains(entry.key) {
-                plan.tombstone.insert(entry.key)
+            let removedByUser = written.contains(entry.key)
+            if removedByUser {
                 plan.rejected.append(entry)
-            } else if !tombstoned.contains(entry.key) {
+            }
+            if trigger.honoursDeletions {
+                if removedByUser {
+                    plan.tombstone.insert(entry.key)
+                } else if !tombstoned.contains(entry.key) {
+                    plan.create.append(entry)
+                }
+            } else {
+                // A press overrides both the tombstone and the silence, and writes.
                 plan.create.append(entry)
             }
         }
@@ -301,6 +397,10 @@ enum CalendarMirror {
     /// mull learns from exactly this event through `Curator`; the one screen the user
     /// actually looks at every day did not.
     ///
+    /// Wiring it to the timer alone was the same mistake one layer up: the timer had
+    /// never run, so a card had never been written, while the button beside it had
+    /// written 56 events. Both triggers fill `rejected` now, so both teach.
+    ///
     /// `kept` is empty on purpose, and that is the whole verdict. The card's `dropped`
     /// then holds the title, so folding it into the ledger puts a negative delta on
     /// that text — which is right beyond the calendar too. A window title not worth an
@@ -318,5 +418,20 @@ enum CalendarMirror {
                            wouldWrite: entry.title,
                            context: context)
         }
+    }
+}
+
+// Written by hand, and in an extension so the memberwise initialiser survives — the
+// tests build a `Quality` field by field, and a stored status must not be able to make
+// `load()` throw. What a throw costs here is not a missing field: it is a fresh zero,
+// and every count since the mirror was first used gone, which is the same silent lie
+// the type was added to end.
+extension CalendarMirror.Quality {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(named: try c.decodeIfPresent(Int.self, forKey: .named) ?? 0,
+                  shortened: try c.decodeIfPresent(Int.self, forKey: .shortened) ?? 0,
+                  fellBack: try c.decodeIfPresent(Int.self, forKey: .fellBack) ?? 0,
+                  tooShort: try c.decodeIfPresent(Int.self, forKey: .tooShort) ?? 0)
     }
 }

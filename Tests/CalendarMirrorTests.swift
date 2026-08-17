@@ -40,9 +40,11 @@ final class CalendarMirrorTests: XCTestCase {
     private func plan(_ blocks: [TimeBlock],
                       existing: [CalendarMirror.Existing] = [],
                       written: Set<String> = [],
-                      tombstoned: Set<String> = []) -> CalendarMirror.Plan {
+                      tombstoned: Set<String> = [],
+                      trigger: CalendarMirror.Trigger = .reconcile) -> CalendarMirror.Plan {
         CalendarMirror.plan(blocks: blocks, existing: existing, written: written,
-                            tombstoned: tombstoned, now: now, resumeGap: resumeGap)
+                            tombstoned: tombstoned, now: now, resumeGap: resumeGap,
+                            trigger: trigger)
     }
 
     // MARK: - Only settled work
@@ -145,6 +147,45 @@ final class CalendarMirrorTests: XCTestCase {
         XCTAssertTrue(result.tombstone.isEmpty)
     }
 
+    // MARK: - A press is not a reconcile
+
+    func testAPressWritesOverATombstoneAndOverSilence() {
+        // The way back for somebody who cleared a day and changed their mind. A timer
+        // reads the absence as an instruction; a press is the opposite instruction,
+        // said out loud.
+        let b = block(minutesAgo: 30)
+        let key = CalendarMirror.key(forBlockStartingAt: b.start)
+
+        let result = plan([b], existing: [], written: [key], tombstoned: [key], trigger: .press)
+
+        XCTAssertEqual(result.create.map(\.key), [key])
+        XCTAssertTrue(result.tombstone.isEmpty, "a press does not agree to stay silent")
+    }
+
+    func testAPressStillRecordsThatTheUserHadDeletedIt() {
+        // The defect this locks shut. `recordRejections` ran from the timer alone, the
+        // timer had never met its start condition on the author's Mac, and the press —
+        // which had written 56 events — planned against an empty ledger, so the branch
+        // that notices a deletion could not be reached from either side. Overriding a
+        // deletion and learning from it are different acts, and only one of them was
+        // ever in question.
+        let b = block(minutesAgo: 30)
+        let key = CalendarMirror.key(forBlockStartingAt: b.start)
+
+        let result = plan([b], existing: [], written: [key], trigger: .press)
+
+        XCTAssertEqual(result.rejected.map(\.key), [key])
+        XCTAssertEqual(CalendarMirror.correctionCards(for: result, now: now).count, 1)
+    }
+
+    func testAPressOverAnEventItNeverWroteIsNotACorrection() {
+        // Absent because this is the first write, not because anybody removed it.
+        let result = plan([block(minutesAgo: 30)], existing: [], written: [], trigger: .press)
+
+        XCTAssertEqual(result.create.count, 1)
+        XCTAssertTrue(result.rejected.isEmpty)
+    }
+
     // MARK: - What is fit to write in somebody's day
 
     func testProseIsNotWrittenAsATitle() {
@@ -189,6 +230,44 @@ final class CalendarMirrorTests: XCTestCase {
         XCTAssertEqual(result.quality.fellBack, 1)
         XCTAssertEqual(result.quality.named, 0)
         XCTAssertEqual(result.quality.namedFraction, 0)
+    }
+
+    func testTheProjectSurvivesASegmentThatDoesNot() {
+        // Measured, not supposed. `eval/calendar/` on four harvested days: 103 minutes
+        // of `Formiq iOS — オンボーディングのデザインが単調な理由を調査` went to the
+        // calendar as **Code**, because `isPresentable` is allSatisfy and the second
+        // segment is a clause. The project was sitting right there in front of it.
+        let result = plan([block(minutesAgo: 30,
+                                 label: "Formiq iOS — オンボーディングのデザインが単調な理由を調査")])
+
+        XCTAssertEqual(result.create.count, 1)
+        XCTAssertEqual(result.create[0].title, "Formiq iOS")
+        XCTAssertEqual(result.quality.shortened, 1)
+        XCTAssertEqual(result.quality.fellBack, 0)
+        XCTAssertEqual(result.quality.named, 0, "half a label is not a whole one")
+        XCTAssertEqual(result.quality.namedFraction, 1, "mull could still name it")
+    }
+
+    func testAHeadThatIsNotANameTakesTheWholeLabelWithIt() {
+        // The direction is the safety of the rule. Keeping any surviving segment would
+        // promote `元のプロファイル` — Firefox's profile name, the exact string the
+        // chrome rule exists to stop — out of a title whose front is prose.
+        let result = plan([block(minutesAgo: 30,
+                                 label: "販売が集客に変わる構造・13パターン — 元のプロファイル")])
+
+        XCTAssertEqual(result.create[0].title, "Code")
+        XCTAssertEqual(result.quality.fellBack, 1)
+        XCTAssertEqual(result.quality.shortened, 0)
+    }
+
+    func testAWholeLabelIsNotReshaped() {
+        // A label that already passed comes back verbatim, separator and all — the
+        // rejoin is only for what was cut.
+        let result = plan([block(minutesAgo: 30, label: "Mull - CalendarView.swift")])
+
+        XCTAssertEqual(result.create[0].title, "Mull - CalendarView.swift")
+        XCTAssertEqual(result.quality.named, 1)
+        XCTAssertEqual(result.quality.shortened, 0)
     }
 
     func testCopiedTextIsNeverWrittenAsATitle() {

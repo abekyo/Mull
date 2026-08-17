@@ -400,11 +400,16 @@ enum BlockSegmenter {
     }
 
     /// Chrome segments observed across a set of blocks.
+    ///
+    /// Every title each block saw, not the one that captions it. `ProjectNames.chrome`
+    /// needs five distinct titles from an app before it will call anything furniture,
+    /// and one-title-per-block never reached that on a normal day: a day with four
+    /// browser blocks in it had four titles, so the rule that exists to catch
+    /// `元のプロファイル` could not fire, and it went to the calendar as 47 minutes of
+    /// work on 2026-08-11. One Firefox block routinely holds thirty distinct page
+    /// titles. The corpus was always there; it was being thrown away one step early.
     static func chromeSegments(in blocks: [TimeBlock]) -> Set<String> {
-        ProjectNames.chrome(in: blocks.compactMap { block in
-            guard let title = block.topWindowTitle else { return nil }
-            return (app: block.app, title: title)
-        })
+        ProjectNames.chrome(in: blocks.flatMap(\.observedTitles))
     }
 }
 
@@ -585,6 +590,13 @@ struct TimeBlock: Identifiable {
         let dominantOwned = windowTitles.filter { windowTitleApps[$0.key] == app }
         if let best = mostSeen(in: dominantOwned) { return best }
         return mostSeen(in: windowTitles)
+    }
+
+    /// Every window title seen inside this block, each with the app that put it on
+    /// screen. `topWindowTitle` is the one that captions the block; this is the corpus
+    /// behind it, and the evidence half of `ProjectNames` cannot work without it.
+    var observedTitles: [(app: String, title: String)] {
+        windowTitles.keys.map { (app: windowTitleApps[$0] ?? app, title: $0) }
     }
 
     private func mostSeen(in counts: [String: Int]) -> String? {

@@ -107,6 +107,7 @@ extension CalendarWeekView {
     private func mirrorGlyph(_ state: CalendarMirrorState) -> String {
         switch state {
         case .off:        return "circle"
+        case .manualOnly: return "hand.point.up.left"
         case .noCalendar: return "exclamationmark.triangle"
         case .waiting:    return "clock"
         case .working:    return "arrow.triangle.2.circlepath"
@@ -120,6 +121,8 @@ extension CalendarWeekView {
     private func mirrorLabel(_ state: CalendarMirrorState) -> String {
         switch state {
         case .off:        return ""
+        case .manualOnly(let status):
+            return String(localized: "\(status.created) written by hand")
         case .noCalendar: return String(localized: "No calendar picked")
         case .waiting:    return String(localized: "Waiting to write")
         case .failing:    return String(localized: "Couldn't write")
@@ -133,6 +136,13 @@ extension CalendarWeekView {
         switch state {
         case .off:
             return ""
+        case .manualOnly(let status):
+            var parts = [String(localized: "Everything here was written by pressing the button. mull is not keeping it up to date on its own.")]
+            if let wrote = status.lastChange {
+                parts.append(String(localized: "Last write \(Self.sinceLabel(wrote))"))
+            }
+            parts.append(String(localized: "Click for settings."))
+            return parts.joined(separator: " ")
         case .noCalendar:
             return String(localized: "The mirror is on but has no calendar to write to, so it does nothing. Click to pick one.")
         case .waiting:
@@ -145,7 +155,7 @@ extension CalendarWeekView {
             if let run = status.lastRun {
                 parts.append(String(localized: "Last checked \(Self.sinceLabel(run))"))
             }
-            parts.append(String(localized: "\(status.created) written, \(status.deleted) removed, \(status.tombstoned) you deleted"))
+            parts.append(String(localized: "\(status.created) written, \(status.deleted) removed, \(status.removedByUser) you deleted"))
             if let fraction = status.quality.namedFraction {
                 parts.append(String(localized: "\(Int((fraction * 100).rounded()))% named from what you had open"))
             }

@@ -424,6 +424,16 @@ struct GeneralTab: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
             } else {
+                // Said out loud when the switch above is off, because the counts below
+                // are then entirely the button's work and read as the timer's. This is
+                // the state the author's own Mac was in for nine days.
+                if !mirrorEnabled {
+                    Label("Everything below was written by pressing the button in the calendar's toolbar. The switch above is off, so mull is not keeping it up to date.",
+                          systemImage: "hand.point.up.left")
+                        .font(DS.captionFont)
+                        .foregroundStyle(DS.inkDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let run = status.lastRun {
                     Label {
                         Text("Last checked \(CalendarWeekView.sinceLabel(run))")
@@ -433,14 +443,14 @@ struct GeneralTab: View {
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkDim)
                 }
-                Text("\(status.created) written · \(status.updated) brought up to date · \(status.deleted) removed · \(status.tombstoned) you deleted and mull won't rewrite")
+                Text("\(status.created) written · \(status.updated) brought up to date · \(status.deleted) removed · \(status.removedByUser) you deleted")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
                     .fixedSize(horizontal: false, vertical: true)
 
                 // The quality reading, in the same words the write sheet uses.
                 if let fraction = status.quality.namedFraction {
-                    Text("\(Int((fraction * 100).rounded()))% of the last pass was named from what you had open; the rest just say the app's name.")
+                    Text("\(Int((fraction * 100).rounded()))% of the last pass was named from what you had open — \(status.quality.shortened) of those keep only the project. The rest just say the app's name.")
                         .font(DS.captionFont)
                         .foregroundStyle(DS.inkFaint)
                         .fixedSize(horizontal: false, vertical: true)

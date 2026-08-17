@@ -11,8 +11,9 @@ import Foundation
 //
 // What it reports, per day:
 //
-//   named       the block's own label was fit to write
-//   fell back   it was not, so the event says "Xcode" instead
+//   named       the block's own label was fit to write, whole
+//   shortened   its front was, so the event keeps the project and drops the rest
+//   fell back   none of it was, so the event says "Xcode" instead
 //   too short   under CalendarMirror.minimumDuration, not written at all
 //   clipboard   the label was copied text, refused on provenance (never counted named)
 //
@@ -119,17 +120,27 @@ func score(_ dayCase: DayCase, resumeGap: TimeInterval) -> DayScore {
                                     app: block.app, minutes: minutes))
             continue
         }
-        let (_, fellBack) = CalendarMirror.title(for: block)
-        guard fellBack else { continue }
-        let reason: String
-        if block.label.isEmpty || block.label == block.app {
-            reason = "no title"
-        } else if block.labelFromClipboard {
-            reason = "clipboard"
-        } else {
-            reason = "not a name"
+        let (written, naming) = CalendarMirror.title(for: block)
+        switch naming {
+        case .named:
+            continue
+        case .shortened:
+            // Not a refusal so much as a haircut, and it is listed for the same reason
+            // the refusals are: this is where a rule that starts trimming good titles
+            // becomes visible, and the aggregate cannot show it.
+            refusals.append(Refusal(reason: "shortened to “\(written)”", title: block.label,
+                                    app: block.app, minutes: minutes))
+        case .fellBack:
+            let reason: String
+            if block.label.isEmpty || block.label == block.app {
+                reason = "no title"
+            } else if block.labelFromClipboard {
+                reason = "clipboard"
+            } else {
+                reason = "not a name"
+            }
+            refusals.append(Refusal(reason: reason, title: block.label, app: block.app, minutes: minutes))
         }
-        refusals.append(Refusal(reason: reason, title: block.label, app: block.app, minutes: minutes))
     }
 
     let written = plan.create.map { (title: $0.title, minutes: Int($0.end.timeIntervalSince($0.start) / 60)) }
@@ -144,25 +155,30 @@ func report(_ s: DayScore) {
     let q = s.quality
     print("── \(s.name)")
     print("   named       \(q.named)")
+    print("   shortened   \(q.shortened)")
     print("   fell back   \(q.fellBack)")
     print("   too short   \(q.tooShort)")
     if let fraction = q.namedFraction {
-        print("   NAMED       \(pct(fraction))  (\(q.named)/\(q.considered) events mull could name)")
+        print("   NAMED       \(pct(fraction))  (\(q.named + q.shortened)/\(q.considered) events mull could name)")
     } else {
         print("   NAMED       —  (nothing long enough to write)")
     }
 
+    // Every row, not the top twenty. NAMED counts how often the rule found a name and
+    // cannot count whether the name was right — a gate that let junk through would
+    // raise it. Correctness is read here, by a person, so truncating this list is
+    // truncating the only measurement of it there is.
     if !s.written.isEmpty {
-        print("\n   what would land on the calendar:")
-        for row in s.written.sorted(by: { $0.minutes > $1.minutes }).prefix(20) {
+        print("\n   what would land on the calendar (read these — NAMED cannot tell you if they are right):")
+        for row in s.written.sorted(by: { $0.minutes > $1.minutes }) {
             print(String(format: "     %4dm  %@", row.minutes, row.title))
         }
     }
 
     let refused = s.refusals.filter { $0.reason != "too short" }
     if !refused.isEmpty {
-        print("\n   refused (read these — a rule that starts refusing good names shows up here):")
-        for r in refused.sorted(by: { $0.minutes > $1.minutes }).prefix(25) {
+        print("\n   refused or trimmed (a rule that starts eating good names shows up here):")
+        for r in refused.sorted(by: { $0.minutes > $1.minutes }) {
             print(String(format: "     %4dm  [%@] %@  →  %@", r.minutes, r.reason, r.title, r.app))
         }
     }
@@ -201,7 +217,7 @@ struct CalendarEval {
     let resumeGap = BlockSegmenter.defaultResumeGap
     print("Calendar title quality · resumeGap \(Int(resumeGap))s · floor \(Int(CalendarMirror.minimumDuration / 60))m\n")
 
-    var totalNamed = 0, totalConsidered = 0, totalShort = 0
+    var totalNamed = 0, totalShortened = 0, totalConsidered = 0, totalShort = 0
     for file in files {
         guard let data = try? Data(contentsOf: file),
               let dayCase = try? JSONDecoder().decode(DayCase.self, from: data) else {
@@ -211,6 +227,7 @@ struct CalendarEval {
         let scored = score(dayCase, resumeGap: resumeGap)
         report(scored)
         totalNamed += scored.quality.named
+        totalShortened += scored.quality.shortened
         totalConsidered += scored.quality.considered
         totalShort += scored.quality.tooShort
     }
@@ -219,7 +236,9 @@ struct CalendarEval {
         print("Nothing long enough to write in any harvested day.")
         exit(0)
     }
-    print("═══ \(files.count) day(s): NAMED \(pct(Double(totalNamed) / Double(totalConsidered)))"
-          + "  (\(totalNamed)/\(totalConsidered)), \(totalShort) too short")
+    let readable = totalNamed + totalShortened
+    print("═══ \(files.count) day(s): NAMED \(pct(Double(readable) / Double(totalConsidered)))"
+          + "  (\(readable)/\(totalConsidered), of which \(totalShortened) shortened),"
+          + " \(totalShort) too short")
     }
 }

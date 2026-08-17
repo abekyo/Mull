@@ -32,9 +32,13 @@ final class CalendarMirrorStatusTests: XCTestCase {
     }
 
     private func plan(tombstone: Set<String> = [],
+                      rejected: [String] = [],
                       quality: CalendarMirror.Quality = .init()) -> CalendarMirror.Plan {
         var p = CalendarMirror.Plan()
         p.tombstone = tombstone
+        p.rejected = rejected.map {
+            CalendarMirror.Entry(key: $0, title: $0, start: now, end: now)
+        }
         p.quality = quality
         return p
     }
@@ -128,6 +132,35 @@ final class CalendarMirrorStatusTests: XCTestCase {
                                                    enabled: false, calendarID: nil).isFaulty)
     }
 
+    func testWritingByHandWithTheTimerOffIsItsOwnState() {
+        // The state the author's Mac was actually in: 56 events written by the toolbar
+        // button, `calendarMirrorEnabled` never once written, a status object holding
+        // the counts — and every screen asking "is the timer on?", getting no, and
+        // drawing nothing. Off and off-but-you-have-been-using-it are not the same
+        // thing to say to somebody.
+        var status = CalendarMirrorStatus()
+        status.record(plan(), created: 6, updated: 0, deleted: 0,
+                      failures: 0, lastError: nil, now: now)
+
+        let state = CalendarMirrorState.current(status: status, enabled: false, calendarID: nil)
+
+        XCTAssertEqual(state, .manualOnly(status))
+        XCTAssertFalse(state.isFaulty, "writing by hand is a way to use this, not a fault")
+    }
+
+    func testARemovalIsCountedWhetherOrNotItWasTombstoned() {
+        // A press writes the event again rather than tombstoning it, so `tombstoned`
+        // answers zero on a Mac where only the button is used. The retraction criterion
+        // in CLAUDE.md §0 asks how often what mull wrote was not wanted, which is this
+        // number and not that one.
+        var status = CalendarMirrorStatus()
+        status.record(plan(tombstone: [], rejected: ["a", "b"]), created: 2, updated: 0,
+                      deleted: 0, failures: 0, lastError: nil, now: now)
+
+        XCTAssertEqual(status.removedByUser, 2)
+        XCTAssertEqual(status.tombstoned, 0)
+    }
+
     func testOnWithNoCalendarIsAFault() {
         // The exact shape of a timer that fires every hour and returns immediately,
         // which is what two independent switches in a settings pane make easy to build.
@@ -157,6 +190,31 @@ final class CalendarMirrorStatusTests: XCTestCase {
 
     func testAnEmptyStoreLoadsAsNeverRun() {
         XCTAssertFalse(CalendarMirrorStatus.load(from: store).hasRun)
+    }
+
+    func testAStatusWrittenByAnOlderBuildKeepsItsCounts() {
+        // This is what shipping a new field costs if nobody writes the decoder. The
+        // synthesised one throws on the first missing key, `load()` catches it and
+        // returns a fresh zero, and every count since the mirror was first used
+        // disappears at the moment of an upgrade — silently, which is the exact
+        // failure this type was added to end. The JSON below is the shape actually
+        // found in `com.mull.app` on 2026-08-18.
+        let legacy = """
+            {"created":6,"updated":0,"deleted":0,"tombstoned":0,"failures":0,\
+            "lastRun":808656467.248357,"lastChange":808656467.248357,\
+            "quality":{"named":4,"fellBack":2,"tooShort":3}}
+            """
+        store.set(Data(legacy.utf8), forKey: CalendarMirrorStatus.storageKey)
+
+        let loaded = CalendarMirrorStatus.load(from: store)
+
+        XCTAssertEqual(loaded.created, 6)
+        XCTAssertEqual(loaded.quality.named, 4)
+        XCTAssertEqual(loaded.quality.fellBack, 2)
+        XCTAssertEqual(loaded.quality.shortened, 0, "a field that did not exist reads as none of it")
+        XCTAssertEqual(loaded.removedByUser, 0)
+        XCTAssertNil(loaded.lastSweep, "never swept, rather than swept at the epoch")
+        XCTAssertTrue(loaded.hasRun)
     }
 
     func testClearingForgetsEverything() {

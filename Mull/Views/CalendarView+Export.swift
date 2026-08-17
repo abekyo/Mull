@@ -80,9 +80,13 @@ extension CalendarWeekView {
         // question you only think to ask once it is in the wrong one.
         let target = calendars.first { $0.id == Preferences.mirrorCalendarID } ?? calendars[0]
         let mirror = appState.calendarMirror
+        // Read here, on the main actor, and handed down: the plan is derived off the
+        // main thread and the ledger is main-actor state. Without it the press cannot
+        // see what mull wrote, and a deletion is indistinguishable from a first run.
+        let written = mirror.writtenKeys
 
         Task.detached(priority: .userInitiated) {
-            let plan = mirror.manualPlan(in: target.id, from: from, to: to)
+            let plan = mirror.manualPlan(in: target.id, from: from, to: to, written: written)
             await MainActor.run {
                 // A fresh sheet asks the automatic question fresh. See `exportKeepUpdated`.
                 exportKeepUpdated = false
@@ -178,6 +182,8 @@ extension CalendarWeekView {
 
                 qualityNote(proposal.plan.quality)
 
+                titleList(proposal.plan)
+
                 Text("Only finished work is written, so nothing here will move afterwards. ⌘Z takes the whole write back.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
@@ -216,6 +222,52 @@ extension CalendarWeekView {
         .frame(width: 420)
     }
 
+    /// The text itself, before it is written.
+    ///
+    /// The sheet used to show counts, a percentage and — for a calendar on an account —
+    /// a warning that "these titles are taken from your window titles and will leave
+    /// this Mac". Everything except the titles. What that hid is not hypothetical: on
+    /// four harvested days the largest rows included
+    /// `不動産コンサルティング報告書｜フィリピン保有コンドミニアム9戸(マカティ市)` for a
+    /// hundred minutes and a meal log with a brand name and a weight in it. mull refuses
+    /// to write clipboard text on provenance grounds (`labelFromClipboard`) because it
+    /// cannot know what document it came out of — and a window title is a document's
+    /// name. The refusal is right and it cannot be extended to titles, because titles
+    /// are the whole feature. So the remaining protection is that the person about to
+    /// send them somewhere can read them first.
+    ///
+    /// Every row, scrolled rather than truncated. A "+12 more" here would hide exactly
+    /// the row somebody needed to see.
+    @ViewBuilder
+    func titleList(_ plan: CalendarMirror.Plan) -> some View {
+        let rows = (plan.create + plan.update.map(\.entry)).sorted { $0.start < $1.start }
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: DS.hair) {
+                Text("What will be written")
+                    .font(DS.captionFont)
+                    .foregroundStyle(DS.inkDim)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: DS.hair) {
+                        ForEach(rows, id: \.key) { entry in
+                            HStack(alignment: .firstTextBaseline, spacing: DS.sm) {
+                                Text(TimeFormat.person(entry.start))
+                                    .font(DS.miniFont.monospacedDigit())
+                                    .foregroundStyle(DS.inkFaint)
+                                Text(entry.title)
+                                    .font(DS.captionFont)
+                                    .foregroundStyle(DS.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 160)
+            }
+        }
+    }
+
     /// How much of this range mull could actually name.
     ///
     /// On the sheet rather than in a log, because this is the number that decides
@@ -233,6 +285,12 @@ extension CalendarWeekView {
                     } icon: {
                         Image(systemName: "textformat")
                     }
+                }
+                if quality.shortened > 0 {
+                    Text(counted(quality.shortened,
+                                 one: "1 event keeps the project but not what you were doing in it.",
+                                 other: "\(quality.shortened) events keep the project but not what you were doing in it."))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if quality.fellBack > 0 {
                     Text(counted(quality.fellBack,

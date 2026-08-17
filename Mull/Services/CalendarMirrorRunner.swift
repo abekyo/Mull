@@ -30,6 +30,29 @@ final class CalendarMirrorRunner {
     private static let writtenKey = "calendarMirrorWritten"
     private static let tombstoneKey = "calendarMirrorTombstoned"
 
+    /// The keys mull has written, for the write sheet.
+    ///
+    /// A press used to be planned against an empty ledger, which made it structurally
+    /// incapable of noticing a deletion: `CalendarMirror.plan` reads "written before,
+    /// absent now" as the user having removed it, and with nothing written before,
+    /// that branch could not be reached. The press still overrides deletions — that is
+    /// `Trigger.press` — but it can only override something it can see.
+    var writtenKeys: Set<String> { written }
+
+    /// How far back a once-a-day pass reconciles.
+    ///
+    /// The hourly pass covers two days, and that is right for the work it does: almost
+    /// everything it writes settled in the last few hours, and re-deriving a fortnight
+    /// every hour would cost far more than it could correct. But the two-day window is
+    /// also the only window in which mull can *notice a deletion*, and deletions do not
+    /// happen on the day. Somebody tidying last week's calendar on a Sunday was
+    /// invisible: no tombstone, no correction card, and the ledger holding the key for
+    /// another twenty-three days without ever looking at it again.
+    ///
+    /// Kept under `ledgerHorizon`, or a sweep would find keys already pruned out of
+    /// `written` and read its own past work as somebody else's events.
+    static let sweepDays = 14
+
     /// What the mirror has been doing, for the screens that report it.
     ///
     /// Held in memory rather than decoded on demand, unlike the two ledgers above. The
@@ -80,29 +103,67 @@ final class CalendarMirrorRunner {
 
     // MARK: - One pass
 
-    /// Reconcile the covered range. Returns what it did, for the tests and the log.
-    @discardableResult
-    func run(now: Date = Date()) -> CalendarMirror.Plan {
-        guard Preferences.mirrorEnabled, let calendarID = Preferences.mirrorCalendarID else {
-            return CalendarMirror.Plan()
-        }
+    /// Reconcile the covered range: today and yesterday, or the last fortnight on the
+    /// first pass of a day.
+    ///
+    /// The deriving half runs off the main thread and the writing half comes back to
+    /// it. Two days of blocks was already a database read on the main thread every
+    /// hour; a fortnight of them once a day would be a visible stall, and fixing the
+    /// window without moving the work would have traded one defect for another.
+    func run(now: Date = Date()) {
+        guard Preferences.mirrorEnabled, let calendarID = Preferences.mirrorCalendarID else { return }
 
+        let sweeping = shouldSweep(now: now)
+        guard let (from, to) = Self.range(endingAt: now,
+                                          days: sweeping ? Self.sweepDays : CalendarMirror.daysCovered)
+        else { return }
+
+        let written = self.written
+        let tombstoned = self.tombstoned
+
+        Task.detached(priority: .utility) { [weak self] in
+            guard let plan = self?.plan(in: calendarID, from: from, to: to,
+                                        written: written, tombstoned: tombstoned,
+                                        trigger: .reconcile, now: now) else { return }
+            await MainActor.run {
+                self?.apply(plan, calendarID: calendarID, now: now, swept: sweeping)
+            }
+        }
+    }
+
+    /// Whether this pass is the first of a calendar day, and so the one that looks
+    /// further back. Anchored on the last sweep rather than on a counter, so a Mac
+    /// asleep for three days sweeps once when it wakes rather than not at all.
+    private func shouldSweep(now: Date) -> Bool {
+        guard let last = status.lastSweep else { return true }
+        return !Calendar.current.isDate(last, inSameDayAs: now)
+    }
+
+    /// Whole days back from the day `now` falls in, through to tomorrow's midnight.
+    private static func range(endingAt now: Date, days: Int) -> (from: Date, to: Date)? {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
-        guard let from = cal.date(byAdding: .day, value: -(CalendarMirror.daysCovered - 1), to: today),
-              let to = cal.date(byAdding: .day, value: 1, to: today) else { return CalendarMirror.Plan() }
+        guard let from = cal.date(byAdding: .day, value: -(max(days, 1) - 1), to: today),
+              let to = cal.date(byAdding: .day, value: 1, to: today) else { return nil }
+        return (from, to)
+    }
 
+    /// What a run of either kind would do. Reads the database and EventKit and touches
+    /// no mutable state of its own, so it is safe to call off the main thread — which
+    /// both callers do, because a month on screen and a fortnight on a timer are the
+    /// same amount of re-derivation and neither should stop the window.
+    nonisolated func plan(in calendarID: String, from: Date, to: Date,
+                          written: Set<String>, tombstoned: Set<String>,
+                          trigger: CalendarMirror.Trigger, now: Date) -> CalendarMirror.Plan {
         let engine = TimeBlockEngine(database: database)
-        let plan = CalendarMirror.plan(
+        return CalendarMirror.plan(
             blocks: blocks(from: from, to: to, engine: engine),
             existing: calendar.mirroredEvents(in: calendarID, from: from, to: to),
             written: written,
             tombstoned: tombstoned,
             now: now,
-            resumeGap: engine.resumeGap)
-
-        apply(plan, calendarID: calendarID, now: now)
-        return plan
+            resumeGap: engine.resumeGap,
+            trigger: trigger)
     }
 
     /// Every block whose day falls in the range. Derived per day because that is the
@@ -132,19 +193,19 @@ final class CalendarMirrorRunner {
     /// Nothing is tombstoned by this path either — a missing event is a thing to
     /// write, not a decision to record.
     ///
-    /// `nonisolated` because it touches neither ledger and no other mutable state, and
-    /// a month on screen means re-deriving six weeks of blocks — which is not work to
-    /// do on the main thread while somebody waits for a sheet to open.
+    /// `tombstoned` is passed empty and `written` is not, and the difference is the
+    /// whole point. The press must be able to *see* what mull wrote, or it cannot tell
+    /// a row the user deleted from one that was never written, and the correction is
+    /// lost exactly where it is most reliable. What it does with that knowledge is
+    /// `Trigger.press`: write anyway, and file the card.
+    ///
+    /// `nonisolated` because it touches no mutable state of its own, and a month on
+    /// screen means re-deriving six weeks of blocks — which is not work to do on the
+    /// main thread while somebody waits for a sheet to open.
     nonisolated func manualPlan(in calendarID: String, from: Date, to: Date,
-                                now: Date = Date()) -> CalendarMirror.Plan {
-        let engine = TimeBlockEngine(database: database)
-        return CalendarMirror.plan(
-            blocks: blocks(from: from, to: to, engine: engine),
-            existing: calendar.mirroredEvents(in: calendarID, from: from, to: to),
-            written: [],
-            tombstoned: [],
-            now: now,
-            resumeGap: engine.resumeGap)
+                                written: Set<String>, now: Date = Date()) -> CalendarMirror.Plan {
+        plan(in: calendarID, from: from, to: to,
+             written: written, tombstoned: [], trigger: .press, now: now)
     }
 
     /// Fold a hand-written result into the ledger, so the timer afterwards agrees with
@@ -166,17 +227,25 @@ final class CalendarMirrorRunner {
         tombstoned.subtract(created)
         self.tombstoned = prune(tombstoned, before: now)
 
+        // The same wire the timer has. It ran from `apply` alone, and `apply` runs from
+        // a timer that had never started, so no calendar correction had ever reached
+        // `CorrectionIndex` — while this path wrote 56 events.
+        recordRejections(plan, now: now)
+
         update { $0.record(plan, created: created.count, updated: updated,
                            deleted: deleted.count, failures: 0, lastError: nil, now: now) }
     }
 
-    private func apply(_ plan: CalendarMirror.Plan, calendarID: String, now: Date) {
+    private func apply(_ plan: CalendarMirror.Plan, calendarID: String, now: Date, swept: Bool) {
         // Recorded even when there is nothing to do. "Ran and found nothing" and "did
         // not run" produce the same empty calendar and are the opposite problem, and
         // until this line there was no way to tell them apart from inside mull.
         guard !plan.isEmpty else {
-            update { $0.record(plan, created: 0, updated: 0, deleted: 0,
-                               failures: 0, lastError: nil, now: now) }
+            update {
+                $0.record(plan, created: 0, updated: 0, deleted: 0,
+                          failures: 0, lastError: nil, now: now)
+                if swept { $0.lastSweep = now }
+            }
             return
         }
 
@@ -198,6 +267,11 @@ final class CalendarMirrorRunner {
         }
 
         for entry in plan.create {
+            // The plan was derived off the main thread against a snapshot of the ledger,
+            // and a press can land in that window. A key that has become `written` since
+            // then is an event that now exists, and creating it again would put two
+            // identical rows in somebody's day with only one of them in the ledger.
+            guard !written.contains(entry.key) else { continue }
             let fields = CalendarService.EventFields(title: entry.title, start: entry.start,
                                                      end: entry.end, calendarID: calendarID)
             let extras = CalendarService.EventExtras(url: CalendarMirror.marker(entry.key))
@@ -229,8 +303,11 @@ final class CalendarMirrorRunner {
 
         recordRejections(plan, now: now)
 
-        update { $0.record(plan, created: created, updated: updated, deleted: deleted,
-                           failures: failures, lastError: lastError, now: now) }
+        update {
+            $0.record(plan, created: created, updated: updated, deleted: deleted,
+                      failures: failures, lastError: lastError, now: now)
+            if swept { $0.lastSweep = now }
+        }
     }
 
     /// Turn the blocks the user deleted into correction cards.
