@@ -284,6 +284,15 @@ any tool (git, Obsidian, iCloud, another AI):
 └── daily/                      — one file per day
 ```
 
+You can move the folder. `defaults write com.mull.app vaultPath <absolute path>` puts the vault
+somewhere else — inside iCloud Drive, inside a git working copy — so that whatever already syncs
+that place syncs this. There is no UI for it, mull does not sync anything itself, and the
+database stays where it is. What it costs you in guarantees is written out in
+[SECURITY.md](SECURITY.md) under *Moving the vault*; read that row first, because the vault's
+`0700` protection is one of the things it costs. One Mac recording and others reading is the
+shape this supports: two Macs recording into one synced folder rewrite each other's `me.md`,
+`now.md`, `full.md` and `mull.md` every minute.
+
 `daily/` does not yet hold what that line promises. `MullEngine.writeDailyFile` is a no-op, and
 what is actually written there is a copy of `full.md`, refreshed every 60 seconds. The day's
 written record exists — it is generated, it is accurate, and it is in the database — but it has

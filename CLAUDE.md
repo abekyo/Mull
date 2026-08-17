@@ -189,6 +189,7 @@ Curator が訂正を検知 → Card に §1–3 を書く（§1 は whats_active
 ## 4. Core Values
 
 1. **Local-first（外に出ない）**。全データはユーザーの Mac 内。mull のサーバーは存在しない。LLM は既定 Off
+   （vault を自分で同期先に移した場合にこの行が literal に破れる。条件は §8.1）
 2. **Portable（持ち出せる）**。出力はプレーン md。DB/API ロックインなし。git/Obsidian 互換
 3. **Correctable（人間が上書きできる）**。自動層は人間の編集を壊さない（Curator / provenance）
 4. **Measurable（測れる）**。選択の質は eval で測る。vibes で「良くなった」と言わない
@@ -424,6 +425,13 @@ Screenpipe も ManicTime も Timing も、この信号を持っていません�
 ### 8.1 大原則: ローカル完結
 
 - 全データはユーザーの Mac 内。mull 社のサーバーは存在しない
+- **この1行目には 2026-08-17 に条件が付きました。** `vaultPath` を設定すると vault を任意の場所に
+  置けます。そこを iCloud Drive にすれば、vault の中身（ウィンドウ本文と打鍵を圧縮したもの）は
+  Apple のサーバーに乗ります。mull が同期するのではなく、ユーザーが同期先に置く形です。UI は
+  ありません。DB は動きません（WAL を持つ SQLite を同期フォルダに置くのは破損の documented な
+  作り方なので、そちらは `~/Library/Application Support/mull/` に固定のままです）。
+  何が変わるかの正本は [SECURITY.md](SECURITY.md) の Moving the vault の行で、
+  ここには完全一覧を置きません（契約2）
 - LLM は既定で Off。クラウドを明示的に選んだ時だけ外部送信し、送信前に機密は除外する
 - Ollama か OpenAI互換ローカルサーバーを選べば、LLM 機能を含めてネットワークを切ったまま動く。
   MCP の13ツールはどの設定でも LLM を呼ばない（境界の全件と、ソースのどこで確かめるかは [SECURITY.md](SECURITY.md)）
