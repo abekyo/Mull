@@ -12,15 +12,21 @@ import CoreGraphics
 final class WeekBarScaleTests: XCTestCase {
 
     private let hour: TimeInterval = 3600
+    /// Spelled out for the same reason `hour` is, and not only for symmetry: a bare
+    /// `40 * 60` inside a `[TimeInterval]` literal is two integer literals, and the
+    /// type checker settles their multiplication as `Int` before the array's element
+    /// type gets a say. Swift 6.3 lets it through; the Xcode 16.4 CI runs on does not,
+    /// so this file compiled here and failed to compile there.
+    private let minute: TimeInterval = 60
 
     /// The bug, stated as a measurement: two weeks whose longest days differ by an
     /// order of magnitude must not draw the same bar.
     func testALongDayIsNotTheSameHeightAsAShortOne() {
         let longWeek = WeekBarScale([9 * hour, 2 * hour, 0, 0, 0, 0, 0])
-        let shortWeek = WeekBarScale([40 * 60, 20 * 60, 0, 0, 0, 0, 0])
+        let shortWeek = WeekBarScale([40 * minute, 20 * minute, 0, 0, 0, 0, 0])
 
         let nineHours = longWeek.height(for: 9 * hour)
-        let fortyMinutes = shortWeek.height(for: 40 * 60)
+        let fortyMinutes = shortWeek.height(for: 40 * minute)
 
         XCTAssertGreaterThan(nineHours, fortyMinutes * 5,
                              "the week's own maximum must not set the scale")
@@ -74,9 +80,9 @@ final class WeekBarScaleTests: XCTestCase {
 
     /// A recorded day is never mistaken for an empty one, however short it was.
     func testTwentyMinutesIsVisiblyMoreThanNothing() {
-        let week = WeekBarScale([20 * 60, 0, 0, 0, 0, 0, 0])
+        let week = WeekBarScale([20 * minute, 0, 0, 0, 0, 0, 0])
 
-        XCTAssertGreaterThan(week.height(for: 20 * 60), week.height(for: 0))
+        XCTAssertGreaterThan(week.height(for: 20 * minute), week.height(for: 0))
         XCTAssertEqual(week.height(for: 0), WeekBarScale.emptyStub, accuracy: 0.001)
     }
 
