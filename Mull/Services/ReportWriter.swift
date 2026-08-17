@@ -218,10 +218,12 @@ struct ReportWriter {
         let average = series.map(\.drift).reduce(0, +) / Double(series.count)
 
         if let today = provenance(for: date)?.drift {
-            guard series.count > 1 else { return "You changed \(percent(today)) of this draft." }
-            return "You changed \(percent(today)) of this draft — \(percent(average)) across your last \(series.count) kept reports."
+            guard series.count > 1 else {
+                return String(localized: "You changed \(percent(today)) of this draft.")
+            }
+            return String(localized: "You changed \(percent(today)) of this draft — \(percent(average)) across your last \(series.count) kept reports.")
         }
-        return "You changed \(percent(average)) of your last \(series.count) kept reports."
+        return String(localized: "You changed \(percent(average)) of your last \(series.count) kept reports.")
     }
 
     /// Step an approved report aside so a re-draft can take its place.
@@ -314,7 +316,7 @@ struct ReportWriter {
                                               options: .init(maxTokens: 4000, timeout: 120),
                                               onToken: onToken)
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { throw DraftError.llm("The model returned an empty draft — try again.") }
+            guard !trimmed.isEmpty else { throw DraftError.llm(String(localized: "The model returned an empty draft — try again.")) }
             return Draft(text: trimmed, sources: sources)
         } catch let error as DraftError {
             throw error

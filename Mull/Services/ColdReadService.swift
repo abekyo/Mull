@@ -205,7 +205,11 @@ struct ColdReadService {
                 return VaultText.t("There is code on your clipboard.", "クリップボードにコードが入っています。")
             }
             let words = clip.split(whereSeparator: \.isWhitespace).count
-            return "There is text on your clipboard — about \(words) \(words == 1 ? "word" : "words")."
+            return words == 1
+                ? VaultText.t("There is text on your clipboard — about 1 word.",
+                              "クリップボードに文章が入っています。1語ほどです。")
+                : VaultText.t("There is text on your clipboard — about \(words) words.",
+                              "クリップボードに文章が入っています。\(words)語ほどです。")
         }
     }
 
@@ -247,7 +251,8 @@ struct ColdReadService {
             return VaultText.t("\(fileName) is the open file in \(appName).",
                            "\(appName) で開いているファイルは \(fileName) です。")
         }
-        return "The front window is \"\(String(title.prefix(60)))\" in \(appName)."
+        return VaultText.t("The front window is \"\(String(title.prefix(60)))\" in \(appName).",
+                           "最前面のウィンドウは \(appName) の「\(String(title.prefix(60)))」です。")
     }
 
     // MARK: - Calendar (EventKit — blocking, and only speaks when it can see)
@@ -291,7 +296,8 @@ struct ColdReadService {
         guard !events.isEmpty else {
             // Verified empty — mull looked, and there is nothing there.
             return CalendarReading(access: .granted,
-                                   facts: ["Your calendar is clear today — mull looked."],
+                                   facts: [VaultText.t("Your calendar is clear today — mull looked.",
+                                                       "今日のカレンダーは空です。mull が確認しました。")],
                                    schedule: [])
         }
 

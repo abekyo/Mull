@@ -30,10 +30,10 @@ final class MCPClient {
 
         var errorDescription: String? {
             switch self {
-            case .spawnFailed(let s): "MCP server failed to start: \(s)"
-            case .timeout(let s): "MCP server timed out: \(s)"
-            case .transport(let s): "MCP transport error: \(s)"
-            case .rpc(let s): "MCP error: \(s)"
+            case .spawnFailed(let s): String(localized: "MCP server failed to start: \(s)")
+            case .timeout(let s): String(localized: "MCP server timed out: \(s)")
+            case .transport(let s): String(localized: "MCP transport error: \(s)")
+            case .rpc(let s): String(localized: "MCP error: \(s)")
             }
         }
     }

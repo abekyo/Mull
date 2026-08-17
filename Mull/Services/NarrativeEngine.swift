@@ -228,9 +228,11 @@ struct NarrativeEngine {
 
             if diffMinutes > 30 {
                 if diff > 0 {
-                    observations.append("That is \(diffMinutes) minutes more than yesterday.")
+                    observations.append(VaultText.t("That is \(diffMinutes) minutes more than yesterday.",
+                                                    "昨日より \(diffMinutes) 分多く記録しています。"))
                 } else {
-                    observations.append("That is \(diffMinutes) minutes less than yesterday.")
+                    observations.append(VaultText.t("That is \(diffMinutes) minutes less than yesterday.",
+                                                    "昨日より \(diffMinutes) 分少なく記録しています。"))
                 }
             }
         }
@@ -244,9 +246,11 @@ struct NarrativeEngine {
                 // new half of this comparison is yesterday's, so on a repeat only
                 // yesterday's half is kept.
                 if stated.hasLead(todayTop.app) {
-                    observations.append("Yesterday the top app was \(yesterdayTop.app).")
+                    observations.append(VaultText.t("Yesterday the top app was \(yesterdayTop.app).",
+                                                    "昨日いちばん使ったアプリは \(yesterdayTop.app) でした。"))
                 } else {
-                    observations.append("Yesterday's top app was \(yesterdayTop.app); today it is \(todayTop.app).")
+                    observations.append(VaultText.t("Yesterday's top app was \(yesterdayTop.app); today it is \(todayTop.app).",
+                                                    "昨日いちばん使ったアプリは \(yesterdayTop.app)、今日は \(todayTop.app) です。"))
                     stated.noteLead(todayTop.app)
                 }
             }

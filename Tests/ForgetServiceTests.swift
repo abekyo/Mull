@@ -223,22 +223,36 @@ final class ForgetServiceTests: XCTestCase {
         let plan = ForgetService.plan(interval: window, database: db)
         let sentence = plan.sentence(label: "the last 30 minutes")
 
-        XCTAssertTrue(sentence.contains("2 recorded events"), "the user gets the scale…")
+        // Asserted against the catalog rather than against English words, and through
+        // `bundle: .main` — the app bundle, which is where the product's own lookups
+        // land. A bare `String(localized:)` inside the test target resolves against
+        // the *test* bundle, which carries no translations, so it would answer English
+        // while the code under test answered Japanese. These
+        // sentences go through `String(localized:)` now, so the test host answers in
+        // whatever language the machine is set to — and a test that reads "2 recorded
+        // events" passes or fails on the tester's System Settings, which is not a
+        // property of the code. What has to hold in either language is that the count
+        // and the window reach the reader, and that the kept-notes clause is there.
+        XCTAssertTrue(sentence.contains("2"), "the user gets the scale…")
         XCTAssertTrue(sentence.contains("the last 30 minutes"), "…and the window, in their words")
         XCTAssertFalse(sentence.contains("•"), "no bullet list")
         XCTAssertFalse(sentence.contains("knowledge"),
                        "internal categories are mull's business, not the user's")
         XCTAssertFalse(sentence.contains("formed-inside"),
                        "naming each memory was detail nobody reads at this moment")
-        XCTAssertTrue(sentence.contains("Your own notes and reports are kept"))
+        XCTAssertTrue(sentence.hasSuffix(String(localized: "Your own notes and reports are kept.", bundle: .main)))
         XCTAssertNil(plan.warning, "nothing to interrupt for when everything is local")
     }
 
     func testEmptyWindowSaysSoPlainly() {
         event(90, "outside")
         let plan = ForgetService.plan(interval: window, database: db)
-        XCTAssertEqual(plan.sentence(label: "the last 30 minutes"),
-                       "There's nothing recorded in the last 30 minutes.")
+        // Interpolated, not spelled out: the catalog key is "There's nothing recorded
+        // in %@.", so an expectation with the label already substituted would miss it
+        // and fall back to its own English.
+        let label = "the last 30 minutes"
+        XCTAssertEqual(plan.sentence(label: label),
+                       String(localized: "There's nothing recorded in \(label).", bundle: .main))
     }
 
     /// The one thing a forget genuinely cannot do — and it has to be said before
@@ -248,8 +262,10 @@ final class ForgetServiceTests: XCTestCase {
         let plan = ForgetService.plan(interval: window, database: db, cloudProvider: "Anthropic")
         let warning = try XCTUnwrap(plan.warning)
         XCTAssertTrue(warning.contains("Anthropic"))
-        XCTAssertTrue(warning.contains("can't take back"),
-                      "mull must not imply it can recall what already left the Mac")
+        let provider = "Anthropic"
+        XCTAssertEqual(warning,
+                       String(localized: "Some of it may already have been sent to \(provider), which mull can't take back.", bundle: .main),
+                       "mull must not imply it can recall what already left the Mac")
     }
 
     // MARK: - Day arithmetic
@@ -300,7 +316,9 @@ final class ForgetServiceTests: XCTestCase {
         let message = try XCTUnwrap(plan.failureMessage)
         XCTAssertTrue(message.contains("daily summaries"),
                       "the user must learn where the forget stopped, not just that it did")
-        XCTAssertTrue(message.contains("Try Forget again"))
+        let layer = "daily summaries"
+        XCTAssertEqual(message,
+                       String(localized: "Deleting \(layer) failed, so this window is only partly forgotten. Try Forget again.", bundle: .main))
     }
 
     func testFileAndScrubFailuresAreToldTogether() throws {

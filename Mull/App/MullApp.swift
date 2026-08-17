@@ -72,13 +72,13 @@ struct MullApp: App {
     private var menuBarStateDescription: String {
         var state: String
         if appState.isSummarizing {
-            state = "Writing tonight's summary"
+            state = String(localized: "Writing tonight's summary")
         } else if appState.isPaused {
-            state = "Paused"
+            state = String(localized: "Paused")
         } else {
-            state = "Recording"
+            state = String(localized: "Recording")
         }
-        if appState.hasUnreadSummary { state += ", unread summary" }
+        if appState.hasUnreadSummary { state += String(localized: ", unread summary") }
         return state
     }
 
@@ -394,9 +394,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         if appState?.hasCompletedOnboarding == false {
             appState?.postNotice(
-                "Setup isn't finished",
-                detail: "mull is recording only what it already has permission for. "
-                    + "Pick it back up from mull → Finish Setting Up mull.",
+                String(localized: "Setup isn't finished"),
+                detail: String(localized: "mull is recording only what it already has permission for. Pick it back up from mull → Finish Setting Up mull."),
                 isProblem: true
             )
         }
@@ -428,7 +427,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             DispatchQueue.main.async { self.installSetupMenuItem(attemptsRemaining: attemptsRemaining - 1) }
             return
         }
-        let item = NSMenuItem(title: "Finish Setting Up mull…",
+        let item = NSMenuItem(title: String(localized: "Finish Setting Up mull…"),
                               action: #selector(resumeOnboarding),
                               keyEquivalent: "")
         item.target = self

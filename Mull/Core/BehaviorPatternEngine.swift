@@ -70,11 +70,11 @@ struct BehaviorPatternEngine {
             return stalledProjects.prefix(2).map { project in
                 BehaviorPattern(
                     type: .abandonment,
-                    title: "\(project.name) — \(project.daysSinceActive) days quiet",
+                    title: String(localized: "\(project.name) — \(project.daysSinceActive) days quiet"),
                     // Observation, not verdict: state the record, ask rather than judge.
-                    insight: "No activity on \(project.name) for \(project.daysSinceActive) days. Across the last 60 days, paused projects resumed \(100 - Int(abandonRate))% of the time.",
-                    action: "Still want to continue \(project.name)?",
-                    evidence: "\(abandonedCount) stayed paused vs \(resumedCount) resumed after a 3+ day gap (last 60 days)",
+                    insight: String(localized: "No activity on \(project.name) for \(project.daysSinceActive) days. Across the last 60 days, paused projects resumed \(100 - Int(abandonRate))% of the time."),
+                    action: String(localized: "Still want to continue \(project.name)?"),
+                    evidence: String(localized: "\(abandonedCount) stayed paused vs \(resumedCount) resumed after a 3+ day gap (last 60 days)"),
                     severity: project.daysSinceActive >= 5 ? 1.0 : 0.8,
                     project: project.name,
                     // Inference about the future of the project, not a logged fact.
@@ -127,12 +127,16 @@ struct BehaviorPatternEngine {
             .map(\.key)
             .joined(separator: " and ")
 
+        // Resolved before the sentence rather than inside it: "noon" is a word, and a
+        // word interpolated into a translated sentence stays in the language it was
+        // written in (WRITING.md §5.3).
+        let afterHour = peakHours.last.map { "\($0 + 1):00" } ?? String(localized: "noon")
         return [BehaviorPattern(
             type: .peakWaste,
-            title: "Peak hours spent on shallow work",
-            insight: "Your most productive hours are \(peakStr) (based on 30 days of data). Today, \(Int(shallowPercent))% of that time went to \(topShallow).",
-            action: "Move \(topShallow) to after \(peakHours.last.map { "\($0 + 1):00" } ?? "noon"). Protect your peak hours for deep work.",
-            evidence: "30-day pattern: peak hours at \(peakStr). Today: \(Int(shallowPercent))% shallow apps",
+            title: String(localized: "Peak hours spent on shallow work"),
+            insight: String(localized: "Your most productive hours are \(peakStr) (based on 30 days of data). Today, \(Int(shallowPercent))% of that time went to \(topShallow)."),
+            action: String(localized: "Move \(topShallow) to after \(afterHour). Protect your peak hours for deep work."),
+            evidence: String(localized: "30-day pattern: peak hours at \(peakStr). Today: \(Int(shallowPercent))% shallow apps"),
             severity: shallowPercent > 50 ? 0.9 : 0.6,
             project: nil
         )]
@@ -150,10 +154,10 @@ struct BehaviorPatternEngine {
             let drop = comp.lastWeekDeepBlocks - comp.thisWeekDeepBlocks
             return [BehaviorPattern(
                 type: .focusDecline,
-                title: "Deep work is disappearing",
-                insight: "Last week you had \(comp.lastWeekDeepBlocks) deep work blocks (2h+ uninterrupted). This week: \(comp.thisWeekDeepBlocks). That's a \(drop)-block drop.",
-                action: "Block 2 hours on your calendar right now. No meetings, no Slack. One project.",
-                evidence: "Last week: \(comp.lastWeekDeepBlocks) blocks >= 2h. This week: \(comp.thisWeekDeepBlocks)",
+                title: String(localized: "Deep work is disappearing"),
+                insight: String(localized: "Last week you had \(comp.lastWeekDeepBlocks) deep work blocks (2h+ uninterrupted). This week: \(comp.thisWeekDeepBlocks). That's a \(drop)-block drop."),
+                action: String(localized: "Block 2 hours on your calendar right now. No meetings, no Slack. One project."),
+                evidence: String(localized: "Last week: \(comp.lastWeekDeepBlocks) blocks >= 2h. This week: \(comp.thisWeekDeepBlocks)"),
                 severity: 0.85,
                 project: nil
             )]
@@ -165,10 +169,10 @@ struct BehaviorPatternEngine {
             if increase > 50 {
                 return [BehaviorPattern(
                     type: .focusDecline,
-                    title: "Attention is fragmenting",
-                    insight: "Context switches up \(Int(increase))% vs last week (\(comp.thisWeekContextSwitches) vs \(comp.lastWeekContextSwitches)). You're touching more things but finishing less.",
-                    action: "Pick one project. Work on it until lunch. Everything else waits.",
-                    evidence: "App switches: \(comp.thisWeekContextSwitches) this week vs \(comp.lastWeekContextSwitches) last week",
+                    title: String(localized: "Attention is fragmenting"),
+                    insight: String(localized: "Context switches up \(Int(increase))% vs last week (\(comp.thisWeekContextSwitches) vs \(comp.lastWeekContextSwitches)). You're touching more things but finishing less."),
+                    action: String(localized: "Pick one project. Work on it until lunch. Everything else waits."),
+                    evidence: String(localized: "App switches: \(comp.thisWeekContextSwitches) this week vs \(comp.lastWeekContextSwitches) last week"),
                     severity: 0.7,
                     project: nil
                 )]
@@ -200,11 +204,11 @@ struct BehaviorPatternEngine {
             if shortSessions.count >= 3 && longSessions.isEmpty {
                 patterns.append(BehaviorPattern(
                     type: .avoidance,
-                    title: "\(project.name): short sessions only",
+                    title: String(localized: "\(project.name): short sessions only"),
                     // Observation of the log; "avoiding / circling" was a judgment — dropped.
-                    insight: "You opened \(project.name) \(shortSessions.count) times in the last 7 days, each under 10 minutes, with no longer session.",
-                    action: "Want to set aside 30 minutes for \(project.name)?",
-                    evidence: "\(shortSessions.count) sessions under 10min, 0 sessions over 10min in the last 7 days",
+                    insight: String(localized: "You opened \(project.name) \(shortSessions.count) times in the last 7 days, each under 10 minutes, with no longer session."),
+                    action: String(localized: "Want to set aside 30 minutes for \(project.name)?"),
+                    evidence: String(localized: "\(shortSessions.count) sessions under 10min, 0 sessions over 10min in the last 7 days"),
                     severity: 0.75,
                     project: project.name,
                     // The fact is logged; calling it "avoidance" is the inference.
@@ -269,10 +273,10 @@ struct BehaviorPatternEngine {
 
             return [BehaviorPattern(
                 type: .correlation,
-                title: "Less switching = more output",
-                insight: "On days with fewer than \(avgLowSwitches) app switches, you log \(multiplier)x more focused work time than days with \(avgHighSwitches)+ switches.",
-                action: "Today, try to stay under \(avgLowSwitches) switches. Close apps you don't need.",
-                evidence: "14-day analysis: low-switch days avg \(Int(lowAvgDuration / 3600))h of focused work, high-switch days avg \(Int(highAvgDuration / 3600))h",
+                title: String(localized: "Less switching = more output"),
+                insight: String(localized: "On days with fewer than \(avgLowSwitches) app switches, you log \(multiplier)x more focused work time than days with \(avgHighSwitches)+ switches."),
+                action: String(localized: "Today, try to stay under \(avgLowSwitches) switches. Close apps you don't need."),
+                evidence: String(localized: "14-day analysis: low-switch days avg \(Int(lowAvgDuration / 3600))h of focused work, high-switch days avg \(Int(highAvgDuration / 3600))h"),
                 severity: 0.65,
                 project: nil
             )]

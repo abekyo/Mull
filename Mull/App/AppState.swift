@@ -248,11 +248,14 @@ final class AppState: ObservableObject {
                 if self.summaryBannersEnabled {
                     self.sendNotification(
                         title: String(localized: "Summary failed"),
-                        body: error.localizedDescription
+                        body: LLMFailure.explain(error).text
                     )
                 }
+                // Through `LLMFailure`, not raw: what `LLMClient` throws is English
+                // by design (it is classified by matching on it), so the raw string
+                // is the one thing here that would not turn with the rest.
                 self.postNotice(String(localized: "Tonight's summary didn't run"),
-                                detail: error.localizedDescription, isProblem: true)
+                                detail: LLMFailure.explain(error).text, isProblem: true)
             }
         }
 
@@ -694,7 +697,8 @@ final class AppState: ObservableObject {
                 // `mullProgress` clears itself after five seconds, so someone who
                 // started this and walked away would find no trace of the failure.
                 // The notice stays until dismissed, without a banner.
-                postNotice(String(localized: "Summary didn't run"), detail: error.localizedDescription, isProblem: true)
+                postNotice(String(localized: "Summary didn't run"),
+                           detail: LLMFailure.explain(error).text, isProblem: true)
                 try? await Task.sleep(for: .seconds(5))
                 mullProgress = nil
             }

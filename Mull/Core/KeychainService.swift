@@ -23,9 +23,9 @@ enum KeychainService {
         var message: String {
             switch self {
             case .notFound:
-                "No key saved yet."
+                String(localized: "No key saved yet.")
             case .denied(let status):
-                "macOS wouldn't open the keychain item (\(status)). The key may still be there — unlock your keychain in Keychain Access, or save it again to replace it."
+                String(localized: "macOS wouldn't open the keychain item (\(status)). The key may still be there — unlock your keychain in Keychain Access, or save it again to replace it.")
             }
         }
     }

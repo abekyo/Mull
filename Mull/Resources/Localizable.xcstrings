@@ -5,6 +5,17 @@
       "extractionState": "manual",
       "shouldTranslate": false
     },
+    "\n\n[mull: cut off at the token limit — this response is incomplete.]": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\n\n[mull: トークン上限で切れました。この応答は途中までです。]"
+          }
+        }
+      }
+    },
     " · away %@": {
       "extractionState": "manual",
       "localizations": {
@@ -115,6 +126,83 @@
         }
       }
     },
+    "%@ couldn't answer that. Another provider may do better.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ はこれに答えられませんでした。別のプロバイダなら答えるかもしれません。"
+          }
+        }
+      }
+    },
+    "%@ declined to answer this one on content-policy grounds.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ はコンテンツポリシーを理由に、これには答えませんでした。"
+          }
+        }
+      }
+    },
+    "%@ didn't answer in time. Ask something narrower — a week of activity rides along with every question.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ が時間内に答えませんでした。もう少し狭く聞いてください。質問のたびに1週間分の活動が一緒に送られます。"
+          }
+        }
+      }
+    },
+    "%@ exists but couldn't be read as JSON. Nothing was written — fix or move that file, then connect again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ はありますが、JSON として読めませんでした。何も書いていません。そのファイルを直すか移動してから、もう一度接続してください。"
+          }
+        }
+      }
+    },
+    "%@ had trouble on its end and sent nothing back.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 側で問題が起きて、何も返ってきませんでした。"
+          }
+        }
+      }
+    },
+    "%@ is rate-limiting this account right now. Wait a minute, or use a different provider.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ はいま、このアカウントを制限しています。1分ほど待つか、別のプロバイダを使ってください。"
+          }
+        }
+      }
+    },
+    "%@ needs an API key before it can answer.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ は API キーが無いと答えられません。"
+          }
+        }
+      }
+    },
     "%@ not found. Available: %@": {
       "extractionState": "manual",
       "localizations": {
@@ -148,6 +236,39 @@
         }
       }
     },
+    "%@ recorded events from %@, and everything mull worked out from it, will be deleted.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$@ の記録 %1$@件 と、そこから mull が組み立てたものすべてを削除します。"
+          }
+        }
+      }
+    },
+    "%@ rejected the API key — keys expire and get revoked.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ が API キーを拒否しました。キーは期限切れや失効があります。"
+          }
+        }
+      }
+    },
+    "%@ timed out. The model may be too large for your hardware.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ がタイムアウトしました。モデルがこのマシンには大きすぎるかもしれません。"
+          }
+        }
+      }
+    },
     "%@ today": {
       "extractionState": "manual",
       "localizations": {
@@ -155,6 +276,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日 %@"
+          }
+        }
+      }
+    },
+    "%@ used up the reply budget before writing anything. Ask for one thing at a time — a narrower question leaves room for the answer.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ は何も書かないうちに返信の予算を使い切りました。一度に1つずつ聞くと、答えの分が残ります。"
+          }
+        }
+      }
+    },
+    "%@ was turned off": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ がオフになりました"
           }
         }
       }
@@ -188,6 +331,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@（%@）"
+          }
+        }
+      }
+    },
+    "%@ — %lld days quiet": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %lld日 動きなし"
+          }
+        }
+      }
+    },
+    "%@: short sessions only": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: 短い作業だけ"
           }
         }
       }
@@ -236,6 +401,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld文字。質問のたびに組み直して送り直されます。"
+          }
+        }
+      }
+    },
+    "%lld could not be read and were left in place.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件は読めなかったので、そのまま残しました。"
           }
         }
       }
@@ -405,6 +581,17 @@
         }
       }
     },
+    "%lld sessions under 10min, 0 sessions over 10min in the last 7 days": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直近7日で10分未満が %lld回、10分以上は0回"
+          }
+        }
+      }
+    },
     "%lld short stretches left out, under %lld minutes.": {
       "extractionState": "manual",
       "localizations": {
@@ -412,6 +599,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "%2$lld分未満の短い区間を%1$lld件除きました。"
+          }
+        }
+      }
+    },
+    "%lld stayed paused vs %lld resumed after a 3+ day gap (last 60 days)": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3日以上空いたあと、%lld件はそのまま止まり、%lld件は再開しました（直近60日）"
+          }
+        }
+      }
+    },
+    "%lld words about your day — paste into any AI.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日についての %lld 語。どの AI にでも貼り付けられます。"
           }
         }
       }
@@ -486,6 +695,17 @@
         }
       }
     },
+    ", unread summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "、未読の要約あり"
+          }
+        }
+      }
+    },
     "1 block": {
       "extractionState": "manual",
       "localizations": {
@@ -515,6 +735,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "記録1件"
+          }
+        }
+      }
+    },
+    "1 could not be read and was left in place.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1件は読めなかったので、そのまま残しました。"
           }
         }
       }
@@ -596,6 +827,17 @@
         }
       }
     },
+    "1 recorded event from %@, and everything mull worked out from it, will be deleted.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ の記録1件と、そこから mull が組み立てたものすべてを削除します。"
+          }
+        }
+      }
+    },
     "1 short stretch left out, under %lld minutes.": {
       "extractionState": "manual",
       "localizations": {
@@ -647,6 +889,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "10分"
+          }
+        }
+      }
+    },
+    "14-day analysis: low-switch days avg %lldh of focused work, high-switch days avg %lldh": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "14日の分析: 切り替えの少ない日は集中した作業が平均 %lld時間、多い日は平均 %lld時間"
           }
         }
       }
@@ -713,6 +966,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "30分"
+          }
+        }
+      }
+    },
+    "30-day pattern: peak hours at %@. Today: %lld%% shallow apps": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30日の傾向: よく進む時間帯は %@。今日は %lld%% が浅いアプリでした"
           }
         }
       }
@@ -1110,6 +1374,17 @@
         }
       }
     },
+    "App switches: %lld this week vs %lld last week": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリの切り替え: 今週 %lld回、先週 %lld回"
+          }
+        }
+      }
+    },
     "Args (e.g. -y @org/mcp-gmail — quote paths with spaces)": {
       "extractionState": "manual",
       "localizations": {
@@ -1209,6 +1484,17 @@
         }
       }
     },
+    "Attention is fragmenting": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "注意が切れぎれになっています"
+          }
+        }
+      }
+    },
     "Audio": {
       "extractionState": "manual",
       "localizations": {
@@ -1260,6 +1546,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "ベース URL"
+          }
+        }
+      }
+    },
+    "Block 2 hours on your calendar right now. No meetings, no Slack. One project.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "いまカレンダーに2時間の枠を取ってください。会議も Slack も無し。プロジェクトは1つ。"
           }
         }
       }
@@ -1385,6 +1682,17 @@
         }
       }
     },
+    "Cannot connect to Ollama at localhost:11434. Error: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "localhost:11434 の Ollama に接続できません。エラー: %@"
+          }
+        }
+      }
+    },
     "Cannot connect — is the server running?": {
       "extractionState": "manual",
       "localizations": {
@@ -1480,6 +1788,61 @@
           "stringUnit": {
             "state": "translated",
             "value": "Claude API"
+          }
+        }
+      }
+    },
+    "Claude API request failed: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude API のリクエストが失敗しました: %@"
+          }
+        }
+      }
+    },
+    "Claude API timed out after 120 seconds.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude API が120秒でタイムアウトしました。"
+          }
+        }
+      }
+    },
+    "Claude returned no text (stop_reason: %@).": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude がテキストを返しませんでした（stop_reason: %@）。"
+          }
+        }
+      }
+    },
+    "Claude returned no text.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude がテキストを返しませんでした。"
+          }
+        }
+      }
+    },
+    "Claude spent its entire %lld-token budget before writing any text. Raise maxTokens.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude は、テキストを1文字も書かないうちに %lld トークンの予算を使い切りました。maxTokens を上げてください。"
           }
         }
       }
@@ -1770,6 +2133,17 @@
         }
       }
     },
+    "Connected to mull's MCP server.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull の MCP サーバーに接続できました。"
+          }
+        }
+      }
+    },
     "Connected — quit and reopen %@ to load mull.": {
       "extractionState": "manual",
       "localizations": {
@@ -1792,6 +2166,28 @@
         }
       }
     },
+    "Context copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンテキストをコピーしました"
+          }
+        }
+      }
+    },
+    "Context ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンテキストの準備ができました"
+          }
+        }
+      }
+    },
     "Context switches": {
       "extractionState": "manual",
       "localizations": {
@@ -1799,6 +2195,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "文脈の切り替え"
+          }
+        }
+      }
+    },
+    "Context switches up %lld%% vs last week (%lld vs %lld). You're touching more things but finishing less.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリの切り替えが先週より %lld%% 増えています（%lld回 対 %lld回）。触るものは増えて、終わるものは減っています。"
           }
         }
       }
@@ -2034,6 +2441,28 @@
         }
       }
     },
+    "Couldn't paste it for you": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼り付けられませんでした"
+          }
+        }
+      }
+    },
+    "Couldn't reach %@. %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ に届きませんでした。%@"
+          }
+        }
+      }
+    },
     "Couldn't save that": {
       "extractionState": "manual",
       "localizations": {
@@ -2052,6 +2481,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "書き込めませんでした"
+          }
+        }
+      }
+    },
+    "Couldn't write a backup (%@) before editing the config. Nothing was written.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定を編集する前のバックアップ（%@）を書けませんでした。何も書いていません。"
           }
         }
       }
@@ -2111,6 +2551,28 @@
         }
       }
     },
+    "Database is running from a temporary location. Data will not persist across restarts.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データベースが一時的な場所で動いています。再起動すると残りません。"
+          }
+        }
+      }
+    },
+    "Database was corrupted and has been reset. Previous data saved to %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データベースが壊れていたため初期化しました。以前のデータは %@ に保存してあります"
+          }
+        }
+      }
+    },
     "Day": {
       "extractionState": "manual",
       "localizations": {
@@ -2140,6 +2602,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "深い作業（2時間以上）"
+          }
+        }
+      }
+    },
+    "Deep work is disappearing": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "深い作業が減っています"
           }
         }
       }
@@ -2283,6 +2756,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "このソースを削除します。確認はしません。"
+          }
+        }
+      }
+    },
+    "Deleting %@ failed, so this window is only partly forgotten. Try Forget again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ の削除に失敗したので、この時間帯は一部しか忘れられていません。もう一度「忘れる」を実行してください。"
           }
         }
       }
@@ -2573,6 +3057,17 @@
         }
       }
     },
+    "Email capture stopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メールの取り込みが止まりました"
+          }
+        }
+      }
+    },
     "Enable %@": {
       "extractionState": "manual",
       "localizations": {
@@ -2701,6 +3196,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "これ以外に mull が捕捉するものは常時オンで、上の「Permissions」に並んでいます。"
+          }
+        }
+      }
+    },
+    "Everything mull recorded in %@, and everything mull worked out from it, will be deleted.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ に mull が記録したものと、そこから組み立てたものすべてを削除します。"
           }
         }
       }
@@ -2848,6 +3354,17 @@
         }
       }
     },
+    "Finish Setting Up mull…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull のセットアップを続ける…"
+          }
+        }
+      }
+    },
     "Finished work is written every hour, once it can no longer change. Anything you delete there stays deleted, and you can stop it in Settings.": {
       "extractionState": "manual",
       "localizations": {
@@ -2980,6 +3497,28 @@
         }
       }
     },
+    "Gemini API request failed: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini API のリクエストが失敗しました: %@"
+          }
+        }
+      }
+    },
+    "Gemini API timed out after 120 seconds.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini API が120秒でタイムアウトしました。"
+          }
+        }
+      }
+    },
     "Gemini Flash": {
       "comment": "Product name. The same in both languages; listed here so the untranslated-string check can tell \"left as is\" from \"forgotten\".",
       "extractionState": "manual",
@@ -2999,6 +3538,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "Gemini Flash が使えます"
+          }
+        }
+      }
+    },
+    "Gemini blocked the prompt (%@).": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini がプロンプトをブロックしました（%@）。"
+          }
+        }
+      }
+    },
+    "Gemini rate limit reached. Try again later.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini のレート制限に達しました。しばらくしてからもう一度。"
+          }
+        }
+      }
+    },
+    "Gemini returned no candidates.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini から候補が返りませんでした。"
+          }
+        }
+      }
+    },
+    "Gemini returned no text (finishReason: %@).": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini がテキストを返しませんでした（finishReason: %@）。"
+          }
+        }
+      }
+    },
+    "Gemini returned no text.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini がテキストを返しませんでした。"
+          }
+        }
+      }
+    },
+    "Gemini stopped for policy reasons (finishReason: %@).": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini がポリシー上の理由で停止しました（finishReason: %@）。"
           }
         }
       }
@@ -3201,6 +3806,17 @@
         }
       }
     },
+    "How should AI respond to you?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI にどう返してほしいですか？"
+          }
+        }
+      }
+    },
     "How soon finished work appears, not how much is written — each block is written once.": {
       "extractionState": "manual",
       "localizations": {
@@ -3300,6 +3916,50 @@
         }
       }
     },
+    "Invalid Claude API URL": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude API の URL が不正です"
+          }
+        }
+      }
+    },
+    "Invalid Gemini API URL": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini API の URL が不正です"
+          }
+        }
+      }
+    },
+    "Invalid Ollama URL": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ollama の URL が不正です"
+          }
+        }
+      }
+    },
+    "Invalid OpenAI API URL": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI API の URL が不正です"
+          }
+        }
+      }
+    },
     "Invalid base URL": {
       "extractionState": "manual",
       "localizations": {
@@ -3307,6 +3967,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "ベース URL が正しくありません"
+          }
+        }
+      }
+    },
+    "Invalid local server URL: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ローカルサーバーの URL が不正です: %@"
           }
         }
       }
@@ -3597,6 +4268,28 @@
         }
       }
     },
+    "LLM is off. Enable a provider in Settings → AI to allow processing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LLM はオフです。処理するには 設定 → AI でプロバイダを有効にしてください。"
+          }
+        }
+      }
+    },
+    "LLM returned empty response. Check your API key or model.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LLM の応答が空でした。API キーかモデルを確認してください。"
+          }
+        }
+      }
+    },
     "Language": {
       "extractionState": "manual",
       "localizations": {
@@ -3663,6 +4356,28 @@
         }
       }
     },
+    "Last week you had %lld deep work blocks (2h+ uninterrupted). This week: %lld. That's a %lld-block drop.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先週は、2時間以上とぎれない深い作業が %lld ブロックありました。今週は %lld ブロックで、%lld ブロック減っています。"
+          }
+        }
+      }
+    },
+    "Last week: %lld blocks >= 2h. This week: %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先週: 2時間以上が %lld ブロック。今週: %lld ブロック"
+          }
+        }
+      }
+    },
     "Later": {
       "extractionState": "manual",
       "localizations": {
@@ -3714,6 +4429,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "me.md から外した行"
+          }
+        }
+      }
+    },
+    "Less switching = more output": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切り替えが少ないほど進んでいます"
           }
         }
       }
@@ -3861,6 +4587,72 @@
         }
       }
     },
+    "MCP error: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP のエラー: %@"
+          }
+        }
+      }
+    },
+    "MCP server failed to start: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP サーバーを起動できませんでした: %@"
+          }
+        }
+      }
+    },
+    "MCP server timed out: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP サーバーがタイムアウトしました: %@"
+          }
+        }
+      }
+    },
+    "MCP transport error: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP の通信エラー: %@"
+          }
+        }
+      }
+    },
+    "Mail returned an error: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail がエラーを返しました: %@"
+          }
+        }
+      }
+    },
+    "Mail.app has no accounts set up, so there is no inbox to read.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail.app にアカウントが設定されていないので、読む受信箱がありません。"
+          }
+        }
+      }
+    },
     "Max size when copying to AI": {
       "extractionState": "manual",
       "localizations": {
@@ -3982,6 +4774,17 @@
         }
       }
     },
+    "Move %@ to after %@. Protect your peak hours for deep work.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ は %@ 以降に回してください。調子の出る時間帯は深い作業に取っておきます。"
+          }
+        }
+      }
+    },
     "Move this event to another calendar": {
       "extractionState": "manual",
       "localizations": {
@@ -4000,6 +4803,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "ゴミ箱に入れる"
+          }
+        }
+      }
+    },
+    "MullMCP binary not found — build/install it first": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MullMCP のバイナリが見つかりません。先にビルドするかインストールしてください"
           }
         }
       }
@@ -4180,6 +4994,17 @@
         }
       }
     },
+    "No AI provider is switched on. Ollama and LM Studio run on this Mac.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI プロバイダがオンになっていません。Ollama と LM Studio はこの Mac の中で動きます。"
+          }
+        }
+      }
+    },
     "No AI provider. Questions like \"what did I do today?\" are answered from your records anyway.": {
       "extractionState": "manual",
       "localizations": {
@@ -4209,6 +5034,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "API キーが入力されていません"
+          }
+        }
+      }
+    },
+    "No activity on %@ for %lld days. Across the last 60 days, paused projects resumed %lld%% of the time.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ は %lld日 動いていません。直近60日では、止まったプロジェクトが再開した割合は %lld%% です。"
+          }
+        }
+      }
+    },
+    "No activity recorded": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "記録された活動はありません"
           }
         }
       }
@@ -4279,6 +5126,28 @@
         }
       }
     },
+    "No internet connection.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "インターネットに接続していません。"
+          }
+        }
+      }
+    },
+    "No key saved yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだキーが保存されていません。"
+          }
+        }
+      }
+    },
     "No limit": {
       "extractionState": "manual",
       "localizations": {
@@ -4286,6 +5155,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "無制限"
+          }
+        }
+      }
+    },
+    "No local server at %@. Start LM Studio (Local Server) or your runtime, then load a model.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ にローカルサーバーがありません。LM Studio（Local Server）か使っているランタイムを起動して、モデルを読み込んでください。"
           }
         }
       }
@@ -4319,6 +5199,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "権限は不要です"
+          }
+        }
+      }
+    },
+    "No provider": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロバイダなし"
           }
         }
       }
@@ -4631,6 +5522,17 @@
         }
       }
     },
+    "Nothing to lend yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだ渡せるものがありません"
+          }
+        }
+      }
+    },
     "Nothing to read yet": {
       "extractionState": "manual",
       "localizations": {
@@ -4730,6 +5632,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "オフ: ローカルの規則ベースのみ"
+          }
+        }
+      }
+    },
+    "Ollama is not running. Start it with: ollama serve": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ollama が動いていません。ollama serve で起動してください"
+          }
+        }
+      }
+    },
+    "Ollama timed out. The model may be too large for your hardware.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ollama がタイムアウトしました。モデルがこのマシンには大きすぎるかもしれません。"
+          }
+        }
+      }
+    },
+    "On days with fewer than %lld app switches, you log %@x more focused work time than days with %lld+ switches.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリの切り替えが %1$lld回 未満の日は、%3$lld回 以上の日より集中した作業時間が %2$@ 倍になっています。"
           }
         }
       }
@@ -5097,6 +6032,28 @@
         }
       }
     },
+    "Paste with ⌘V — clipboard restores in 30s.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V で貼り付けてください。クリップボードは30秒で元に戻ります。"
+          }
+        }
+      }
+    },
+    "Pasting into another app needs Accessibility, which mull doesn't have. Your context is on the clipboard — press ⌘V. Settings › Data can turn the permission on.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "他のアプリへの貼り付けにはアクセシビリティが要りますが、mull は持っていません。コンテキストはクリップボードに入っているので ⌘V を押してください。設定 › データ で許可できます。"
+          }
+        }
+      }
+    },
     "Pause Recording": {
       "extractionState": "manual",
       "localizations": {
@@ -5137,6 +6094,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "再開するまで停止"
+          }
+        }
+      }
+    },
+    "Paused": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時停止中"
+          }
+        }
+      }
+    },
+    "Peak hours spent on shallow work": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "調子の出る時間帯が浅い作業に使われています"
           }
         }
       }
@@ -5185,6 +6164,17 @@
         }
       }
     },
+    "Pick one project. Work on it until lunch. Everything else waits.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロジェクトを1つ選んでください。昼まではそれだけ。ほかは待たせます。"
+          }
+        }
+      }
+    },
     "Point it at mull's server yourself. This is the same entry the buttons above write, and the command Claude Code's own CLI takes.": {
       "extractionState": "manual",
       "localizations": {
@@ -5192,6 +6182,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "mull のサーバーを自分で登録する場合はこちら。上のボタンが書き込むのと同じ内容で、Claude Code の CLI がそのまま受け取るコマンドです。"
+          }
+        }
+      }
+    },
+    "Points at a different copy of MullMCP than this app.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアプリとは別の MullMCP を指しています。"
+          }
+        }
+      }
+    },
+    "Points at a file that is no longer there.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "もう存在しないファイルを指しています。"
           }
         }
       }
@@ -5680,6 +6692,28 @@
         }
       }
     },
+    "Recovered %lld records from %lld quarantined database(s).": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隔離されたデータベース %2$lld件 から、レコードを %1$lld件 回収しました。"
+          }
+        }
+      }
+    },
+    "Recovered 1 record from %lld quarantined database(s).": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隔離されたデータベース %lld件 から、レコードを1件回収しました。"
+          }
+        }
+      }
+    },
     "Redo": {
       "extractionState": "manual",
       "localizations": {
@@ -5687,6 +6721,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "やり直す"
+          }
+        }
+      }
+    },
+    "Registered without a command. Reconnect to fix it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コマンドなしで登録されています。接続し直すと直ります。"
           }
         }
       }
@@ -6241,6 +7286,17 @@
         }
       }
     },
+    "Seeds your current projects.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "いまのプロジェクトの出発点になります。"
+          }
+        }
+      }
+    },
     "Select a file or view": {
       "extractionState": "manual",
       "localizations": {
@@ -6296,6 +7352,28 @@
         }
       }
     },
+    "Server did not respond": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバーが応答しませんでした"
+          }
+        }
+      }
+    },
+    "Server did not respond. It said: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバーが応答しませんでした。出力: %@"
+          }
+        }
+      }
+    },
     "Server up, but no model loaded — load one in LM Studio": {
       "extractionState": "manual",
       "localizations": {
@@ -6336,6 +7414,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "設定（⌘,）"
+          }
+        }
+      }
+    },
+    "Setup isn't finished": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "セットアップが終わっていません"
           }
         }
       }
@@ -6538,6 +7627,17 @@
         }
       }
     },
+    "So mull times proactive nudges well.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull が声をかける時間帯を合わせます。"
+          }
+        }
+      }
+    },
     "So you never have to paste it. mull can add itself to the AI tools already on this Mac — you'll see the exact change before anything is written.": {
       "extractionState": "manual",
       "localizations": {
@@ -6545,6 +7645,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "貼り付ける手間を無くすためです。mull は、この Mac にある AI ツールへ自分を登録できます。書き込む前に、変更内容をそのまま確認できます。"
+          }
+        }
+      }
+    },
+    "Some files could not be cleaned and may still mention this window: %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一部のファイルを掃除できず、この時間帯のことがまだ残っている可能性があります: %@。"
+          }
+        }
+      }
+    },
+    "Some of it may already have been sent to %@, which mull can't take back.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一部はすでに %@ へ送られている可能性があり、それは mull には取り戻せません。"
           }
         }
       }
@@ -6622,6 +7744,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "うまくいきませんか？ 設定を開く"
+          }
+        }
+      }
+    },
+    "Still want to continue %@?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ はこのまま続けますか？"
           }
         }
       }
@@ -6758,6 +7891,39 @@
         }
       }
     },
+    "Summarizing…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要約中…"
+          }
+        }
+      }
+    },
+    "Summary didn't run": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要約は動きませんでした"
+          }
+        }
+      }
+    },
+    "Summary failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要約に失敗しました"
+          }
+        }
+      }
+    },
     "Summary notifications": {
       "extractionState": "manual",
       "localizations": {
@@ -6831,6 +7997,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "要点を mull に伝える"
+          }
+        }
+      }
+    },
+    "Terse or detailed, tone, language — shapes every reply.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "簡潔か詳しいか、口調、言語。すべての返答に効きます。"
           }
         }
       }
@@ -6923,6 +8100,17 @@
         }
       }
     },
+    "The database schema is broken and could not be reset: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データベースのスキーマが壊れていて、初期化もできませんでした: %@"
+          }
+        }
+      }
+    },
     "The edits you just made to your answers won't be saved.": {
       "extractionState": "manual",
       "localizations": {
@@ -6974,6 +8162,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "ミラーはオンですが、書き込み先のカレンダーが無いため何もしていません。クリックして選んでください。"
+          }
+        }
+      }
+    },
+    "The model returned an empty draft — try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "モデルが空の下書きを返しました。もう一度試してください。"
           }
         }
       }
@@ -7077,6 +8276,17 @@
         }
       }
     },
+    "There's nothing recorded in %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ には記録がありません。"
+          }
+        }
+      }
+    },
     "There's nothing to hand over yet — mull has only just started. Come back after some work and your day will be in here.": {
       "extractionState": "manual",
       "localizations": {
@@ -7143,6 +8353,17 @@
         }
       }
     },
+    "This file is not JSON mull can read, so mull left it alone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このファイルは mull が読める JSON ではないので、触らずに残しました。"
+          }
+        }
+      }
+    },
     "This is what you'd hand an AI": {
       "extractionState": "manual",
       "localizations": {
@@ -7198,6 +8419,17 @@
         }
       }
     },
+    "Time zone & working hours?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タイムゾーンと稼働時間は？"
+          }
+        }
+      }
+    },
     "Timed out — server not responding": {
       "extractionState": "manual",
       "localizations": {
@@ -7227,6 +8459,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日（⌘T）"
+          }
+        }
+      }
+    },
+    "Today is being kept somewhere temporary": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日の記録は一時的な場所に置かれています"
           }
         }
       }
@@ -7264,6 +8507,17 @@
         }
       }
     },
+    "Today, try to stay under %lld switches. Close apps you don't need.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日は切り替えを %lld回 未満に抑えてみてください。使わないアプリは閉じます。"
+          }
+        }
+      }
+    },
     "Tomorrow's draft copies its style from your edit.": {
       "extractionState": "manual",
       "localizations": {
@@ -7271,6 +8525,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "明日の下書きは、あなたの編集の文体を引き継ぎます。"
+          }
+        }
+      }
+    },
+    "Tonight's summary didn't run": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今夜の要約は動きませんでした"
+          }
+        }
+      }
+    },
+    "Tonight's summary is ready ☽": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今夜の要約ができました ☽"
+          }
+        }
+      }
+    },
+    "Tonight's summary was written without the model": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今夜の要約はモデル無しで書きました"
           }
         }
       }
@@ -7385,6 +8672,50 @@
         }
       }
     },
+    "Unexpected response from server": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバーの応答が想定と違います"
+          }
+        }
+      }
+    },
+    "Unexpected response from server. It said: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバーの応答が想定と違います。出力: %@"
+          }
+        }
+      }
+    },
+    "Unknown LLM provider '%@'. Pick one in Settings → AI.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "知らない LLM プロバイダです（'%@'）。設定 → AI で選んでください。"
+          }
+        }
+      }
+    },
+    "Unknown error": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不明なエラー"
+          }
+        }
+      }
+    },
     "Unlimited": {
       "extractionState": "manual",
       "localizations": {
@@ -7396,6 +8727,17 @@
         }
       }
     },
+    "Unsupported AI tool": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "対応していない AI ツールです"
+          }
+        }
+      }
+    },
     "Waiting to write": {
       "extractionState": "manual",
       "localizations": {
@@ -7403,6 +8745,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "書き込み待ち"
+          }
+        }
+      }
+    },
+    "Want to set aside 30 minutes for %@?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ に30分取っておきますか？"
           }
         }
       }
@@ -7425,6 +8778,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "モデルに渡されるもの"
+          }
+        }
+      }
+    },
+    "What are you working on right now?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "いま何を作っていますか？"
+          }
+        }
+      }
+    },
+    "What do you do?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "何をしている人ですか？"
+          }
+        }
+      }
+    },
+    "What do you want AI's help with?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI に何を手伝ってほしいですか？"
+          }
+        }
+      }
+    },
+    "What language should AI reply in?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI は何語で答えますか？"
           }
         }
       }
@@ -7473,6 +8870,17 @@
         }
       }
     },
+    "What the AI answers you in. Which language mull writes its own files in is set in Settings › General.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI があなたに返す言語です。mull 自身がファイルを書く言語は 設定 › 一般 で決めます。"
+          }
+        }
+      }
+    },
     "What was I mainly working on this week?": {
       "extractionState": "manual",
       "localizations": {
@@ -7480,6 +8888,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "今週は主に何をしていた？"
+          }
+        }
+      }
+    },
+    "What would you like to offload?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "何を手放したいですか？"
           }
         }
       }
@@ -7502,6 +8921,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "使っているもの"
+          }
+        }
+      }
+    },
+    "What you'd rather not do yourself.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自分ではやりたくないこと。"
           }
         }
       }
@@ -7704,6 +9134,17 @@
         }
       }
     },
+    "Writing tonight's summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今夜の要約を書いています"
+          }
+        }
+      }
+    },
     "Written by mull": {
       "extractionState": "manual",
       "localizations": {
@@ -7814,6 +9255,50 @@
         }
       }
     },
+    "You changed %@ of this draft — %@ across your last %lld kept reports.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この下書きの %1$@ を書き換えました。直近 %3$lld件 の平均は %2$@ です。"
+          }
+        }
+      }
+    },
+    "You changed %@ of this draft.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この下書きの %@ を書き換えました。"
+          }
+        }
+      }
+    },
+    "You changed %@ of your last %lld kept reports.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直近 %2$lld件 のレポートのうち、%1$@ を書き換えました。"
+          }
+        }
+      }
+    },
+    "You opened %@ %lld times in the last 7 days, each under 10 minutes, with no longer session.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直近7日で %@ を %lld回 開いていますが、どれも10分未満で、長い作業はありません。"
+          }
+        }
+      }
+    },
     "You own this file. mull reads it and never writes to it — every line that isn't a comment is placed above mull's own guesses in About Me.": {
       "extractionState": "manual",
       "localizations": {
@@ -7821,6 +9306,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "このファイルはあなたのものです。mull は読むだけで、書き込みません。コメント以外のすべての行が、About Me で mull 自身の推測より上に置かれます。"
+          }
+        }
+      }
+    },
+    "Your aim for using mull — what to surface toward.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull を使う目的。何を優先して出すかが変わります。"
           }
         }
       }
@@ -7854,6 +9350,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "編集内容は %@ に保存してあります。"
+          }
+        }
+      }
+    },
+    "Your most productive hours are %@ (based on 30 days of data). Today, %lld%% of that time went to %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "よく進む時間帯は %@ です（30日分の記録）。今日はそのうち %lld%% が %@ でした。"
           }
         }
       }
@@ -7898,6 +9405,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "プロフィール。あなた自身が書いた行"
+          }
+        }
+      }
+    },
+    "Your own notes and reports are kept.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あなた自身のノートとレポートは残ります。"
           }
         }
       }
@@ -7953,6 +9471,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "記録した活動はこの Mac に留まります。外へ出るのは、AI タブでクラウドのプロバイダを有効にしたときだけです。そのときは mull がここでそう伝えます。"
+          }
+        }
+      }
+    },
+    "Your role — the core of who mull says you are.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あなたの役割。mull があなたを説明するときの中心になります。"
           }
         }
       }
@@ -8063,6 +9592,83 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日の活動から起こした下書き · コピーするまでこの Mac から出ません"
+          }
+        }
+      }
+    },
+    "e.g. Boilerplate, research, scheduling": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: 定型コード、調べもの、日程調整"
+          }
+        }
+      }
+    },
+    "e.g. JST, evenings": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: JST、夜"
+          }
+        }
+      }
+    },
+    "e.g. Japanese (日本語)": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: 日本語"
+          }
+        }
+      }
+    },
+    "e.g. Ship faster, fewer re-explanations": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: 早く出す、説明し直す回数を減らす"
+          }
+        }
+      }
+    },
+    "e.g. Solo founder & Swift developer": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: 個人開発者、Swift エンジニア"
+          }
+        }
+      }
+    },
+    "e.g. Terse, in Japanese, no preamble": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: 日本語で簡潔に、前置きなし"
+          }
+        }
+      }
+    },
+    "e.g. a macOS app, plus a side project": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例: macOS アプリと、副業のプロジェクト1つ"
           }
         }
       }
@@ -8188,6 +9794,17 @@
         }
       }
     },
+    "macOS wouldn't open the keychain item (%d). The key may still be there — unlock your keychain in Keychain Access, or save it again to replace it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS がキーチェーン項目を開けませんでした（%d）。キー自体は残っている可能性があります。キーチェーンアクセスでロックを解除するか、保存し直して置き換えてください。"
+          }
+        }
+      }
+    },
     "mull": {
       "extractionState": "manual",
       "shouldTranslate": false
@@ -8225,6 +9842,17 @@
         }
       }
     },
+    "mull couldn't reach %@, so it fell back to its own rule-based summary. Settings › AI can test the connection.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ に届かなかったので、mull 自身のルールベースの要約に切り替えました。設定 › AI で接続を試せます。"
+          }
+        }
+      }
+    },
     "mull couldn't write this file: %@\n\nYour text is still here. Try Save again, or copy it out.": {
       "extractionState": "manual",
       "localizations": {
@@ -8247,6 +9875,17 @@
         }
       }
     },
+    "mull failed: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull が失敗しました: %@"
+          }
+        }
+      }
+    },
     "mull fills this in as you work.": {
       "extractionState": "manual",
       "localizations": {
@@ -8254,6 +9893,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "作業するにつれて mull が埋めます。"
+          }
+        }
+      }
+    },
+    "mull had trouble opening its store": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull は保存先をうまく開けませんでした"
+          }
+        }
+      }
+    },
+    "mull has stopped recording %@. Turn %@ back on for mull in System Settings → Privacy & Security to pick it back up.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull は %@ の記録を止めました。システム設定 → プライバシーとセキュリティ で mull の %@ をオンに戻すと、また記録します。"
+          }
+        }
+      }
+    },
+    "mull hasn't recorded enough today to describe what you're working on. Leave it running a little longer, or check that recording is on in Live.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日はまだ、何を作業しているか説明できるだけの記録がありません。もう少し動かしたままにするか、Live で記録がオンになっているか確認してください。"
           }
         }
       }
@@ -8291,6 +9963,17 @@
         }
       }
     },
+    "mull is recording only what it already has permission for. Pick it back up from mull → Finish Setting Up mull.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull は、すでに許可のあるものだけを記録しています。mull → mull のセットアップを続ける から再開できます。"
+          }
+        }
+      }
+    },
     "mull is recording. The first line appears as soon as you type something, copy something, or move to another app — usually within a minute of starting work.": {
       "extractionState": "manual",
       "localizations": {
@@ -8309,6 +9992,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "mull は動いていますが、必要な権限のひとつが与えられていないため、その日の一部がこのページに届いていません。どの権限か、そしてそれで何を保持できるようになるかは「設定 › データ」にあります。"
+          }
+        }
+      }
+    },
+    "mull isn't in %@'s MCP config — nothing to remove.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ の MCP 設定に mull はありません。削除するものがありません。"
           }
         }
       }
@@ -8401,6 +10095,17 @@
         }
       }
     },
+    "mull stopped recording": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull が記録を止めました"
+          }
+        }
+      }
+    },
     "mull will launch this command on your Mac, with your account's access, every time it pulls from this source. Add only servers you installed yourself and trust. Nothing runs until you press Add and leave the source enabled.": {
       "extractionState": "manual",
       "localizations": {
@@ -8474,6 +10179,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "種類の指定なし"
+          }
+        }
+      }
+    },
+    "noon": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正午"
           }
         }
       }
@@ -8610,6 +10326,28 @@
         }
       }
     },
+    "what you type": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あなたが打った内容"
+          }
+        }
+      }
+    },
+    "window titles and page names": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ウィンドウタイトルとページ名"
+          }
+        }
+      }
+    },
     "written by mull · you can correct it": {
       "extractionState": "manual",
       "localizations": {
@@ -8654,6 +10392,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "「%@」を削除できませんでした。~/mull/memory のファイルはそのまま残っています。"
+          }
+        }
+      }
+    },
+    "“%@” stopped pulling": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」の取り込みが止まりました"
           }
         }
       }

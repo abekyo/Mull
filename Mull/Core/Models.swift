@@ -74,7 +74,7 @@ struct DailySummary: Codable, FetchableRecord, PersistableRecord, Identifiable {
         let lines = content.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.hasPrefix("#") }
         guard let first = lines.first?.trimmingCharacters(in: .whitespaces) else {
-            return "No activity recorded"
+            return String(localized: "No activity recorded")
         }
         for marker in ["- [ ] ", "- [x] ", "- ", "* ", "+ "] where first.hasPrefix(marker) {
             return String(first.dropFirst(marker.count))
@@ -292,10 +292,10 @@ enum LLMProvider: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .off: "Off — local rule-based only"
+        case .off: String(localized: "Off — local rule-based only")
         case .gemini: "Gemini Flash"
         case .local: "Local (Ollama)"
-        case .localOpenAI: "Local (OpenAI-compatible)"
+        case .localOpenAI: String(localized: "Local (OpenAI-compatible)")
         case .claude: "Claude API"
         case .openai: "OpenAI API"
         }

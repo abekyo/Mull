@@ -269,8 +269,8 @@ final class ProactiveEngine: NSObject {
 
                 self?.sendNotification(
                     id: "ai-context-ready",
-                    title: "Context ready",
-                    body: "Paste with \u{2318}V — clipboard restores in 30s.",
+                    title: String(localized: "Context ready"),
+                    body: String(localized: "Paste with \u{2318}V — clipboard restores in 30s."),
                     action: nil
                 )
             }

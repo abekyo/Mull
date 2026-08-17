@@ -1082,13 +1082,16 @@ struct ConsolidatedSummary {
 
 enum mullError: LocalizedError {
     case missingAPIKey(String)
-    case llmFailed(String)
+    /// The kind is carried rather than inferred: `LLMFailure` used to recover it by
+    /// matching English words in the detail, which stopped working the moment the
+    /// detail could be Japanese. See `LLMFailure.Kind`.
+    case llmFailed(kind: LLMFailure.Kind, String)
     case alreadyRunning
 
     var errorDescription: String? {
         switch self {
         case .missingAPIKey(let provider): "No API key configured for \(provider). Set it in Settings → AI."
-        case .llmFailed(let detail): "LLM call failed: \(detail)"
+        case .llmFailed(_, let detail): "LLM call failed: \(detail)"
         case .alreadyRunning: "A consolidation is already running. Try again when it finishes."
         }
     }

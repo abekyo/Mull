@@ -271,10 +271,17 @@ enum QuarantineRecovery {
         var parts: [String] = []
         if rows > 0 {
             let files = outcomes.filter { $0.totalRows > 0 }.count
-            parts.append("Recovered \(rows) record\(rows == 1 ? "" : "s") from \(files) quarantined database\(files == 1 ? "" : "s").")
+            // Whole sentences rather than a stem with English inflections spliced in
+            // (WRITING.md §5.3). `counted` lives in the view layer, and this file is
+            // compiled into MullMCP as well, so the choice is written out here.
+            parts.append(rows == 1
+                ? String(localized: "Recovered 1 record from \(files) quarantined database(s).")
+                : String(localized: "Recovered \(rows) records from \(files) quarantined database(s)."))
         }
         if failed > 0 {
-            parts.append("\(failed) could not be read and \(failed == 1 ? "was" : "were") left in place.")
+            parts.append(failed == 1
+                ? String(localized: "1 could not be read and was left in place.")
+                : String(localized: "\(failed) could not be read and were left in place."))
         }
         return parts.joined(separator: " ")
     }

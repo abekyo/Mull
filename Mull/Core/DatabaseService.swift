@@ -176,7 +176,7 @@ final class DatabaseService: Sendable {
 
                 do {
                     pool = try DatabasePool(path: dbPath, configuration: config)
-                    reason = "Database was corrupted and has been reset. Previous data saved to \(corruptPath)"
+                    reason = String(localized: "Database was corrupted and has been reset. Previous data saved to \(corruptPath)")
                     databaseLogger.warning("\(reason!)")
                 } catch {
                     databaseLogger.error("Fresh database creation also failed: \(error.localizedDescription)")
@@ -192,7 +192,7 @@ final class DatabaseService: Sendable {
                 if let p = try? DatabasePool(path: tmpPath, configuration: config) {
                     pool = p
                     usedFallback = true
-                    reason = "Database is running from a temporary location. Data will not persist across restarts."
+                    reason = String(localized: "Database is running from a temporary location. Data will not persist across restarts.")
                     databaseLogger.fault("\(reason!)")
                     break
                 }
@@ -252,7 +252,7 @@ final class DatabaseService: Sendable {
                 databaseLogger.warning("\(reason!)")
             } catch {
                 databaseLogger.fault("Could not recover from migration failure: \(error.localizedDescription)")
-                reason = "The database schema is broken and could not be reset: \(error.localizedDescription)"
+                reason = String(localized: "The database schema is broken and could not be reset: \(error.localizedDescription)")
                 // Re-open the original so the app still runs read-mostly rather than
                 // dying; the schema is stale but the user's data is intact.
                 if let reopened = try? DatabasePool(path: backupPath, configuration: config) {

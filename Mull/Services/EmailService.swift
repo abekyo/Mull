@@ -60,9 +60,9 @@ final class EmailService {
             case .automationDenied:
                 "macOS is blocking mull from controlling Mail. Allow it in System Settings › Privacy & Security › Automation › mull › Mail."
             case .mailNotConfigured:
-                "Mail.app has no accounts set up, so there is no inbox to read."
+                String(localized: "Mail.app has no accounts set up, so there is no inbox to read.")
             case .scriptFailed(let detail):
-                "Mail returned an error: \(detail)"
+                String(localized: "Mail returned an error: \(detail)")
             }
         }
 
@@ -323,7 +323,9 @@ final class EmailService {
 
         guard !events.isEmpty else { return nil }
 
-        var lines: [String] = ["Recent emails:"]
+        // now.md, not chrome: this goes into the vault, so it follows the reader's
+        // language through `VaultText` rather than the catalog (WRITING.md §5.2).
+        var lines: [String] = [VaultText.t("Recent emails:", "最近のメール:")]
         var seen = Set<String>()
 
         for event in events.reversed() {

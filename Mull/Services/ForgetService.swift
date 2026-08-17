@@ -78,13 +78,13 @@ enum ForgetService {
         /// changes what the user should do next.
         var failureMessage: String? {
             if let failedLayer {
-                return "Deleting \(failedLayer) failed, so this window is only partly forgotten. Try Forget again."
+                return String(localized: "Deleting \(failedLayer) failed, so this window is only partly forgotten. Try Forget again.")
             }
             var parts: [String] = []
             if !failedFiles.isEmpty {
                 let names = failedFiles.map { ($0 as NSString).lastPathComponent }
                     .joined(separator: ", ")
-                parts.append("Some files could not be cleaned and may still mention this window: \(names).")
+                parts.append(String(localized: "Some files could not be cleaned and may still mention this window: \(names)."))
             }
             if scrubFailed {
                 parts.append("The records are gone, but the database could not be fully scrubbed — fragments may remain on disk until the next cleanup.")
@@ -118,12 +118,19 @@ enum ForgetService {
         /// The whole message. `label` is the window in the user's words, e.g.
         /// "the last 15 minutes".
         func sentence(label: String) -> String {
-            guard !isEmpty else { return "There's nothing recorded in \(label)." }
-            let scale = events > 0
-                ? "\(events.formatted()) recorded \(events == 1 ? "event" : "events") from \(label)"
-                : "Everything mull recorded in \(label)"
-            return "\(scale), and everything mull worked out from it, will be deleted. "
-                 + "Your own notes and reports are kept."
+            guard !isEmpty else { return String(localized: "There's nothing recorded in \(label).") }
+            // One sentence per case rather than a stem plus an inflected fragment:
+            // "\(events) recorded event" + "s" cannot be translated, and the joined
+            // halves left the middle clause outside the catalog entirely (WRITING.md §5.3).
+            let scale: String
+            if events == 1 {
+                scale = String(localized: "1 recorded event from \(label), and everything mull worked out from it, will be deleted.")
+            } else if events > 1 {
+                scale = String(localized: "\(events.formatted()) recorded events from \(label), and everything mull worked out from it, will be deleted.")
+            } else {
+                scale = String(localized: "Everything mull recorded in \(label), and everything mull worked out from it, will be deleted.")
+            }
+            return scale + " " + String(localized: "Your own notes and reports are kept.")
         }
 
         /// The single caveat worth interrupting for: text that has already left
@@ -135,7 +142,7 @@ enum ForgetService {
         /// really be forgotten is the worst possible moment to say so.
         var warning: String? {
             guard let cloudProvider else { return nil }
-            return "Some of it may already have been sent to \(cloudProvider), which mull can't take back."
+            return String(localized: "Some of it may already have been sent to \(cloudProvider), which mull can't take back.")
         }
     }
 
