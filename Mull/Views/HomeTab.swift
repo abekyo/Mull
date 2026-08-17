@@ -609,15 +609,24 @@ struct HomeTab: View {
     // page, or it says plainly that it is showing a part of the whole — and
     // there is always a way to see the rest.
 
-    private static func countLabel(showing: Int, of total: Int, noun: String) -> String {
-        let unit = pluralNoun(total, noun)
-        return showing == total ? "\(total) \(unit)" : "\(showing) of \(total) \(unit)"
+    /// The events variant. It used to take the noun as a `String` and pluralise it by
+    /// suffixing an s, which is a sentence assembled from parts and so a sentence no
+    /// translation can reach (WRITING.md §5.3). One caller, one noun, four whole keys.
+    private static func eventCountLabel(showing: Int, of total: Int) -> String {
+        if showing == total {
+            return counted(total, one: "1 event", other: "\(total) events")
+        }
+        return counted(total, one: "\(showing) of 1 event",
+                       other: "\(showing) of \(total) events")
     }
 
     /// The same count for a header that has already named the noun. "PATTERNS · 3 of 7"
     /// says everything "PATTERNS · 3 of 7 patterns" does, without saying it twice.
     private static func countLabel(showing: Int, of total: Int) -> String {
-        showing == total ? "\(total)" : "\(showing) of \(total)"
+        // `String(localized:)` on the second one, not bare interpolation: "of" is a
+        // word, and a bare `"\(a) of \(b)"` is a Swift string that no catalog ever
+        // sees. The first is two digits and has nothing to translate.
+        showing == total ? "\(total)" : String(localized: "\(showing) of \(total)")
     }
 
     /// "Show N more" / "Show fewer", or nothing when everything is already out.
@@ -969,7 +978,7 @@ struct HomeTab: View {
                 Text("SCHEDULE")
                     .sectionLabel()
                 Spacer()
-                Text(Self.countLabel(showing: todayEvents.count, of: todayEvents.count, noun: "event"))
+                Text(Self.eventCountLabel(showing: todayEvents.count, of: todayEvents.count))
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkGhost)
             }

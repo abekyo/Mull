@@ -225,8 +225,7 @@ final class ChatViewModel: ObservableObject {
             withAnimation(Self.appear) {
                 messages.append(Message(
                     role: .assistant,
-                    text: String(localized: "That one needs a model to read your records. Ollama and LM Studio ")
-                        + "run on this Mac and never send anything out.",
+                    text: String(localized: "That one needs a model to read your records. Ollama and LM Studio run on this Mac and never send anything out."),
                     retryPrompt: prompt,
                     offersProviderSetup: true))
             }
@@ -775,8 +774,7 @@ struct ChatPanelView: View {
                  ? (isLLMOff
                     ? String(localized: "Stays on this Mac. No provider is on, so nothing is uploaded.")
                     : String(localized: "Stays on this Mac — \(providerLabel) runs locally."))
-                 : "Each question sends me.md, now.md, up to 5 project notes and 7 days of "
-                   + "activity to \(providerLabel).")
+                 : String(localized: "Each question sends me.md, now.md, up to 5 project notes and 7 days of activity to \(providerLabel)."))
                 .font(DS.miniFont)
                 .foregroundStyle(DS.inkGhost)
                 // Served width before the Spacer is — NOT `fixedSize`.

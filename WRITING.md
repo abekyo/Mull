@@ -200,6 +200,27 @@ Text("Runs as: " + parts.joined(separator: " "))   // ← 同じ
 `String` を引数に取る自前のヘルパー（`moreButton(_ title: String)` など）も同じです。
 呼び出し側で `String(localized:)` を通してください。
 
+### 5.5 キーに `%1$@` を書かない（2026-08-18 追記）
+
+Swift が引く**キー**は常に非位置指定です。`"\(a) · \(b) recorded"` が探すのは
+`%@ · %@ recorded` であって `%1$@ · %2$@ recorded` ではありません。引数が何個でも同じで、
+`Text` の `LocalizedStringKey` と `String(localized:)` の両方で確認しました。
+
+xcstrings に位置指定でキーを書くと、翻訳は載っているのに永久に引かれません。**画面は英語のまま、
+カタログは完成して見える**という、いちばん気づけない壊れ方をします。2026-08-18 に10件見つかりました
+（カレンダーの日別ツールチップ、中断の表示、検索の絞り込み件数、全削除の確認文など）。
+
+**値のほうは位置指定で構いません。** 日本語で語順を入れ替えるときは値に `%2$lld件中 %1$lld件` と
+書けば効きます。キーと値は別物です。
+
+### 5.6 引数が無い文字列の `%` は `%%` にしない（2026-08-18 追記）
+
+補間が1つでもある文字列は書式文字列になるので、リテラルの `%` はキーの中で `%%` になります
+（`"\(n)% named"` → `%lld%% named`）。補間が1つも無ければ書式文字列ではないので、`%` は `%` のままです
+（`"about 3% of what mull captured"` → そのまま）。
+
+スクリプトでカタログを編集するときにここを取り違えると、キーが1文字ずれて引かれなくなります。
+
 ---
 
 ## 6. 検査
@@ -230,23 +251,47 @@ grep -rn --include="*.swift" -P '"[^"]*[\x{3040}-\x{30ff}\x{4e00}-\x{9fff}][^"]*
 python3 -c "
 import json,re,glob
 keys=set(json.load(open('Mull/Resources/Localizable.xcstrings'))['strings'])
-pat=re.compile(r'(?:Text|Toggle|Button|Label|Picker|Section|Stepper|TextField|SecureField)\(\s*\"((?:[^\"\\\\]|\\\\.)*)\"|\.help\(\s*\"((?:[^\"\\\\]|\\\\.)*)\"')
+lit=r'\"((?:[^\"\\\\]|\\\\.)*)\"'
+apis=r'(?:Text|Toggle|Button|Label|Picker|Section|Stepper|TextField|SecureField|Menu|Link|LabeledContent|confirmationDialog|alert|navigationTitle)'
+pats=[re.compile(apis+r'\(\s*'+lit),
+      re.compile(r'String\(localized:\s*'+lit),
+      re.compile(r'\.(?:help|accessibilityLabel|accessibilityValue|accessibilityHint)\(\s*'+lit),
+      re.compile(r'(?:one|other):\s*'+lit)]
 for f in sorted(glob.glob('Mull/Views/**/*.swift',recursive=True)):
     for i,line in enumerate(open(f),1):
-        for m in pat.finditer(line):
-            s=next(g for g in m.groups() if g is not None)
-            if '\\\\(' in s or len(s)<=2: continue
-            k=s.replace('\\\\n','\n').replace('\\\\\"','\"')
-            if k not in keys: print(f'{f}:{i} {k[:60]!r}')
+        if line.strip().startswith('//'): continue
+        for p in pats:
+            for m in p.finditer(line):
+                s=m.group(1)
+                if '\\\\(' in s or len(s)<=2: continue
+                k=s.replace('\\\\n','\n').replace('\\\\\"','\"')
+                if k not in keys: print(f'{f}:{i} {k[:60]!r}')
 "
 
 # 4. Text() の中で文字列を + で繋いでいないか（§5.4）
 grep -rn --include="*.swift" -E 'Text\("[^"]*"\s*\+' Mull/Views/
+
+# 5. キーに位置指定子が混ざっていないか（§5.5）。テストが同じことを見ています
+python3 -c "
+import json
+d=json.load(open('Mull/Resources/Localizable.xcstrings'))['strings']
+import re
+for k in d:
+    if re.search(r'%\d+\\\$', k): print(repr(k[:70]))
+"
 ```
 
 3 は `Text(` だけを見ていた時期があり、`Toggle` / `Picker` / `.help` に入った11件を
-取りこぼしました。API を1つ足したら、この正規表現にも足してください。
+取りこぼしました。2026-08-18 に `String(localized:)` と `counted(one:other:)` も足しています。
+API を1つ足したら、この正規表現にも足してください。補間を含む行（`\(…)`）は飛ばすので、
+そこは目で見るしかありません。
 4 はコメントと `"+"` を含むリテラルを拾います。目視で外してください。
+
+**3 と 5 はテストにもなっています。** `VaultLocalizationTests` の
+`testEveryEnglishStringHasAJapaneseOne`（訳の抜け）と
+`testNoKeyUsesAPositionalSpecifier`（§5.5 の死んだキー）が、ビルドされた `.lproj` の側から
+同じことを見ます。上のスクリプトが見るのはソース側で、テストが見るのは成果物側です。
+xcstrings に登録し忘れた文字列はテストでは落ちないので、両方要ります。
 
 2 の grep は doc comment も拾います。実際のウィンドウタイトルを例示している
 コメント（`「Mdファイル編集時のサイドバー位置ずれ問題」 — Mull`）は正しい姿なので、

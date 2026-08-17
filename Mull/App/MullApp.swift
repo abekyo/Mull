@@ -153,6 +153,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
 
+        // Make the stored language true of the bundle for the *next* launch. This
+        // one is already bound: CoreFoundation resolved `.lproj` before any of our
+        // code ran. Doing it here rather than only in Settings is what stops a
+        // preference the picker has not been moved this session — including every
+        // one stored before the windows followed it at all — sitting in Japanese
+        // over an English window forever.
+        UserLanguage.applyChromeAtLaunch()
+
         // No `NSApp.appearance` pin. The app used to force `.aqua` here because
         // the palette had a single ivory page; every DS colour token is now a
         // dynamic NSColor with a daylight and a lamplight value, so leaving this

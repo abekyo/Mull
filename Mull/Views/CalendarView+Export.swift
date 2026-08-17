@@ -156,14 +156,20 @@ extension CalendarWeekView {
             } else {
                 VStack(alignment: .leading, spacing: DS.xs) {
                     if !proposal.plan.create.isEmpty {
-                        Label(pluralized(proposal.plan.create.count, "new event"), systemImage: DS.Glyph.add)
+                        let n = proposal.plan.create.count
+                        Label(counted(n, one: "1 new event", other: "\(n) new events"),
+                              systemImage: DS.Glyph.add)
                     }
                     if !proposal.plan.update.isEmpty {
-                        Label("\(pluralized(proposal.plan.update.count, "event")) brought up to date",
+                        let n = proposal.plan.update.count
+                        Label(counted(n, one: "1 event brought up to date",
+                                      other: "\(n) events brought up to date"),
                               systemImage: "arrow.triangle.2.circlepath")
                     }
                     if !proposal.plan.delete.isEmpty {
-                        Label("\(pluralized(proposal.plan.delete.count, "event")) removed — no longer how the day reads",
+                        let n = proposal.plan.delete.count
+                        Label(counted(n, one: "1 event removed — no longer how the day reads",
+                                      other: "\(n) events removed — no longer how the day reads"),
                               systemImage: "trash")
                     }
                 }
@@ -229,11 +235,16 @@ extension CalendarWeekView {
                     }
                 }
                 if quality.fellBack > 0 {
-                    Text("\(pluralized(quality.fellBack, "event")) will just say the app's name — mull couldn't read a title worth writing.")
+                    Text(counted(quality.fellBack,
+                                 one: "1 event will just say the app's name — mull couldn't read a title worth writing.",
+                                 other: "\(quality.fellBack) events will just say the app's name — mull couldn't read a title worth writing."))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if quality.tooShort > 0 {
-                    Text("\(pluralized(quality.tooShort, "short stretch")) left out, under \(Int(CalendarMirror.minimumDuration / 60)) minutes.")
+                    let minutes = Int(CalendarMirror.minimumDuration / 60)
+                    Text(counted(quality.tooShort,
+                                 one: "1 short stretch left out, under \(minutes) minutes.",
+                                 other: "\(quality.tooShort) short stretches left out, under \(minutes) minutes."))
                 }
             }
             .font(DS.captionFont)

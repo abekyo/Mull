@@ -2,26 +2,29 @@ import Foundation
 
 // MARK: - Counts that agree with the thing they count
 //
-// mull carries no localisation catalogue (there is no .strings or .stringsdict in
-// the project), so there is nothing for `String.localizedStringWithFormat` to look
-// a plural rule up in, and interpolating `"\(n) blocks"` prints "1 blocks" one day
-// in seven. Two English forms chosen here is the honest version of that. When a
-// second UI language does arrive this becomes a catalogue lookup and every call
-// site holds — which is the point of routing them all through one place.
+// This used to build the phrase out of parts: `pluralized(3, "block")` returned
+// "\(count) \(noun)", with the noun pluralised by suffixing an s. That was written
+// when "mull carries no localisation catalogue" was true of the project. It has not
+// been true since `Localizable.xcstrings` arrived, and the seam it left is the one
+// WRITING.md §5.3 names: a translated sentence with an English fragment glued into
+// it. In a Japanese window "3 events brought up to date" came out as
+// "3 events を最新に更新" — half of it looked up, half of it hard-coded English, and
+// nothing in the type system or the catalog to say so.
 //
-// It is one place because it briefly was not: the rule was written twice, once as
-// a free `pluralized` next to the week bars and once folded into Home's own
-// "showing N of M" label, which is exactly how two screens end up disagreeing
-// about how to say "1 project".
+// So the unit of translation is the whole sentence, and the plural is chosen by
+// picking between two whole sentences. English needs both; Japanese does not
+// inflect for number, so both keys usually carry the same wording with the number
+// substituted. That is a translation deciding how it reads, which is the point.
 
-/// "1 block", "3 blocks". Pass `plural:` for anything English does not pluralise
-/// by suffixing an s.
-func pluralized(_ count: Int, _ singular: String, plural: String? = nil) -> String {
-    "\(count) \(pluralNoun(count, singular, plural: plural))"
-}
-
-/// The noun alone, in the form that agrees with `count` — for the call sites that
-/// need to place the number somewhere other than directly in front of it.
-func pluralNoun(_ count: Int, _ singular: String, plural: String? = nil) -> String {
-    count == 1 ? singular : plural ?? singular + "s"
+/// One sentence in the form that agrees with `count`.
+///
+/// Both arguments are literals at the call site, so both become keys in the string
+/// catalog and both can be translated. Put the number in with interpolation — the
+/// key becomes `%lld …`, and the translation places it wherever that language puts
+/// it, which is not always the front.
+///
+///     counted(n, one: "1 new event", other: "\(n) new events")
+func counted(_ count: Int, one: String.LocalizationValue,
+             other: String.LocalizationValue) -> String {
+    String(localized: count == 1 ? one : other)
 }

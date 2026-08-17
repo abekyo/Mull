@@ -102,15 +102,25 @@ struct GeneralTab: View {
     @State private var loginItemNote: String?
     @State private var loginItemIsProblem = false
 
-    /// The picker moved the app's chrome to a language this launch is not running
-    /// in. Session state: it is true from the change until the app is quit, which
-    /// is exactly how long the discrepancy lasts.
+    /// The windows on screen are in a different language from the one now chosen.
+    /// Session state: true from the moment the two disagree until the app is quit,
+    /// which is exactly how long the discrepancy lasts. Read from
+    /// `UserLanguage.chromeNeedsRelaunch` on appear as well as on change, so a
+    /// launch that came up out of step says so too.
     @State private var languageNeedsRelaunch = false
+
+    // All three are typed `LocalizedStringKey`, and that is the whole reason they
+    // work. `Text` has two initialisers: a literal picks the one that takes a
+    // `LocalizedStringKey` and looks the string up, a `String` value picks the
+    // pass-through. These arrays held plain `String`s, so `Text(label)` took the
+    // second one and every row in these three pickers stayed English in a Japanese
+    // window — no warning, no key in the catalog, nothing to see but the symptom.
+    // WRITING.md §5.4 is the same trap reached through `+`.
 
     /// Seconds, matching `Preferences.resumeGap`. "Off" is a real option rather than
     /// a hidden floor: someone who wants every interruption drawn separately should
     /// be able to say so, not be told the smallest break mull believes in.
-    private let resumeGapOptions = [
+    private let resumeGapOptions: [(Int, LocalizedStringKey)] = [
         (0, "Off — every break starts a new block"),
         (300, "5 minutes"),
         (600, "10 minutes"),
@@ -121,7 +131,7 @@ struct GeneralTab: View {
     /// Seconds. This picks how soon a finished stretch of work reaches the calendar,
     /// not how much is written: only settled blocks are mirrored and each is written
     /// once, so a shorter interval costs latency, not volume.
-    private let mirrorIntervalOptions = [
+    private let mirrorIntervalOptions: [(Int, LocalizedStringKey)] = [
         (900, "Every 15 minutes"),
         (1800, "Every 30 minutes"),
         (3600, "Every hour"),
@@ -130,13 +140,17 @@ struct GeneralTab: View {
         (86400, "Once a day"),
     ]
 
-    private let charOptions = [
+    private let charOptions: [(Int, LocalizedStringKey)] = [
         (5000, "Minimal (5K)"),
         (10000, "Light (10K)"),
         (50000, "Default (50K)"),
         (100000, "Large (100K)"),
         (200000, "Full day (200K)"),
-        (0, "Unlimited"),
+        // "No limit" rather than "Unlimited", which is the retention picker's word
+        // for *time*. One English literal is one catalog key, so the two controls
+        // shared the translation and this row read 無期限 — no expiry — under a
+        // heading about how many characters to hand over.
+        (0, "No limit"),
     ]
 
     var body: some View {
@@ -151,15 +165,27 @@ struct GeneralTab: View {
                     }
                 }
                 .onChange(of: vaultLanguage) { old, new in
+                    // The windows first, and on every change rather than only on a
+                    // flip. The chrome can need moving when the vault language does
+                    // not: picking "Same as macOS" on a Japanese Mac leaves every
+                    // file in Japanese and still has to hand the windows back to
+                    // System Settings.
+                    UserLanguage.applyChrome(UserLanguage.Preference(rawValue: new) ?? .system)
+                    languageNeedsRelaunch = UserLanguage.chromeNeedsRelaunch
+
                     let was = UserLanguage.isJapanese(
                         preference: UserLanguage.Preference(rawValue: old) ?? .system)
-                    // Only on a real flip: every picker change fires this, including
-                    // one that resolves to the same language.
+                    // The vault only on a real flip: every picker change fires this,
+                    // including one that resolves to the same language.
                     guard UserLanguage.isJapanese != was else { return }
-                    applyToAppChrome(UserLanguage.Preference(rawValue: new) ?? .system)
                     OnboardingProfile.reprojectSection()
                     appState.regenerateContextNow()
                 }
+                // The mismatch outlives the change that caused it, and it can also
+                // predate this session entirely: a launch that came up in one
+                // language while the preference named the other used to say nothing
+                // at all, because this was only ever set from `onChange`.
+                .onAppear { languageNeedsRelaunch = UserLanguage.chromeNeedsRelaunch }
 
                 // Where the line falls. The vault turns over on the next write —
                 // seconds — while the windows are a real macOS localization and are
@@ -424,7 +450,9 @@ struct GeneralTab: View {
             if status.failures > 0, let error = status.lastError {
                 HStack(alignment: .firstTextBaseline, spacing: DS.xs) {
                     Image(systemName: "exclamationmark.triangle.fill").font(DS.miniFont)
-                    Text("\(pluralized(status.failures, "write")) failed. Last reason: \(error)")
+                    Text(counted(status.failures,
+                                 one: "1 write failed. Last reason: \(error)",
+                                 other: "\(status.failures) writes failed. Last reason: \(error)"))
                         .font(DS.captionFont)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -486,37 +514,10 @@ struct GeneralTab: View {
         loginItemIsProblem = false
     }
 
-    /// Point the *bundle* at the chosen language, so mull's windows follow the same
-    /// setting its files do.
-    ///
-    /// The two halves of "language" are resolved by different machinery and there is
-    /// no honest way to make them switch together. The vault is written by mull, so
-    /// `VaultText` reads the preference at every write and the next 60-second pass
-    /// picks it up. The windows are a real macOS localization: `Text("…")` resolves
-    /// against the bundle's `.lproj`, which CoreFoundation binds **once, at process
-    /// start**, from `AppleLanguages`. Writing it here is what makes the next launch
-    /// come up in the chosen language; nothing can make this one.
-    ///
-    /// `.system` removes the override rather than writing a value, so mull goes back
-    /// to following System Settings › General › Language & Region — including its
-    /// per-app entry for mull, which exists because the bundle now ships two
-    /// localizations. Pinning `en`/`ja` there would make that per-app picker a
-    /// control that silently does nothing.
-    private func applyToAppChrome(_ preference: UserLanguage.Preference) {
-        let key = "AppleLanguages"
-        switch preference {
-        case .system:   UserDefaults.standard.removeObject(forKey: key)
-        case .english:  UserDefaults.standard.set(["en"], forKey: key)
-        case .japanese: UserDefaults.standard.set(["ja"], forKey: key)
-        }
-        // Compare against what this process actually launched with, not against the
-        // preference: switching to `.japanese` on a Mac already running mull in
-        // Japanese changes nothing on screen, and offering to relaunch for it would
-        // be asking the user to fix a problem they do not have.
-        let running = Bundle.main.preferredLocalizations.first ?? "en"
-        let wanted = UserLanguage.isJapanese(preference: preference) ? "ja" : "en"
-        languageNeedsRelaunch = !running.hasPrefix(wanted)
-    }
+    // The bundle write that used to live here is `UserLanguage.applyChrome`. It moved
+    // because the launch has to do it too, and a private method on a tab that most
+    // launches never open could not: a preference stored before the windows followed
+    // it at all left the chrome in the other language permanently.
 }
 
 // MARK: - AI Tab
@@ -1570,7 +1571,7 @@ struct DataTab: View {
                 // accessibility tree and reads up to 40,000 characters of whatever
                 // text is on screen. This row is where a person decides whether to
                 // hand that over, so it has to name the bigger thing.
-                permRow("Accessibility",
+                permRow(String(localized: "Accessibility"),
                         granted: appState.permissions.accessibilityGranted,
                         detail: String(localized: "Window titles, and the text on screen in the window you're using")) {
                     appState.permissions.openAccessibilitySettings()
@@ -1579,7 +1580,7 @@ struct DataTab: View {
                 // granted this once can still find it and take it back. What changes is
                 // the sentence: an ungranted permission mull is not using is not a gap
                 // to fix, and showing it as one trains people past the rows that are.
-                permRow("Input Monitoring",
+                permRow(String(localized: "Input Monitoring"),
                         granted: appState.permissions.inputMonitoringGranted,
                         detail: keystrokeCapture
                             ? String(localized: "Keystrokes")
@@ -1591,10 +1592,11 @@ struct DataTab: View {
                 // picked "Add only", which cannot read a single event — got a
                 // permanently empty week view and a now.md with no schedule in it,
                 // with nothing on any screen to explain why or to ask again.
-                permRow("Calendar",
+                permRow(String(localized: "Calendar"),
                         granted: calendarGranted,
                         detail: calendarDetail,
-                        actionLabel: calendarStatus == .notDetermined ? "Grant" : "Open Settings") {
+                        actionLabel: calendarStatus == .notDetermined
+                            ? String(localized: "Grant") : String(localized: "Open Settings")) {
                     requestCalendarAccess()
                 }
                 // Browser Automation had no row at all, and its denial was never
@@ -1935,7 +1937,9 @@ struct DataTab: View {
                     }
                 }
                 .confirmationDialog(
-                    "Delete \(pendingRetentionCount.formatted()) recorded \(pendingRetentionCount == 1 ? "event" : "events")?",
+                    counted(pendingRetentionCount,
+                            one: "Delete 1 recorded event?",
+                            other: "Delete \(pendingRetentionCount.formatted()) recorded events?"),
                     isPresented: Binding(
                         get: { pendingRetention != nil },
                         set: { if !$0 { pendingRetention = nil } }
@@ -1952,8 +1956,7 @@ struct DataTab: View {
                         do {
                             try appState.database.deleteEventsOlderThan(days: days)
                         } catch {
-                            cleanupProblem = "The setting was changed, but the older events "
-                                + "could not be deleted: \(error.localizedDescription)"
+                            cleanupProblem = String(localized: "The setting was changed, but the older events could not be deleted: \(error.localizedDescription)")
                         }
                         pendingRetention = nil
                         Task { await refresh() }
@@ -2068,8 +2071,15 @@ struct DataTab: View {
     /// `actionLabel` exists because not every permission can still be *granted*
     /// from inside mull: once macOS has recorded a denial it will not prompt again,
     /// and the only honest button is one that opens System Settings.
+    ///
+    /// Every one of these three is a `String` and reaches `Text` through the
+    /// pass-through initialiser, so what a caller hands over is what appears on
+    /// screen: pass literals here and the whole Permissions section stays English in
+    /// a Japanese window. The call sites go through `String(localized:)` — WRITING.md
+    /// §5 says this about every helper of this shape, and the default below is the
+    /// one string this file can localise on their behalf.
     private func permRow(_ name: String, granted: Bool, detail: String,
-                         actionLabel: String = "Grant",
+                         actionLabel: String = String(localized: "Grant"),
                          action: @escaping () -> Void) -> some View {
         HStack {
             Image(systemName: granted ? DS.Glyph.success : DS.Glyph.denied)

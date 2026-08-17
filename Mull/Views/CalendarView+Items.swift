@@ -404,7 +404,8 @@ extension CalendarWeekView {
                     .font(DS.captionFont)
                 // A bare number beside a "#" glyph left the reader to guess what had
                 // been counted. It is captures, and it says so.
-                Label(pluralized(block.eventCount, "capture"), systemImage: "number")
+                Label(counted(block.eventCount, one: "1 capture",
+                              other: "\(block.eventCount) captures"), systemImage: "number")
                     .font(DS.captionFont)
             }
             .foregroundStyle(DS.inkDim)
@@ -413,7 +414,10 @@ extension CalendarWeekView {
             // that span, so the span has to say what is inside it — otherwise the
             // merge quietly turns a break into work.
             if !block.pauses.isEmpty {
-                Label("\(pluralized(block.pauses.count, "break")) · away \(CalendarWeekView.durationLabel(block.pausedDuration))",
+                let away = CalendarWeekView.durationLabel(block.pausedDuration)
+                Label(counted(block.pauses.count,
+                              one: "1 break · away \(away)",
+                              other: "\(block.pauses.count) breaks · away \(away)"),
                       systemImage: "pause")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)

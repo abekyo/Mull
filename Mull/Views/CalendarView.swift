@@ -684,8 +684,10 @@ extension CalendarWeekView {
             }
         }
         .contentShape(Rectangle())
-        .help("Click to select \(dayLabel.string(from: date)) · double-click to add an event · "
-              + "click the date to open it in Day view")
+        // One literal. `Text`/`help` take `LocalizedStringKey` from a literal and the
+        // pass-through initialiser from a `String` expression, so the `+` that used to
+        // join these two halves quietly took this line out of the catalog (WRITING.md §5.4).
+        .help("Click to select \(dayLabel.string(from: date)) · double-click to add an event · click the date to open it in Day view")
         .onTapGesture(count: 2) { newEvent(on: date) }
         .onTapGesture { monthSelection = key }
         .accessibilityAction(named: "New event") { newEvent(on: date) }
@@ -850,7 +852,9 @@ extension CalendarWeekView {
                 .contentShape(Rectangle())
                 // The shading alone says "busier"; the tooltip is where the reader
                 // finds out busier at what, so it stays explicit about the unit.
-                .help("\(CalendarWeekView.shortDate(day)) · \(pluralized(count, "capture")) recorded")
+                .help(counted(count,
+                              one: "\(CalendarWeekView.shortDate(day)) · 1 capture recorded",
+                              other: "\(CalendarWeekView.shortDate(day)) · \(count) captures recorded"))
                 .pointingHandCursor()
                 .onTapGesture { jumpToDay(day) }
         } else {

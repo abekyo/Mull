@@ -82,84 +82,6 @@
         }
       }
     },
-    "%1$@ %2$@": {
-      "extractionState": "manual",
-      "shouldTranslate": false
-    },
-    "%1$@ chars ≈ %2$@ tokens": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@文字 ≈ %2$@トークン"
-          }
-        }
-      }
-    },
-    "%1$@ · %2$@": {
-      "extractionState": "manual",
-      "shouldTranslate": false
-    },
-    "%1$@ · %2$@ recorded": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ · %2$@を記録"
-          }
-        }
-      }
-    },
-    "%1$@ · away %2$@": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ · 離席 %2$@"
-          }
-        }
-      }
-    },
-    "%1$@ – %2$@": {
-      "extractionState": "manual",
-      "shouldTranslate": false
-    },
-    "%1$lld main activities today, %2$@ of activity.": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "今日の主な作業: %1$lld件、稼働 %2$@"
-          }
-        }
-      }
-    },
-    "%1$lld new of %2$lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%2$lld件中 %1$lld件が新規"
-          }
-        }
-      }
-    },
-    "%1$lld of %2$lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%2$lld件中 %1$lld件"
-          }
-        }
-      }
-    },
     "%@ changed outside mull": {
       "extractionState": "manual",
       "localizations": {
@@ -167,6 +89,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ が mull の外で変更されました"
+          }
+        }
+      }
+    },
+    "%@ chars ≈ %@ tokens": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@文字 ≈ %2$@トークン"
           }
         }
       }
@@ -215,9 +148,75 @@
         }
       }
     },
+    "%@ · %lld captures recorded": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 記録%lld件"
+          }
+        }
+      }
+    },
+    "%@ · 1 capture recorded": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 記録1件"
+          }
+        }
+      }
+    },
+    "%@ — %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@（%@）"
+          }
+        }
+      }
+    },
     "%lld": {
       "extractionState": "manual",
       "shouldTranslate": false
+    },
+    "%lld blocks": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lldブロック"
+          }
+        }
+      }
+    },
+    "%lld breaks · away %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中断%lld回 · 離席 %@"
+          }
+        }
+      }
+    },
+    "%lld captures": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "記録%lld件"
+          }
+        }
+      }
     },
     "%lld characters, rebuilt and re-sent with every question.": {
       "extractionState": "manual",
@@ -237,6 +236,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "これ以前のセッション%lld件は表示していません"
+          }
+        }
+      }
+    },
+    "%lld events": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "予定%lld件"
+          }
+        }
+      }
+    },
+    "%lld events brought up to date": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件を最新に更新"
+          }
+        }
+      }
+    },
+    "%lld events removed — no longer how the day reads": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件を削除（その日の読み方が変わったため）"
+          }
+        }
+      }
+    },
+    "%lld events will just say the app's name — mull couldn't read a title worth writing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件はアプリ名だけになります。書くに値するタイトルを読めませんでした。"
           }
         }
       }
@@ -263,6 +306,72 @@
         }
       }
     },
+    "%lld new events": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新規%lld件"
+          }
+        }
+      }
+    },
+    "%lld new of %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$lld件中 %1$lld件が新規"
+          }
+        }
+      }
+    },
+    "%lld of %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$lld件中 %1$lld件"
+          }
+        }
+      }
+    },
+    "%lld of %lld events": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "予定%2$lld件中 %1$lld件"
+          }
+        }
+      }
+    },
+    "%lld of %lld named from what you had open · %lld%%": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld/%lld件は開いていた画面から名前を取りました · %lld%%"
+          }
+        }
+      }
+    },
+    "%lld of 1 event": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "予定1件中 %lld件"
+          }
+        }
+      }
+    },
     "%lld records kept today.": {
       "extractionState": "manual",
       "localizations": {
@@ -285,9 +394,75 @@
         }
       }
     },
+    "%lld short stretches left out, under %lld minutes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$lld分未満の短い区間を%1$lld件除きました。"
+          }
+        }
+      }
+    },
+    "%lld writes failed. Last reason: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込みが%lld件失敗しました。直近の理由: %@"
+          }
+        }
+      }
+    },
+    "%lld written · %lld brought up to date · %lld removed · %lld you deleted and mull won't rewrite": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件を書き込み · %lld件を最新に更新 · %lld件を削除 · %lld件はあなたが削除したので mull は書き直しません"
+          }
+        }
+      }
+    },
+    "%lld written, %lld removed, %lld you deleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件を書き込み、%lld件を削除、%lld件はあなたが削除"
+          }
+        }
+      }
+    },
     "%lld%%": {
       "extractionState": "manual",
       "shouldTranslate": false
+    },
+    "%lld%% named from what you had open": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% は開いていた画面から名前を取りました"
+          }
+        }
+      }
+    },
+    "%lld%% of the last pass was named from what you had open; the rest just say the app's name.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前回の書き込みのうち %lld%% は開いていた画面から名前を取りました。残りはアプリ名だけです。"
+          }
+        }
+      }
     },
     "+%lld more": {
       "extractionState": "manual",
@@ -296,6 +471,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "＋%lld件"
+          }
+        }
+      }
+    },
+    "1 block": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1ブロック"
+          }
+        }
+      }
+    },
+    "1 break · away %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中断1回 · 離席 %@"
+          }
+        }
+      }
+    },
+    "1 capture": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "記録1件"
           }
         }
       }
@@ -311,6 +519,61 @@
         }
       }
     },
+    "1 event": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "予定1件"
+          }
+        }
+      }
+    },
+    "1 event brought up to date": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1件を最新に更新"
+          }
+        }
+      }
+    },
+    "1 event removed — no longer how the day reads": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1件を削除（その日の読み方が変わったため）"
+          }
+        }
+      }
+    },
+    "1 event will just say the app's name — mull couldn't read a title worth writing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1件はアプリ名だけになります。書くに値するタイトルを読めませんでした。"
+          }
+        }
+      }
+    },
+    "1 new event": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新規1件"
+          }
+        }
+      }
+    },
     "1 record kept today.": {
       "extractionState": "manual",
       "localizations": {
@@ -318,6 +581,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日の記録: 1件"
+          }
+        }
+      }
+    },
+    "1 short stretch left out, under %lld minutes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld分未満の短い区間を1件除きました。"
+          }
+        }
+      }
+    },
+    "1 write failed. Last reason: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込みが1件失敗しました。直近の理由: %@"
           }
         }
       }
@@ -340,6 +625,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "1. 上の「システム設定を開く」を押すと、「プライバシーとセキュリティ」が開きます"
+          }
+        }
+      }
+    },
+    "10 minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "10分"
+          }
+        }
+      }
+    },
+    "15 minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15分"
           }
         }
       }
@@ -384,6 +691,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "30日"
+          }
+        }
+      }
+    },
+    "30 minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30分"
+          }
+        }
+      }
+    },
+    "5 minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5分"
           }
         }
       }
@@ -579,6 +908,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "アクセス拒否（403）: このキーには API の権限がありません"
+          }
+        }
+      }
+    },
+    "Accessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセシビリティ"
           }
         }
       }
@@ -968,6 +1308,17 @@
         }
       }
     },
+    "Calendar mirror status": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カレンダーミラーの状態"
+          }
+        }
+      }
+    },
     "Calendar range": {
       "extractionState": "manual",
       "localizations": {
@@ -1283,6 +1634,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "もう一度押すと削除します（⌘Z で取り消せます）"
+          }
+        }
+      }
+    },
+    "Click to select %@ · double-click to add an event · click the date to open it in Day view": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クリックで %@ を選択 · ダブルクリックで予定を追加 · 日付をクリックすると日ビューで開きます"
           }
         }
       }
@@ -1672,6 +2034,17 @@
         }
       }
     },
+    "Couldn't write": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込めませんでした"
+          }
+        }
+      }
+    },
     "Create": {
       "extractionState": "manual",
       "localizations": {
@@ -1738,6 +2111,17 @@
         }
       }
     },
+    "Debug build: when running from Xcode, add Xcode instead.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバッグビルド: Xcode から実行しているときは、代わりに Xcode を追加してください。"
+          }
+        }
+      }
+    },
     "Deep work (2h+)": {
       "extractionState": "manual",
       "localizations": {
@@ -1749,13 +2133,35 @@
         }
       }
     },
-    "Delete %1$@ recorded %2$@?": {
+    "Default (50K)": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "記録された%2$@ %1$@件を削除しますか？"
+            "value": "既定（50K）"
+          }
+        }
+      }
+    },
+    "Delete %@ recorded events?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "記録したイベントを%@件削除しますか？"
+          }
+        }
+      }
+    },
+    "Delete 1 recorded event?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "記録したイベントを1件削除しますか？"
           }
         }
       }
@@ -2057,6 +2463,17 @@
         }
       }
     },
+    "Each question sends me.md, now.md, up to 5 project notes and 7 days of activity to %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "質問のたびに me.md・now.md・プロジェクトノート最大5件・7日分の活動を %@ へ送ります。"
+          }
+        }
+      }
+    },
     "Each section shows whether mull wrote its lines or you did.": {
       "extractionState": "manual",
       "localizations": {
@@ -2178,6 +2595,50 @@
         }
       }
     },
+    "Every 15 minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15分ごと"
+          }
+        }
+      }
+    },
+    "Every 2 hours": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2時間ごと"
+          }
+        }
+      }
+    },
+    "Every 30 minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30分ごと"
+          }
+        }
+      }
+    },
+    "Every 4 hours": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4時間ごと"
+          }
+        }
+      }
+    },
     "Every break of more than three minutes begins a new block, even when you come straight back to the same file.": {
       "extractionState": "manual",
       "localizations": {
@@ -2196,6 +2657,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "すべて任意です。飛ばして構いません。あとから「About Me」の末尾でいつでも直せます。"
+          }
+        }
+      }
+    },
+    "Every field is optional. Skip what you like; you can correct any of it later in Settings › General.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべて任意です。飛ばして構いません。あとから 設定 › 一般 で直せます。"
+          }
+        }
+      }
+    },
+    "Every hour": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1時間ごと"
           }
         }
       }
@@ -2343,13 +2826,24 @@
         }
       }
     },
-    "Filters are narrowing this search: %1$lld of %2$lld matched%3$@": {
+    "Filters are narrowing this search: %lld of %lld matched%@": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
             "value": "絞り込みが効いています: %2$lld件中 %1$lld件が一致%3$@"
+          }
+        }
+      }
+    },
+    "Finished work is written every hour, once it can no longer change. Anything you delete there stays deleted, and you can stop it in Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完了して変わらなくなった作業を、1時間ごとに書き込みます。そこで削除したものは削除されたままになり、設定で止められます。"
           }
         }
       }
@@ -2460,6 +2954,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "忘れますか？"
+          }
+        }
+      }
+    },
+    "Full day (200K)": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1日分（200K）"
+          }
+        }
+      }
+    },
+    "Gemini Flash": {
+      "comment": "Product name. The same in both languages; listed here so the untranslated-string check can tell \"left as is\" from \"forgotten\".",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini Flash"
           }
         }
       }
@@ -2860,6 +3377,17 @@
         }
       }
     },
+    "Jump to today (⌘T)": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日へ移動（⌘T）"
+          }
+        }
+      }
+    },
     "Keep": {
       "extractionState": "manual",
       "localizations": {
@@ -2922,6 +3450,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "これを残す"
+          }
+        }
+      }
+    },
+    "Keep “%@” up to date from now on": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これから「%@」を自動で最新に保つ"
           }
         }
       }
@@ -3014,6 +3553,17 @@
         }
       }
     },
+    "Keystrokes — not in use. Turn on \"Keystrokes\" under Optional sources to use it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打鍵: いまは使っていません。使うには「自分で入れるソース」の「打鍵」をオンにしてください。"
+          }
+        }
+      }
+    },
     "Know what you did.\nStop explaining yourself to AI.": {
       "extractionState": "manual",
       "localizations": {
@@ -3054,6 +3604,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "mull が書く言語"
+          }
+        }
+      }
+    },
+    "Large (100K)": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大きめ（100K）"
+          }
+        }
+      }
+    },
+    "Last checked %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最終確認 %@"
           }
         }
       }
@@ -3146,6 +3718,17 @@
         }
       }
     },
+    "Let mull read your keyboard?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull にキーボードを読ませますか？"
+          }
+        }
+      }
+    },
     "Let your AI read this": {
       "extractionState": "manual",
       "localizations": {
@@ -3153,6 +3736,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "これを AI に読ませる"
+          }
+        }
+      }
+    },
+    "Light (10K)": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "軽め（10K）"
           }
         }
       }
@@ -3296,6 +3890,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "記憶の索引。mull が書いたもの"
+          }
+        }
+      }
+    },
+    "Minimal (5K)": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最小（5K）"
           }
         }
       }
@@ -3520,6 +4125,17 @@
         }
       }
     },
+    "Next month": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次の月"
+          }
+        }
+      }
+    },
     "Nightly summary at": {
       "extractionState": "manual",
       "localizations": {
@@ -3619,6 +4235,17 @@
         }
       }
     },
+    "No calendar picked": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カレンダー未選択"
+          }
+        }
+      }
+    },
     "No executable at that path.": {
       "extractionState": "manual",
       "localizations": {
@@ -3641,6 +4268,17 @@
         }
       }
     },
+    "No limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無制限"
+          }
+        }
+      }
+    },
     "No other running apps": {
       "extractionState": "manual",
       "localizations": {
@@ -3648,6 +4286,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "ほかに動いているアプリはありません"
+          }
+        }
+      }
+    },
+    "No pass has finished yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだ1回も書き込みを終えていません。"
           }
         }
       }
@@ -3758,6 +4407,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "未読"
+          }
+        }
+      }
+    },
+    "Notes mull keeps": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull が持っているメモ"
           }
         }
       }
@@ -3982,6 +4642,28 @@
         }
       }
     },
+    "Nothing to write yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだ書くものがありません"
+          }
+        }
+      }
+    },
+    "Nothing to write. Either this range has no finished work in it, or “%@” already matches it. Work still in progress is never written.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書くものがありません。この範囲に完了した作業が無いか、「%@」がすでに一致しています。進行中の作業は書き込みません。"
+          }
+        }
+      }
+    },
     "Nothing was renamed. Pick another name, or open the one that is already there.": {
       "extractionState": "manual",
       "localizations": {
@@ -4019,6 +4701,17 @@
       "extractionState": "manual",
       "shouldTranslate": false
     },
+    "Off — every break starts a new block": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オフ: 中断ごとに新しいブロック"
+          }
+        }
+      }
+    },
     "Off — local rule-based only": {
       "extractionState": "manual",
       "localizations": {
@@ -4026,6 +4719,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "オフ: ローカルの規則ベースのみ"
+          }
+        }
+      }
+    },
+    "Once a day": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1日1回"
           }
         }
       }
@@ -4059,6 +4763,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "確認のひとつが時間内に応答しなかったため、この一覧は短くなっています。"
+          }
+        }
+      }
+    },
+    "One permission needed": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "必要な許可は1つ"
+          }
+        }
+      }
+    },
+    "Only finished work is written, so nothing here will move afterwards. ⌘Z takes the whole write back.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込むのは完了した作業だけなので、あとから動くものはありません。⌘Z で書き込み全体を取り消せます。"
           }
         }
       }
@@ -4261,6 +4987,17 @@
         }
       }
     },
+    "Opens a date picker. Left and right arrows step by one period.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日付の選択を開きます。左右の矢印キーで1期間ずつ動きます。"
+          }
+        }
+      }
+    },
     "Opens this day in the calendar": {
       "extractionState": "manual",
       "localizations": {
@@ -4426,6 +5163,17 @@
         }
       }
     },
+    "Pick a day, week or month to write": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込む日・週・月を選んでください"
+          }
+        }
+      }
+    },
     "Point it at mull's server yourself. This is the same entry the buttons above write, and the command Claude Code's own CLI takes.": {
       "extractionState": "manual",
       "localizations": {
@@ -4433,6 +5181,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "mull のサーバーを自分で登録する場合はこちら。上のボタンが書き込むのと同じ内容で、Claude Code の CLI がそのまま受け取るコマンドです。"
+          }
+        }
+      }
+    },
+    "Previous month": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前の月"
           }
         }
       }
@@ -5262,6 +6021,17 @@
         }
       }
     },
+    "Reveal ~/mull in Finder, or export it as a zip": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "~/mull を Finder で表示するか、zip で書き出します"
+          }
+        }
+      }
+    },
     "Rewrites mull's entry in %@ to point at this app's copy of MullMCP": {
       "extractionState": "manual",
       "localizations": {
@@ -5313,6 +6083,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "要約"
+          }
+        }
+      }
+    },
+    "Same as macOS": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS に合わせる"
           }
         }
       }
@@ -5456,6 +6237,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "ファイルか画面を選択してください"
+          }
+        }
+      }
+    },
+    "Select a view": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表示を選ぶ"
           }
         }
       }
@@ -6076,6 +6868,17 @@
         }
       }
     },
+    "That one needs a model to read your records. Ollama and LM Studio run on this Mac and never send anything out.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "それに答えるには、記録を読むモデルが要ります。Ollama と LM Studio はこの Mac の中で動き、外へは何も送りません。"
+          }
+        }
+      }
+    },
     "That's the whole of it, and it stays on this Mac. Nothing is sent anywhere until you send it, and you can pause or delete any of it whenever you like.": {
       "extractionState": "manual",
       "localizations": {
@@ -6131,6 +6934,39 @@
         }
       }
     },
+    "The last write failed: %@. Click for settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前回の書き込みが失敗しました: %@。クリックで設定を開きます。"
+          }
+        }
+      }
+    },
+    "The mirror is on and hasn't finished a pass yet. Click for settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ミラーはオンですが、まだ1回も書き込みを終えていません。クリックで設定を開きます。"
+          }
+        }
+      }
+    },
+    "The mirror is on but has no calendar to write to, so it does nothing. Click to pick one.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ミラーはオンですが、書き込み先のカレンダーが無いため何もしていません。クリックして選んでください。"
+          }
+        }
+      }
+    },
     "The note leaves mull's memory and its file is removed from ~/mull/memory. Your recorded events are untouched.": {
       "extractionState": "manual",
       "localizations": {
@@ -6160,6 +6996,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "記録のデータベースを消去できませんでした: %@"
+          }
+        }
+      }
+    },
+    "The setting was changed, but the older events could not be deleted: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定は変更しましたが、古いイベントを削除できませんでした: %@"
           }
         }
       }
@@ -6241,6 +7088,17 @@
         }
       }
     },
+    "These two are off until you turn them on. Everything else mull captures is always on, and listed under Permissions above.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この2つは、あなたがオンにするまで動きません。mull が捕えるそれ以外は常にオンで、上の「権限」に並んでいます。"
+          }
+        }
+      }
+    },
     "This calendar is subscribed, so mull can only read it.": {
       "extractionState": "manual",
       "localizations": {
@@ -6296,7 +7154,7 @@
         }
       }
     },
-    "This permanently deletes %1$@ recorded events, %2$@ daily summaries, %3$@ memories, and every markdown file in ~/mull — me.md, now.md, and all your notes, projects and reports. Nothing goes to the Trash. This cannot be undone.": {
+    "This permanently deletes %@ recorded events, %@ daily summaries, %@ memories, and every markdown file in ~/mull — me.md, now.md, and all your notes, projects and reports. Nothing goes to the Trash. This cannot be undone.": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
@@ -6527,6 +7385,17 @@
         }
       }
     },
+    "Waiting to write": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込み待ち"
+          }
+        }
+      }
+    },
     "Week": {
       "extractionState": "manual",
       "localizations": {
@@ -6714,6 +7583,17 @@
         }
       }
     },
+    "Write": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き込む"
+          }
+        }
+      }
+    },
     "Write a new draft": {
       "extractionState": "manual",
       "localizations": {
@@ -6758,6 +7638,17 @@
         }
       }
     },
+    "Write to Calendar": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カレンダーに書き込む"
+          }
+        }
+      }
+    },
     "Write today's report": {
       "extractionState": "manual",
       "localizations": {
@@ -6765,6 +7656,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日のレポートを書く"
+          }
+        }
+      }
+    },
+    "Write what you did into Calendar.app": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "やったことをカレンダーに書き込みます"
+          }
+        }
+      }
+    },
+    "Write what you did to “%@”?": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "やったことを「%@」に書き込みますか？"
           }
         }
       }
@@ -6820,6 +7733,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ に書き込みました。About Me では mull 自身の推測より上に置かれます。"
+          }
+        }
+      }
+    },
+    "Wrote %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ に書き込み"
           }
         }
       }
@@ -6919,6 +7843,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "編集内容は %@ に保存してあります。"
+          }
+        }
+      }
+    },
+    "Your mull folder": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull フォルダ"
+          }
+        }
+      }
+    },
+    "Your mull folder — reveal or export": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull フォルダを表示、または書き出す"
           }
         }
       }
@@ -7209,6 +8155,17 @@
         }
       }
     },
+    "macOS will ask for Input Monitoring. After that mull records what you type in every app except the ones under \"Don't record in these apps\" below — including messengers and notes. Password fields are always skipped.\n\nmull works without this. It is off by default because over the last few months it added about 3% of what mull captured, and most of that was text already visible in window titles and on screen.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS が入力監視を求めます。許可すると mull は、下の「このアプリでは記録しない」に入れたアプリを除くすべてのアプリで、あなたが打った内容を記録します。メッセンジャーやメモも含みます。パスワード欄は常に飛ばします。\n\nmull はこれが無くても動きます。既定でオフなのは、ここ数か月の実測で、これが増やしたのは mull が捕えた文字のおよそ3%で、その大半はウィンドウタイトルや画面上にすでに見えていた文字だったからです。"
+          }
+        }
+      }
+    },
     "macOS will ask whether mull may control Mail. This reads the subject and sender of mail received in the last 24 hours, not the body, and keeps them on this Mac. It does not change what mull reads from your screen: while you are reading mail, the text in the window is captured like any other app's. To stop that too, add Mail under \"Don't record in these apps\" below.": {
       "extractionState": "manual",
       "localizations": {
@@ -7223,6 +8180,17 @@
     "mull": {
       "extractionState": "manual",
       "shouldTranslate": false
+    },
+    "mull already keeps “%@” up to date on its own.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull は「%@」をすでに自動で最新に保っています。"
+          }
+        }
+      }
     },
     "mull cannot write to the ~/mull folder, so me.md, now.md and full.md have stopped being refreshed. Recording itself is unaffected.": {
       "extractionState": "manual",
@@ -7242,17 +8210,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "mull は ~/mull に書き込めませんでした。"
-          }
-        }
-      }
-    },
-    "mull couldn't write %1$@: %2$@\n\nYour text is still here. Keep typing, or copy it out.": {
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "mull は %1$@ に書き込めませんでした: %2$@\n\n文章はここに残っています。続けて入力するか、コピーして退避してください。"
           }
         }
       }
@@ -7286,6 +8243,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "作業するにつれて mull が埋めます。"
+          }
+        }
+      }
+    },
+    "mull is not reading your keyboard. Window titles, on-screen text, the clipboard, app switches and browser pages are unaffected.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull はキーボードを読んでいません。ウィンドウタイトル・画面上の文字・クリップボード・アプリの切り替え・ブラウザのページには影響しません。"
+          }
+        }
+      }
+    },
+    "mull is reading your keyboard.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull はキーボードを読んでいます。"
           }
         }
       }
@@ -7378,6 +8357,17 @@
         }
       }
     },
+    "mull needs this to see what you're working on. What it records stays on this Mac unless you later turn on a cloud AI — and it will tell you when you do.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作業中の画面を見るために必要です。記録はこの Mac の中に残ります。あとからクラウドの AI をオンにしたときだけ外に出て、そのときは mull が知らせます。"
+          }
+        }
+      }
+    },
     "mull resumes recording while %@ is frontmost": {
       "extractionState": "manual",
       "localizations": {
@@ -7433,7 +8423,7 @@
         }
       }
     },
-    "mull's entry is removed from %1$@. Every other MCP server in that file is left exactly as it is, and a timestamped backup is written beside it first. Your recordings are untouched — %2$@ just stops being able to read them.": {
+    "mull's entry is removed from %@. Every other MCP server in that file is left exactly as it is, and a timestamped backup is written beside it first. Your recordings are untouched — %@ just stops being able to read them.": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
@@ -7620,6 +8610,17 @@
         }
       }
     },
+    "your calendar refused the write": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カレンダー側が書き込みを拒否しました"
+          }
+        }
+      }
+    },
     "yours to edit": {
       "extractionState": "manual",
       "localizations": {
@@ -7642,6 +8643,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "「%@」を削除できませんでした。~/mull/memory のファイルはそのまま残っています。"
+          }
+        }
+      }
+    },
+    "“%@” syncs with %@. These titles are taken from your window titles and will leave this Mac for that account.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」は %@ と同期しています。ここに書くタイトルはあなたのウィンドウタイトルから取ったもので、この Mac を出てそのアカウントへ渡ります。"
+          }
+        }
+      }
+    },
+    "“%@” syncs with %@. What mull writes are the names of the things you worked on, taken from your window titles, and they will leave this Mac for that account. A calendar under “On My Mac” stays here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」は %@ と同期しています。mull が書くのは、あなたが作業したものの名前です。ウィンドウタイトルから取ったもので、この Mac を出てそのアカウントへ渡ります。「このMac内」のカレンダーなら、ここに留まります。"
+          }
+        }
+      }
+    },
+    "“%@” was corrected in mull's memory, but its file in ~/mull/memory could not be written — that copy still has the old wording.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」は mull のメモリ側では直りましたが、~/mull/memory のファイルには書き込めませんでした。そちらは古い文言のままです。"
           }
         }
       }

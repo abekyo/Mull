@@ -210,8 +210,7 @@ struct NotesSection: View {
         updated.updatedAt = Date()
 
         if !HeldMemoryStore.save(updated, database: appState.database) {
-            forgetProblem = "“\(updated.name)” was corrected in mull's memory, but its file "
-                + "in ~/mull/memory could not be written — that copy still has the old wording."
+            forgetProblem = String(localized: "“\(updated.name)” was corrected in mull's memory, but its file in ~/mull/memory could not be written — that copy still has the old wording.")
         }
         memories[index] = updated
         editingID = nil

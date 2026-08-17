@@ -241,7 +241,8 @@ struct WeekSection: View {
                 let deepDelta = comp.thisWeekDeepBlocks - comp.lastWeekDeepBlocks
                 stat(
                     label: String(localized: "Deep work (2h+)"),
-                    value: pluralized(comp.thisWeekDeepBlocks, "block"),
+                    value: counted(comp.thisWeekDeepBlocks, one: "1 block",
+                                   other: "\(comp.thisWeekDeepBlocks) blocks"),
                     delta: deepDelta != 0 ? (deepDelta > 0 ? "+\(deepDelta)" : "\(deepDelta)") : nil,
                     deltaUp: deepDelta >= 0
                 )
