@@ -602,4 +602,26 @@ final class CalendarGridTests: XCTestCase {
     func testASingleColumnRangeNeverChangesDay() {
         XCTAssertEqual(CalendarGrid.draggedColumns(500, columnWidth: 100, from: 0, columns: 1), 0)
     }
+
+    // MARK: - What a draft is saved under
+
+    /// Double-click, press Return, and what lands on the real calendar used to be an
+    /// event with no title — the one thing the placeholder promised it would not be.
+    func testAnUntouchedDraftIsSavedUnderTheNameItWasShowing() {
+        XCTAssertEqual(CalendarGrid.draftTitle("", placeholder: "New Event"), "New Event")
+    }
+
+    /// A title typed and then rubbed out leaves a space behind it.
+    func testWhitespaceIsNotATitle() {
+        XCTAssertEqual(CalendarGrid.draftTitle("   \n ", placeholder: "New Event"), "New Event")
+    }
+
+    func testATypedTitleIsKept() {
+        XCTAssertEqual(CalendarGrid.draftTitle("Stand-up", placeholder: "New Event"), "Stand-up")
+    }
+
+    /// Trimmed, but only at the ends: the space in "Stand up" is part of the name.
+    func testATypedTitleIsTrimmedAndNotOtherwiseTouched() {
+        XCTAssertEqual(CalendarGrid.draftTitle("  Stand up  ", placeholder: "New Event"), "Stand up")
+    }
 }

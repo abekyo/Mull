@@ -308,6 +308,23 @@ enum CalendarGrid {
         return min(max(column + asked, 0), columns - 1) - column
     }
 
+    // MARK: - The draft being composed
+
+    /// The name a draft is saved under.
+    ///
+    /// Return on a field nobody typed into used to write an event with no title at
+    /// all — a blank card on a real calendar, which is not something any other
+    /// calendar on this Mac will produce. The placeholder has been saying "New Event"
+    /// for as long as the card has been open, so saving under the name that was
+    /// already on screen is the only reading of Return that doesn't surprise.
+    ///
+    /// Trimmed, because a title typed and then rubbed out leaves a space behind, and
+    /// an event called " " is the blank one wearing a disguise.
+    static func draftTitle(_ typed: String, placeholder: String) -> String {
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? placeholder : trimmed
+    }
+
     enum Rounding { case down, up, nearest }
 
     /// To the quarter hour — the unit a calendar thinks in, and what turns a rough

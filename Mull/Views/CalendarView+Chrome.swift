@@ -43,7 +43,7 @@ extension CalendarWeekView {
             }
 
             Picker("", selection: $mode) {
-                ForEach(CalMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                ForEach(CalMode.allCases, id: \.self) { Text($0.label).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -629,7 +629,16 @@ extension CalendarWeekView {
         let days = displayedDays
         let bars = allDayBars
         let draftSlot = allDayDraftSlot(bars)
-        let lanes = max(bars.map { $0.bar.lane + 1 }.max() ?? 0, draftSlot.map { $0.lane + 1 } ?? 0)
+        // One lane at minimum, whether or not anything is in it. The band used to
+        // appear only once it had something to draw, which made the double-click that
+        // creates an all-day event reachable only on the weeks that already had one:
+        // the empty strip *is* the target, and on an ordinary week there was no strip.
+        // The way in was to make a timed event and then turn on All-day in its editor,
+        // which is not a route anybody finds. Apple's calendar keeps the row for the
+        // same reason, and it costs one bar's height.
+        let lanes = max(bars.map { $0.bar.lane + 1 }.max() ?? 0,
+                        draftSlot.map { $0.lane + 1 } ?? 0,
+                        1)
         let step = allDayBarHeight + DS.hair
 
         if lanes > 0 {
@@ -738,6 +747,9 @@ extension CalendarWeekView {
             .font(DS.miniMedium)
             .foregroundStyle(DS.ink)
             .focused($draftFocused)
+            // The same second request the hour grid's draft needs, for the same
+            // reason: the field is not in the hierarchy when `beginAllDayDraft` asks.
+            .onAppear { draftFocused = true }
             .onSubmit { commitDraft() }
             .padding(.horizontal, DS.xs)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -768,12 +780,23 @@ extension CalendarWeekView {
         mode == .day ? [selectedDay] : weekDays
     }
 
-    /// Where a freshly laid-out grid should sit: an hour before now when the range
-    /// contains today, otherwise the start of an ordinary working day rather than
-    /// midnight.
+    /// Where a freshly laid-out grid should sit: on the draft being typed into if
+    /// there is one, an hour before now when the range contains today, otherwise the
+    /// start of an ordinary working day rather than midnight.
+    ///
+    /// The draft comes first because ⌘N and the ＋ button choose an hour of their own
+    /// — the next quarter, or nine in the morning on any day but today — and that hour
+    /// has nothing to do with wherever the grid was last scrolled to. The card opens
+    /// with the caret in it, so a card below the fold is not merely out of sight: you
+    /// type, and nothing you can see changes.
     var scrollAnchorHour: Int {
-        guard displayedDays.contains(where: { Calendar.current.isDateInToday($0) }) else { return 8 }
-        return max(Calendar.current.component(.hour, from: now) - 1, 0)
+        let cal = Calendar.current
+        if let draft, !draft.isAllDay,
+           displayedDays.contains(where: { cal.isDate($0, inSameDayAs: draft.day) }) {
+            return max(cal.component(.hour, from: draft.start) - 1, 0)
+        }
+        guard displayedDays.contains(where: { cal.isDateInToday($0) }) else { return 8 }
+        return max(cal.component(.hour, from: now) - 1, 0)
     }
 
     /// Scroll once the rows exist. Calling `scrollTo` straight out of `onAppear` races
@@ -828,10 +851,26 @@ extension CalendarWeekView {
         guard !items.isEmpty else { return }
         guard let current = keyboardSelection,
               let index = items.firstIndex(where: { $0.id == current }) else {
-            keyboardSelection = (delta > 0 ? items.first : items.last)?.id
+            select(delta > 0 ? items.first : items.last)
             return
         }
-        keyboardSelection = items[min(max(index + delta, 0), items.count - 1)].id
+        select(items[min(max(index + delta, 0), items.count - 1)])
+    }
+
+    /// Highlight a card and make sure it is somewhere the reader can see.
+    ///
+    /// ↑ / ↓ used to move the highlight and nothing else, so walking down a day left it
+    /// somewhere past the bottom of the window. That is bad on Return, which opens a
+    /// popover anchored off screen, and worse on ⌫, which is how the highlighted event
+    /// gets deleted: the whole gesture was aimed at something the reader could not see.
+    private func select(_ item: CalItem?) {
+        guard let item else { return }
+        keyboardSelection = item.id
+        // A day-shaped commitment lives in the band, which is above the scroll and
+        // always in view — scrolling the hour grid for it would move the grid for
+        // nothing.
+        guard item.event?.isAllDay != true else { return }
+        bringIntoView(item.start)
     }
 
     /// ⌫ on the highlighted event. It goes through the writer, so ⌘Z brings it back.

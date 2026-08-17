@@ -21,7 +21,8 @@ enum MullDirectory {
             || env["XCTestSessionIdentifier"] != nil
     }()
 
-    /// Root directory: ~/mull — or a throwaway directory under XCTest.
+    /// Root directory: ~/mull, or wherever `vaultPath` points — or a throwaway
+    /// directory under XCTest.
     ///
     /// Redirecting the root (rather than guarding each writer) means every path
     /// into the vault is covered at once: Curator, VaultLayout's migration, RawStore,
@@ -29,8 +30,7 @@ enum MullDirectory {
     /// testable, which they were not before.
     static let root: URL = {
         guard isRunningTests else {
-            return FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("mull")
+            return configuredRoot() ?? defaultRoot
         }
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("mull-test-vault-\(ProcessInfo.processInfo.processIdentifier)",
@@ -38,6 +38,71 @@ enum MullDirectory {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
+
+    /// Where the vault lives when nothing says otherwise.
+    static var defaultRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("mull")
+    }
+
+    /// Preference key naming an alternative vault location.
+    ///
+    /// There is deliberately no UI for this. It exists for one job: putting the
+    /// vault inside a folder some sync service already watches — iCloud Drive, a git
+    /// working copy. Doing that yourself is the stated division of labour, and it
+    /// was not actually possible while this path was a constant. The route is
+    /// `defaults write com.mull.app vaultPath <absolute path>`, and SECURITY.md
+    /// carries what changes about the promises once you take it.
+    ///
+    /// mull still syncs nothing itself, and this key does not make a second
+    /// recording Mac safe. Nothing in the app watches the vault for changes
+    /// arriving from elsewhere — there is no FSEvents, NSFilePresenter or
+    /// NSFileCoordinator anywhere in it — and the 60s pass rewrites me.md, now.md,
+    /// full.md and mull.md from *this* machine's database, so two machines writing
+    /// one folder would overwrite each other's copy of all four every minute. What
+    /// this key supports is one Mac that records and other machines that read.
+    static let pathPreferenceKey = "vaultPath"
+
+    /// The vault location from preferences, or nil to fall back to `defaultRoot`.
+    ///
+    /// Symlinks are resolved here rather than followed later. `FileManager`'s
+    /// directory enumerator hands back physical paths, so a root reached through a
+    /// symlink made `markdownFilesRecursively` return nothing at all: its prefix
+    /// filter compared physical paths against a symlinked one and dropped every file
+    /// it had just found. Resolving once, at the root, means every path derived from
+    /// the root is already physical.
+    ///
+    /// Two kinds of path are refused rather than honoured, because `setup()` chmods
+    /// this directory to 0700 and `deleteEverything()` removes it whole:
+    ///
+    ///   - the home directory, `/`, or any ancestor of home. "Delete everything"
+    ///     would become deleting the account.
+    ///   - a path whose parent does not exist. That is what a typo looks like, and
+    ///     also what an iCloud Drive not set up on this Mac looks like. Falling back
+    ///     beats building a vault somewhere nobody meant.
+    static func configuredRoot(defaults: UserDefaults = .standard,
+                               fileManager: FileManager = .default) -> URL? {
+        guard let raw = defaults.string(forKey: pathPreferenceKey) else { return nil }
+        let expanded = (raw as NSString).expandingTildeInPath
+        guard expanded.hasPrefix("/") else { return nil }
+
+        let candidate = URL(fileURLWithPath: expanded)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let home = fileManager.homeDirectoryForCurrentUser
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+
+        guard candidate.path != "/",
+              candidate != home,
+              !home.path.hasPrefix(candidate.path + "/") else { return nil }
+
+        var parentIsDirectory: ObjCBool = false
+        let parent = candidate.deletingLastPathComponent()
+        guard fileManager.fileExists(atPath: parent.path, isDirectory: &parentIsDirectory),
+              parentIsDirectory.boolValue else { return nil }
+
+        return candidate
+    }
 
     /// Subdirectories created on setup.
     static let daily: URL = root.appendingPathComponent("daily")
@@ -219,10 +284,16 @@ enum MullDirectory {
         guard let walker = FileManager.default.enumerator(
             at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
 
-        let prefix = root.standardizedFileURL.path + "/"
+        // Both sides are resolved, not just standardized. The enumerator returns
+        // physical paths, so when the root is reached through a symlink — the obvious
+        // way to move a vault into iCloud Drive by hand — comparing the two forms
+        // dropped every file and this returned an empty list. `backfillDailyFiles`
+        // reads it to find stale generated files, so the symptom was silent: nothing
+        // was deleted that should have been, and no error said so.
+        let prefix = root.resolvingSymlinksInPath().standardizedFileURL.path + "/"
         return walker.compactMap { $0 as? URL }
             .filter { $0.pathExtension == "md" }
-            .map { $0.standardizedFileURL.path }
+            .map { $0.resolvingSymlinksInPath().standardizedFileURL.path }
             .filter { $0.hasPrefix(prefix) }
             .map { String($0.dropFirst(prefix.count)) }
             .sorted()

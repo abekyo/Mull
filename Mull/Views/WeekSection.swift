@@ -200,21 +200,17 @@ struct WeekSection: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { onSelectDay?(day.date) }
+        // Same unbalanced push/pop the calendar's cards had, and the cursor stack it
+        // corrupts is the one every other view on screen is sharing. `PointingHandCursor`
+        // counts its own pushes; this only tracks which day is lit.
+        .pointingHandCursor(onSelectDay != nil)
         .onHover { hovering in
             guard onSelectDay != nil else { return }
-            if hovering {
-                hoveredDay = day.date
-                NSCursor.pointingHand.push()
-            } else {
-                if hoveredDay == day.date { hoveredDay = nil }
-                NSCursor.pop()
-            }
+            if hovering { hoveredDay = day.date }
+            else if hoveredDay == day.date { hoveredDay = nil }
         }
         .onDisappear {
-            if hoveredDay == day.date {
-                hoveredDay = nil
-                NSCursor.pop()
-            }
+            if hoveredDay == day.date { hoveredDay = nil }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(onSelectDay != nil ? .isButton : [])

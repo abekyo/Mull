@@ -46,6 +46,16 @@ extension CalendarWeekView {
                 .onAppear { scrollToAnchor(proxy, force: true) }
                 .onChange(of: loadedKey) { _, _ in scrollToAnchor(proxy) }
                 .onChange(of: hourHeightSetting) { _, _ in restoreZoomAnchor(proxy) }
+                // What carries the grid to a draft ⌘N opened at an hour of its own, and
+                // to a card ↑ / ↓ walked to below the fold.
+                .onChange(of: scrollRequest) { _, request in
+                    guard let request else { return }
+                    DispatchQueue.main.async {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo(request.hour, anchor: .top)
+                        }
+                    }
+                }
             }
             .coordinateSpace(name: Self.gridSpace)
             .onPreferenceChange(GridScrollKey.self) { offset in scrollOffset = offset }
@@ -267,6 +277,9 @@ extension CalendarWeekView {
         draft = EventDraft(day: day, start: base, end: base.addingTimeInterval(3600),
                            calendarID: calendarID)
         draftFocused = true
+        // Unlike a draft made by pointing at the grid, this one is at an hour nobody
+        // just looked at. Bring the grid to it.
+        bringIntoView(base)
     }
 
     /// The card being composed. It carries its own text field and its own two
@@ -286,6 +299,14 @@ extension CalendarWeekView {
                     .font(DS.miniMedium)
                     .foregroundStyle(DS.ink)
                     .focused($draftFocused)
+                    // Asked for again here, and this is the request that lands.
+                    // `beginDraft` sets `draftFocused` in the same turn as it sets
+                    // `draft` — which is a turn in which this field does not exist yet,
+                    // and a `@FocusState` aimed at a field that is not in the hierarchy
+                    // is dropped rather than remembered. The card appeared with no caret
+                    // in it often enough to look like weather: you double-clicked, typed,
+                    // and the title went to whatever had the keyboard before.
+                    .onAppear { draftFocused = true }
                     .onSubmit { commitDraft() }
 
                 Text("\(TimeFormat.person(draft.start)) – \(TimeFormat.person(draft.end))")
@@ -308,6 +329,7 @@ extension CalendarWeekView {
                     .strokeBorder(DS.moon.opacity(0.7), lineWidth: 1)
             )
             .padding(.horizontal, 2)
+            .gesture(draftGesture(height: height))
             .offset(y: y)
             .accessibilityLabel("New event")
             // Escape anywhere in the draft throws it away — nothing has been written
@@ -320,13 +342,59 @@ extension CalendarWeekView {
         Binding(get: { draft?.title ?? "" }, set: { draft?.title = $0 })
     }
 
+    /// The draft answers the same two drags a real card does — the body moves it, the
+    /// lower edge stretches it.
+    ///
+    /// Without them the times a draft opened with were the times it had to be saved
+    /// with. The card sits *over* the empty grid the create-drag comes from, so there
+    /// was no second drag to be had: a meeting that wanted to be half an hour later,
+    /// or half an hour longer, meant Escape and typing the title again.
+    ///
+    /// Down the column only. Sideways would mean redrawing the card in another column,
+    /// and the field being typed into would go with it — a caret that changes windows
+    /// mid-word is worse than a drag that cannot cross a day.
+    func draftGesture(height: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .local)
+            .onChanged { value in
+                guard var next = draft else { return }
+                if draftGrip == nil {
+                    draftGrip = value.startLocation.y >= height - Self.resizeGrip ? .resize : .move
+                    draftGripOrigin = DateInterval(start: next.start,
+                                                   end: max(next.end, next.start))
+                }
+                guard let grip = draftGrip, let origin = draftGripOrigin else { return }
+                let shift = TimeInterval(Double(value.translation.height / hourHeight) * 3600)
+                switch grip {
+                case .move:
+                    let moved = CalendarGrid.draggedStart(from: origin.start, shift: shift, dayDelta: 0)
+                    next.start = moved
+                    next.end = moved.addingTimeInterval(origin.duration)
+                case .resize:
+                    // Same floor the create-drag uses: a quarter of an hour still has
+                    // to mean something.
+                    let ended = CalendarGrid.snapped(origin.end.addingTimeInterval(shift),
+                                                     rounding: .nearest)
+                    next.end = max(ended, next.start.addingTimeInterval(900))
+                }
+                draft = next
+            }
+            .onEnded { _ in
+                draftGrip = nil
+                draftGripOrigin = nil
+                // The drag took the caret out of the field. Put it back, or Return no
+                // longer saves the thing that was just moved into place.
+                draftFocused = true
+            }
+    }
+
     /// Write the draft. The grid does not paint the new event itself — it saves, and
     /// the store's change notification brings it back as a real event, so what you
     /// end up looking at is EventKit's copy and not mull's guess at it.
     func commitDraft() {
         guard let draft, let writer else { return }
         let fields = CalendarService.EventFields(
-            title: draft.title, start: draft.start, end: draft.end,
+            title: CalendarGrid.draftTitle(draft.title, placeholder: String(localized: "New Event")),
+            start: draft.start, end: draft.end,
             location: nil, isAllDay: draft.isAllDay, calendarID: draft.calendarID
         )
         writer.create(fields, undo: undoManager)

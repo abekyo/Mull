@@ -248,20 +248,20 @@ extension CalendarWeekView {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(item.tooltip)
+        // The cursor is `PointingHandCursor`'s business, which counts its own pushes.
+        // Rolled by hand here, the pop in the not-hovering branch ran whether or not
+        // this card had ever pushed, and a card taken out from under the pointer popped
+        // twice — once there and once from `onDisappear`. `NSCursor`'s stack is global,
+        // so an unmatched pop takes somebody else's cursor off it. The grid rebuilds its
+        // cards every minute and on every calendar sync, so a pointer resting on an
+        // event was the whole of what it took to leave the wrong cursor behind.
+        .pointingHandCursor()
         .onHover { hovering in
-            if hovering {
-                hoveredItem = item.id
-                NSCursor.pointingHand.push()
-            } else {
-                if hoveredItem == item.id { hoveredItem = nil }
-                NSCursor.pop()
-            }
+            if hovering { hoveredItem = item.id }
+            else if hoveredItem == item.id { hoveredItem = nil }
         }
         .onDisappear {
-            if hoveredItem == item.id {
-                hoveredItem = nil
-                NSCursor.pop()
-            }
+            if hoveredItem == item.id { hoveredItem = nil }
         }
         // Anchored to the card, not to the window. This used to hang off the root
         // VStack, so every block's detail popped from the same spot at the top.

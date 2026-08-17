@@ -67,7 +67,25 @@ struct CalendarWeekView: View {
     /// the permission.
     @State var calendarAccess: CalendarService.Access = CalendarService.currentAccessState
 
-    enum CalMode: String, CaseIterable { case day = "Day", week = "Week", month = "Month", year = "Year" }
+    enum CalMode: String, CaseIterable {
+        case day = "Day", week = "Week", month = "Month", year = "Year"
+
+        /// The segment's title, looked up rather than printed.
+        ///
+        /// The picker used to draw `Text(rawValue)`, and `Text` localises a *literal*,
+        /// never a `String` it is handed. So the one control that names the four ranges
+        /// stayed in English on a machine where the row beside it had already turned —
+        /// 今日, 終日, localised weekday names — and the four translations sat in the
+        /// catalogue reachable only by the off-screen ⌘1–⌘4 buttons.
+        var label: String {
+            switch self {
+            case .day:   return String(localized: "Day")
+            case .week:  return String(localized: "Week")
+            case .month: return String(localized: "Month")
+            case .year:  return String(localized: "Year")
+            }
+        }
+    }
     @State var mode: CalMode = .week
     @State var dayOffset: Int = 0
     @State var monthOffset: Int = 0
@@ -158,6 +176,39 @@ struct CalendarWeekView: View {
     }
     @State var draft: EventDraft?
     @FocusState var draftFocused: Bool
+    /// An hour the grid has been asked to bring into view, on purpose rather than as a
+    /// side effect of a load.
+    ///
+    /// The token is what makes asking twice for the same hour scroll twice — walking
+    /// ↓ through three meetings inside one hour has to keep working.
+    struct ScrollRequest: Equatable {
+        var hour: Int
+        var token: Int
+    }
+    @State var scrollRequest: ScrollRequest?
+    @State var scrollRequestCount = 0
+
+    /// Ask the grid to put `moment` where it can be seen, an hour down from the top so
+    /// it doesn't sit against the edge.
+    func bringIntoView(_ moment: Date) {
+        scrollRequestCount += 1
+        scrollRequest = ScrollRequest(hour: max(Calendar.current.component(.hour, from: moment) - 1, 0),
+                                      token: scrollRequestCount)
+    }
+    /// Which half of the draft card a drag took hold of, and the times the card had
+    /// when that drag began — held rather than read back each frame, so dragging away
+    /// and back again doesn't compound its own snapping.
+    @State var draftGrip: ActiveDrag.Kind?
+    @State var draftGripOrigin: DateInterval?
+
+    /// Whether the card being typed into is still on a day the grid is drawing.
+    ///
+    /// Only Day and Week have somewhere to draw one; Month and Year have no hour axis
+    /// and no all-day band.
+    var draftIsVisible: Bool {
+        guard let draft, mode == .day || mode == .week else { return false }
+        return displayedDays.contains { Calendar.current.isDate($0, inSameDayAs: draft.day) }
+    }
 
     /// An event being dragged on the grid.
     struct ActiveDrag {
@@ -299,6 +350,11 @@ struct CalendarWeekView: View {
         // the mode onChange, and each subview's onAppear — which between them fired
         // two loads (14 EventKit round trips in Week) for a single mode switch.
         .onChange(of: loadKey, initial: true) { _, _ in
+            // The open popover is anchored to a card in the range being left. Closing
+            // on screen writes its own binding back; a card removed out from under it
+            // does not, and a `selectedItem` left behind stands ⌘Z, ⌫ and Return down
+            // over an editor nobody can see — the same trap the draft used to set.
+            selectedItem = nil
             // A pending jump is about to change the key; let it own the load.
             guard jumpDate.wrappedValue == nil else { return }
             loadCurrent()
@@ -307,6 +363,16 @@ struct CalendarWeekView: View {
             // A new range is a new view of the day; that one *should* open at now.
             wantsAnchorScroll = true
             keyboardSelection = nil
+        }
+        // A draft is a card on a day, and only the days on screen draw one. Paging to
+        // next week, jumping to a date or switching to Month therefore left it alive
+        // with nothing drawing it: the title being typed was dropped without a word the
+        // next time a draft was opened, and — because ⌘Z, ⌫ and Return all stand down
+        // while a title is being typed — the keyboard stayed stood down over a card
+        // that was no longer anywhere. Leaving its day discards it, which is what
+        // Escape would have done. Nothing was written, so there is nothing to undo.
+        .onChange(of: draftIsVisible) { _, visible in
+            if !visible { draft = nil }
         }
         // Only the observed half is re-derived, and only because its segmentation
         // just changed underneath it.
