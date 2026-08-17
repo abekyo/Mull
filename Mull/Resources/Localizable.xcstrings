@@ -38,6 +38,17 @@
         }
       }
     },
+    " · double-click to edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " · ダブルクリックで編集"
+          }
+        }
+      }
+    },
     " · drag to move, drag the lower edge to stretch": {
       "extractionState": "manual",
       "localizations": {

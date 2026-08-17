@@ -73,12 +73,12 @@ struct AIToolSetup {
             case .absent, .current: nil
             case .missingBinary(let c):
                 c.isEmpty
-                    ? "Registered without a command. Reconnect to fix it."
-                    : "Points at a file that is no longer there."
+                    ? String(localized: "Registered without a command. Reconnect to fix it.")
+                    : String(localized: "Points at a file that is no longer there.")
             case .otherBinary:
-                "Points at a different copy of MullMCP than this app."
+                String(localized: "Points at a different copy of MullMCP than this app.")
             case .unreadable:
-                "This file is not JSON mull can read, so mull left it alone."
+                String(localized: "This file is not JSON mull can read, so mull left it alone.")
             }
         }
     }
@@ -487,7 +487,7 @@ struct AIToolSetup {
               (info["name"] as? String) == "mull" else {
             return .failure(SetupError.badResponse(detail: complaint))
         }
-        return .success("Connected to mull's MCP server.")
+        return .success(String(localized: "Connected to mull's MCP server."))
     }
 
     // MARK: - Helpers
@@ -550,22 +550,20 @@ struct AIToolSetup {
         case notConfigured(String)
         var errorDescription: String? {
             switch self {
-            case .unsupportedTool: "Unsupported AI tool"
-            case .binaryNotFound:  "MullMCP binary not found — build/install it first"
+            case .unsupportedTool: String(localized: "Unsupported AI tool")
+            case .binaryNotFound:  String(localized: "MullMCP binary not found — build/install it first")
             case .timedOut(let detail):
-                detail.map { "Server did not respond. It said: \($0)" }
-                    ?? "Server did not respond"
+                detail.map { String(localized: "Server did not respond. It said: \($0)") }
+                    ?? String(localized: "Server did not respond")
             case .badResponse(let detail):
-                detail.map { "Unexpected response from server. It said: \($0)" }
-                    ?? "Unexpected response from server"
+                detail.map { String(localized: "Unexpected response from server. It said: \($0)") }
+                    ?? String(localized: "Unexpected response from server")
             case .notConfigured(let name):
-                "mull isn't in \(name)'s MCP config — nothing to remove."
+                String(localized: "mull isn't in \(name)'s MCP config — nothing to remove.")
             case .configUnreadable(let name):
-                "\(name) exists but couldn't be read as JSON. Nothing was written — "
-                    + "fix or move that file, then connect again."
+                String(localized: "\(name) exists but couldn't be read as JSON. Nothing was written — fix or move that file, then connect again.")
             case .backupFailed(let name):
-                "Couldn't write a backup (\(name)) before editing the config. "
-                    + "Nothing was written."
+                String(localized: "Couldn't write a backup (\(name)) before editing the config. Nothing was written.")
             }
         }
     }

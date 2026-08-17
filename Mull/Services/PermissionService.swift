@@ -26,16 +26,16 @@ final class PermissionService: ObservableObject {
         /// switch the user has to go and find.
         var displayName: String {
             switch self {
-            case .accessibility: return "Accessibility"
-            case .inputMonitoring: return "Input Monitoring"
+            case .accessibility: return String(localized: "Accessibility")
+            case .inputMonitoring: return String(localized: "Input Monitoring")
             }
         }
 
         /// What stops being recorded the moment it's revoked.
         var whatStops: String {
             switch self {
-            case .accessibility: return "window titles and page names"
-            case .inputMonitoring: return "what you type"
+            case .accessibility: return String(localized: "window titles and page names")
+            case .inputMonitoring: return String(localized: "what you type")
             }
         }
     }

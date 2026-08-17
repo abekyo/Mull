@@ -730,11 +730,16 @@ extension CalendarWeekView {
             .help(item.tooltip)
             .contentShape(Rectangle())
             .pointingHandCursor()
-            // Same pair as a card on the grid: the click both highlights it for the
-            // keyboard and opens it, so ⌫ afterwards means the thing just clicked.
-            .onTapGesture {
+            // Same pair as a card on the grid, and split the same way: one click
+            // highlights it for the keyboard, two open it. ⌫ afterwards means the
+            // thing just clicked, which it could not while the click opened an editor.
+            .onTapGesture(count: 2) {
                 keyboardSelection = item.id
                 selectedItem = item
+            }
+            .onTapGesture(count: 1) {
+                keyboardSelection = item.id
+                gridFocused = true
             }
             .popover(isPresented: popoverBinding(for: item), arrowEdge: .bottom) {
                 itemDetail(item)

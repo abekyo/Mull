@@ -50,7 +50,7 @@ final class LLMClient {
         case "off":
             // No cloud processing. Callers (nightly summary, deliberation) fall
             // back to rule-based; the chat surfaces this message.
-            throw mullError.llmFailed("LLM is off. Enable a provider in Settings → AI to allow processing.")
+            throw mullError.llmFailed(String(localized: "LLM is off. Enable a provider in Settings → AI to allow processing."))
         case "gemini":
             response = try await callGemini(system: system, prompt: prompt, options: options)
             if let onToken { onToken(response) }   // no streaming endpoint wired — emit once
@@ -63,11 +63,11 @@ final class LLMClient {
         case "localopenai":
             response = try await callLocalOpenAI(system: system, prompt: prompt, options: options, onToken: onToken)
         default:
-            throw mullError.llmFailed("Unknown LLM provider '\(provider)'. Pick one in Settings → AI.")
+            throw mullError.llmFailed(String(localized: "Unknown LLM provider '\(provider)'. Pick one in Settings → AI."))
         }
 
         guard !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw mullError.llmFailed("LLM returned empty response. Check your API key or model.")
+            throw mullError.llmFailed(String(localized: "LLM returned empty response. Check your API key or model."))
         }
         return response
     }
@@ -132,7 +132,7 @@ final class LLMClient {
     /// bug: a report cut off mid-sentence came back looking complete, so nothing
     /// downstream — and no reader — could tell it wasn't the whole thought.
     private static let truncationNotice =
-        "\n\n[mull: cut off at the token limit — this response is incomplete.]"
+        String(localized: "\n\n[mull: cut off at the token limit — this response is incomplete.]")
 
     // MARK: - Gemini
 
@@ -172,7 +172,7 @@ final class LLMClient {
         // return nil, which surfaced as "Invalid Gemini API URL" — a message that
         // sends you looking at everything except your key.)
         guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent") else {
-            throw mullError.llmFailed("Invalid Gemini API URL")
+            throw mullError.llmFailed(String(localized: "Invalid Gemini API URL"))
         }
 
         var request = URLRequest(url: url)
@@ -201,30 +201,30 @@ final class LLMClient {
             // Only one key can be in play now — the user's own — so there is no
             // longer a "set your own key for more headroom" case to advise.
             if failure.status == 429 {
-                throw mullError.llmFailed("Gemini rate limit reached. Try again later.")
+                throw mullError.llmFailed(String(localized: "Gemini rate limit reached. Try again later."))
             }
             throw mullError.llmFailed("Gemini API: HTTP \(failure.status) \(failure.detail)")
         } catch let error as URLError where error.code == .timedOut {
-            throw mullError.llmFailed("Gemini API timed out after 120 seconds.")
+            throw mullError.llmFailed(String(localized: "Gemini API timed out after 120 seconds."))
         } catch let error as URLError where error.code == .notConnectedToInternet {
-            throw mullError.llmFailed("No internet connection.")
+            throw mullError.llmFailed(String(localized: "No internet connection."))
         } catch {
-            throw mullError.llmFailed("Gemini API request failed: \(error.localizedDescription)")
+            throw mullError.llmFailed(String(localized: "Gemini API request failed: \(error.localizedDescription)"))
         }
 
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
         // A 200 can still carry an API-level error object.
         if let errorObj = json?["error"] as? [String: Any] {
-            let message = errorObj["message"] as? String ?? "Unknown error"
+            let message = errorObj["message"] as? String ?? String(localized: "Unknown error")
             throw mullError.llmFailed("Gemini API: \(message)")
         }
 
         // A prompt blocked before generation returns no candidates at all.
         guard let candidate = (json?["candidates"] as? [[String: Any]])?.first else {
             let blocked = (json?["promptFeedback"] as? [String: Any])?["blockReason"] as? String
-            throw mullError.llmFailed(blocked.map { "Gemini blocked the prompt (\($0))." }
-                ?? "Gemini returned no candidates.")
+            throw mullError.llmFailed(blocked.map { String(localized: "Gemini blocked the prompt (\($0)).") }
+                ?? String(localized: "Gemini returned no candidates."))
         }
         let finish = candidate["finishReason"] as? String
         let content = candidate["content"] as? [String: Any]
@@ -239,14 +239,16 @@ final class LLMClient {
         if text.isEmpty {
             switch finish {
             case "MAX_TOKENS":
-                throw mullError.llmFailed(
-                    "Gemini spent its entire \(options.maxTokens)-token budget before writing "
-                    + "any text (thinking is on by default and shares that budget). Raise maxTokens.")
+                throw mullError.llmFailed(String(localized:
+                    "Gemini spent its entire \(options.maxTokens)-token budget before writing any text (thinking is on by default and shares that budget). Raise maxTokens."))
             case "SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST":
-                throw mullError.llmFailed("Gemini stopped for policy reasons (finishReason: \(finish ?? "")).")
+                throw mullError.llmFailed(String(localized: "Gemini stopped for policy reasons (finishReason: \(finish ?? ""))."))
             default:
-                throw mullError.llmFailed(
-                    "Gemini returned no text\(finish.map { " (finishReason: \($0))" } ?? "").")
+                // Two whole sentences rather than a translated stem with an English
+                // tail interpolated onto it (WRITING.md §5.3).
+                throw mullError.llmFailed(finish.map {
+                    String(localized: "Gemini returned no text (finishReason: \($0)).")
+                } ?? String(localized: "Gemini returned no text."))
             }
         }
         return finish == "MAX_TOKENS" ? text + Self.truncationNotice : text
@@ -259,7 +261,7 @@ final class LLMClient {
                             onToken: (@Sendable (String) -> Void)? = nil) async throws -> String {
         let model = UserDefaults.standard.string(forKey: "ollamaModel") ?? "llama3.2"
         guard let url = URL(string: "http://localhost:11434/api/generate") else {
-            throw mullError.llmFailed("Invalid Ollama URL")
+            throw mullError.llmFailed(String(localized: "Invalid Ollama URL"))
         }
 
         var request = URLRequest(url: url)
@@ -325,13 +327,13 @@ final class LLMClient {
         } catch let failure as HTTPFailure {
             throw mullError.llmFailed("Ollama: HTTP \(failure.status) \(failure.detail)")
         } catch let error as URLError where error.code == .cannotConnectToHost {
-            throw mullError.llmFailed("Ollama is not running. Start it with: ollama serve")
+            throw mullError.llmFailed(String(localized: "Ollama is not running. Start it with: ollama serve"))
         } catch let error as URLError where error.code == .timedOut {
-            throw mullError.llmFailed("Ollama timed out. The model may be too large for your hardware.")
+            throw mullError.llmFailed(String(localized: "Ollama timed out. The model may be too large for your hardware."))
         } catch let error as mullError {
             throw error
         } catch {
-            throw mullError.llmFailed("Cannot connect to Ollama at localhost:11434. Error: \(error.localizedDescription)")
+            throw mullError.llmFailed(String(localized: "Cannot connect to Ollama at localhost:11434. Error: \(error.localizedDescription)"))
         }
     }
 
@@ -343,7 +345,7 @@ final class LLMClient {
         let apiKey = try apiKey("claude_api_key", provider: "Claude")
 
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
-            throw mullError.llmFailed("Invalid Claude API URL")
+            throw mullError.llmFailed(String(localized: "Invalid Claude API URL"))
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -415,21 +417,24 @@ final class LLMClient {
             let text = blocks?.compactMap { $0["text"] as? String }.joined() ?? ""
             let stop = json?["stop_reason"] as? String
             if text.isEmpty {
-                throw mullError.llmFailed(stop == "max_tokens"
-                    ? "Claude spent its entire \(options.maxTokens)-token budget before writing any text. Raise maxTokens."
-                    : "Claude returned no text\(stop.map { " (stop_reason: \($0))" } ?? "").")
+                if stop == "max_tokens" {
+                    throw mullError.llmFailed(String(localized: "Claude spent its entire \(options.maxTokens)-token budget before writing any text. Raise maxTokens."))
+                }
+                throw mullError.llmFailed(stop.map {
+                    String(localized: "Claude returned no text (stop_reason: \($0)).")
+                } ?? String(localized: "Claude returned no text."))
             }
             return stop == "max_tokens" ? text + Self.truncationNotice : text
         } catch let failure as HTTPFailure {
             throw mullError.llmFailed("Claude API: HTTP \(failure.status) \(failure.detail)")
         } catch let error as URLError where error.code == .timedOut {
-            throw mullError.llmFailed("Claude API timed out after 120 seconds.")
+            throw mullError.llmFailed(String(localized: "Claude API timed out after 120 seconds."))
         } catch let error as URLError where error.code == .notConnectedToInternet {
-            throw mullError.llmFailed("No internet connection.")
+            throw mullError.llmFailed(String(localized: "No internet connection."))
         } catch let error as mullError {
             throw error
         } catch {
-            throw mullError.llmFailed("Claude API request failed: \(error.localizedDescription)")
+            throw mullError.llmFailed(String(localized: "Claude API request failed: \(error.localizedDescription)"))
         }
     }
 
@@ -445,7 +450,7 @@ final class LLMClient {
         let trimmedBase = base.hasSuffix("/") ? String(base.dropLast()) : base
         let model = UserDefaults.standard.string(forKey: "localModel") ?? ""
         guard let url = URL(string: "\(trimmedBase)/chat/completions") else {
-            throw mullError.llmFailed("Invalid local server URL: \(trimmedBase)")
+            throw mullError.llmFailed(String(localized: "Invalid local server URL: \(trimmedBase)"))
         }
         // Most local servers ignore the key; send a harmless dummy unless the user set one.
         let key = KeychainService.loadKey("local_api_key")
@@ -456,7 +461,7 @@ final class LLMClient {
             system: system, prompt: prompt, options: options,
             providerLabel: "Local server",
             timeout: options.timeout ?? 300,            // local models can be slow
-            connectHint: "No local server at \(trimmedBase). Start LM Studio (Local Server) or your runtime, then load a model.",
+            connectHint: String(localized: "No local server at \(trimmedBase). Start LM Studio (Local Server) or your runtime, then load a model."),
             onToken: onToken)
     }
 
@@ -467,7 +472,7 @@ final class LLMClient {
                             onToken: (@Sendable (String) -> Void)? = nil) async throws -> String {
         let apiKey = try apiKey("openai_api_key", provider: "OpenAI")
         guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
-            throw mullError.llmFailed("Invalid OpenAI API URL")
+            throw mullError.llmFailed(String(localized: "Invalid OpenAI API URL"))
         }
         // gpt-5-mini: best cost/quality for mull's drafting work. The GPT-5 family
         // rejects `max_tokens` (verified) — it requires `max_completion_tokens`, and
@@ -476,7 +481,7 @@ final class LLMClient {
             url: url, apiKey: apiKey, model: "gpt-5-mini",
             system: system, prompt: prompt, options: options,
             providerLabel: "OpenAI API", timeout: options.timeout ?? 120,
-            connectHint: "No internet connection.",
+            connectHint: String(localized: "No internet connection."),
             useCompletionTokensParam: true, onToken: onToken)
     }
 
@@ -577,9 +582,9 @@ final class LLMClient {
         } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .cannotFindHost {
             throw mullError.llmFailed(connectHint)
         } catch let error as URLError where error.code == .timedOut {
-            throw mullError.llmFailed("\(providerLabel) timed out. The model may be too large for your hardware.")
+            throw mullError.llmFailed(String(localized: "\(providerLabel) timed out. The model may be too large for your hardware."))
         } catch let error as URLError where error.code == .notConnectedToInternet {
-            throw mullError.llmFailed("No internet connection.")
+            throw mullError.llmFailed(String(localized: "No internet connection."))
         } catch let error as mullError {
             throw error
         } catch {

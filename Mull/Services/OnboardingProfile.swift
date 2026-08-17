@@ -21,33 +21,57 @@ enum OnboardingProfile {
         let prompt: String       // what the user sees
         let hint: String         // why we ask / what it changes
         let placeholder: String
-        let label: String        // the me.pinned.md fact label
+
+        /// The label this answer carries in me.pinned.md.
+        ///
+        /// Computed rather than stored, and resolved through `VaultText` rather than
+        /// the catalog, because it is the one part of a `Question` that is not chrome:
+        /// it is written into the vault, so it follows the reader's language at the
+        /// moment of the write (WRITING.md §5.2). A stored property would be resolved
+        /// once, at first access, and the vault does not wait for the next launch the
+        /// way the windows do. Nothing parses these back — the answers themselves live
+        /// in `UserDefaults`, keyed by `id`.
+        var label: String {
+            switch id {
+            case "role":     VaultText.t("Role", "役割")
+            case "language": VaultText.t("Primary working language", "主に使う言語")
+            case "building": VaultText.t("Currently working on", "いま作っているもの")
+            case "goal":     VaultText.t("Goal with AI", "AI に期待すること")
+            case "style":    VaultText.t("Preferred AI response style", "AI の返し方の好み")
+            case "offload":  VaultText.t("Wants to offload", "手放したいこと")
+            case "hours":    VaultText.t("Time zone / working hours", "タイムゾーン / 稼働時間")
+            default:         id
+            }
+        }
     }
 
     /// Seven questions. Each earns its place by changing a downstream decision —
     /// no "how old are you" unless it moves something.
+    ///
+    /// The prompts, hints and placeholders are chrome: they are read on screen, so
+    /// they go through the catalog and change with the windows.
     static let questions: [Question] = [
-        .init(id: "role", prompt: "What do you do?",
-              hint: "Your role — the core of who mull says you are.",
-              placeholder: "e.g. Solo founder & Swift developer", label: "Role"),
-        .init(id: "language", prompt: "What language should AI reply in?",
-              hint: "What the AI answers you in. Which language mull writes its own files in is set in Settings › General.",
-              placeholder: "e.g. Japanese (日本語)", label: "Primary working language"),
-        .init(id: "building", prompt: "What are you working on right now?",
-              hint: "Seeds your current projects.",
-              placeholder: "e.g. a macOS app, plus a side project", label: "Currently working on"),
-        .init(id: "goal", prompt: "What do you want AI's help with?",
-              hint: "Your aim for using mull — what to surface toward.",
-              placeholder: "e.g. Ship faster, fewer re-explanations", label: "Goal with AI"),
-        .init(id: "style", prompt: "How should AI respond to you?",
-              hint: "Terse or detailed, tone, language — shapes every reply.",
-              placeholder: "e.g. Terse, in Japanese, no preamble", label: "Preferred AI response style"),
-        .init(id: "offload", prompt: "What would you like to offload?",
-              hint: "What you'd rather not do yourself.",
-              placeholder: "e.g. Boilerplate, research, scheduling", label: "Wants to offload"),
-        .init(id: "hours", prompt: "Time zone & working hours?",
-              hint: "So mull times proactive nudges well.",
-              placeholder: "e.g. JST, evenings", label: "Time zone / working hours"),
+        .init(id: "role", prompt: String(localized: "What do you do?"),
+              hint: String(localized: "Your role — the core of who mull says you are."),
+              placeholder: String(localized: "e.g. Solo founder & Swift developer")),
+        .init(id: "language", prompt: String(localized: "What language should AI reply in?"),
+              hint: String(localized: "What the AI answers you in. Which language mull writes its own files in is set in Settings › General."),
+              placeholder: String(localized: "e.g. Japanese (日本語)")),
+        .init(id: "building", prompt: String(localized: "What are you working on right now?"),
+              hint: String(localized: "Seeds your current projects."),
+              placeholder: String(localized: "e.g. a macOS app, plus a side project")),
+        .init(id: "goal", prompt: String(localized: "What do you want AI's help with?"),
+              hint: String(localized: "Your aim for using mull — what to surface toward."),
+              placeholder: String(localized: "e.g. Ship faster, fewer re-explanations")),
+        .init(id: "style", prompt: String(localized: "How should AI respond to you?"),
+              hint: String(localized: "Terse or detailed, tone, language — shapes every reply."),
+              placeholder: String(localized: "e.g. Terse, in Japanese, no preamble")),
+        .init(id: "offload", prompt: String(localized: "What would you like to offload?"),
+              hint: String(localized: "What you'd rather not do yourself."),
+              placeholder: String(localized: "e.g. Boilerplate, research, scheduling")),
+        .init(id: "hours", prompt: String(localized: "Time zone & working hours?"),
+              hint: String(localized: "So mull times proactive nudges well."),
+              placeholder: String(localized: "e.g. JST, evenings")),
     ]
 
     // MARK: - Persistence (source of truth)

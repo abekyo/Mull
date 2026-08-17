@@ -165,6 +165,20 @@ struct CalendarWeekView: View {
     /// stack down with it.
     @State var writer: CalendarWriter?
 
+    /// Whether the reader has asked the system to move things less.
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+
+    /// An animation, or none at all where the reader has asked for less movement.
+    ///
+    /// Everything the calendar animates goes through here. Motion added to a grid this
+    /// dense is exactly what Reduce Motion exists to switch off, and a helper that
+    /// returns `nil` means honouring it costs one call rather than a branch at each
+    /// site — `withAnimation` and `.animation(_:value:)` both take an optional and read
+    /// `nil` as "just change".
+    func motion(_ animation: Animation) -> Animation? {
+        reduceMotion ? nil : animation
+    }
+
     /// An event being composed on the grid and not yet in EventKit.
     struct EventDraft {
         var day: Date
@@ -292,9 +306,20 @@ struct CalendarWeekView: View {
             toolbar
             Divider()
             modeContent
+                // A load empties the grid before it refills it, so paging read as a
+                // flash of blank week followed by a pop. Dimming while the answer is
+                // being fetched makes those two moments one crossfade, and says with
+                // the picture what the pill says in words.
+                .opacity(isLoading ? 0.55 : 1)
                 .overlay(alignment: .top) {
                     if isLoading { loadingPill }
                 }
+                // The pill has carried `.transition(.opacity)` all along and has never
+                // once used it: a transition needs the state change driving it to be
+                // animated, and `isLoading` was set from `beginLoad` / `finishLoad`
+                // with nothing around it. So the pill appeared and vanished instantly,
+                // which is the one thing a "still working" indicator must not do.
+                .animation(motion(.easeOut(duration: 0.18)), value: isLoading)
         }
         // Keyboard navigation. The whole view takes focus so ← / → step by whatever
         // unit is on screen and ↑ / ↓ walk the events on it, without the reader
@@ -440,7 +465,7 @@ struct CalendarWeekView: View {
 
     func zoom(by factor: Double) {
         zoomAnchorHour = Int(scrollOffset / hourHeight)
-        withAnimation(.easeOut(duration: 0.15)) {
+        withAnimation(motion(.easeOut(duration: 0.15))) {
             hourHeightSetting = clampHour(hourHeightSetting * factor)
         }
     }

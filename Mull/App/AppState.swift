@@ -224,7 +224,7 @@ final class AppState: ObservableObject {
                 self.loadRecentSummaries()
                 if self.summaryBannersEnabled {
                     self.sendNotification(
-                        title: "Tonight's summary is ready ☽",
+                        title: String(localized: "Tonight's summary is ready ☽"),
                         body: summary.preview
                     )
                 }
@@ -234,8 +234,8 @@ final class AppState: ObservableObject {
                 let configured = UserDefaults.standard.string(forKey: "llmProvider") ?? "off"
                 if summary.llmProvider == "rule-based", configured != "off" {
                     self.postNotice(
-                        "Tonight's summary was written without the model",
-                        detail: "mull couldn't reach \(configured), so it fell back to its own rule-based summary. Settings › AI can test the connection.",
+                        String(localized: "Tonight's summary was written without the model"),
+                        detail: String(localized: "mull couldn't reach \(configured), so it fell back to its own rule-based summary. Settings › AI can test the connection."),
                         isProblem: true)
                 }
             }
@@ -247,11 +247,11 @@ final class AppState: ObservableObject {
                 // this is the one message that explains a missing summary.
                 if self.summaryBannersEnabled {
                     self.sendNotification(
-                        title: "Summary failed",
+                        title: String(localized: "Summary failed"),
                         body: error.localizedDescription
                     )
                 }
-                self.postNotice("Tonight's summary didn't run",
+                self.postNotice(String(localized: "Tonight's summary didn't run"),
                                 detail: error.localizedDescription, isProblem: true)
             }
         }
@@ -304,8 +304,9 @@ final class AppState: ObservableObject {
         // user may never open. Say it once, in the channel that persists until
         // dismissed.
         if let reason = database.fallbackReason {
-            postNotice(database.isFallback ? "Today is being kept somewhere temporary"
-                                           : "mull had trouble opening its store",
+            postNotice(database.isFallback
+                        ? String(localized: "Today is being kept somewhere temporary")
+                        : String(localized: "mull had trouble opening its store"),
                        detail: reason, isProblem: true)
         }
 
@@ -313,7 +314,7 @@ final class AppState: ObservableObject {
         // be visible only to someone who happened to open Settings › Data.
         EmailService.onProblemAppeared = { problem in
             Task { @MainActor [weak self] in
-                self?.postNotice("Email capture stopped", detail: problem.message, isProblem: true)
+                self?.postNotice(String(localized: "Email capture stopped"), detail: problem.message, isProblem: true)
             }
         }
 
@@ -338,7 +339,7 @@ final class AppState: ObservableObject {
 
         // Pull from configured sources every 30 min (no-op if none configured).
         ingestion.onFailure = { [weak self] connector, error in
-            self?.postNotice("“\(connector)” stopped pulling", detail: error, isProblem: true)
+            self?.postNotice(String(localized: "“\(connector)” stopped pulling"), detail: error, isProblem: true)
         }
         ingestion.schedule(every: 1800)
 
@@ -657,7 +658,7 @@ final class AppState: ObservableObject {
         // is the app-wide record; callers with their own surface (the menu bar
         // panel, Settings) additionally show the same message where the user is.
         if let problem = result.failureMessage {
-            postNotice("Forget didn't finish", detail: problem, isProblem: true)
+            postNotice(String(localized: "Forget didn't finish"), detail: problem, isProblem: true)
         }
         return result
     }
@@ -675,7 +676,7 @@ final class AppState: ObservableObject {
 
         Task {
             isSummarizing = true
-            mullProgress = "Summarizing..."
+            mullProgress = String(localized: "Summarizing…")
 
             do {
                 let summary = try await mullEngine.runSummary()
@@ -689,11 +690,11 @@ final class AppState: ObservableObject {
                 // watching the progress line they started. The nightly run keeps its
                 // banner — that one finishes while they are elsewhere.
             } catch {
-                mullProgress = "mull failed: \(error.localizedDescription)"
+                mullProgress = String(localized: "mull failed: \(error.localizedDescription)")
                 // `mullProgress` clears itself after five seconds, so someone who
                 // started this and walked away would find no trace of the failure.
                 // The notice stays until dismissed, without a banner.
-                postNotice("Summary didn't run", detail: error.localizedDescription, isProblem: true)
+                postNotice(String(localized: "Summary didn't run"), detail: error.localizedDescription, isProblem: true)
                 try? await Task.sleep(for: .seconds(5))
                 mullProgress = nil
             }
@@ -730,11 +731,9 @@ final class AppState: ObservableObject {
     private func handlePermissionRevoked(_ permission: PermissionService.Permission) {
         guard hasCompletedOnboarding else { return }
 
-        let detail = "mull has stopped recording \(permission.whatStops). "
-            + "Turn \(permission.displayName) back on for mull in System Settings → "
-            + "Privacy & Security to pick it back up."
-        postNotice("\(permission.displayName) was turned off", detail: detail, isProblem: true)
-        sendNotification(title: "mull stopped recording", body: detail)
+        let detail = String(localized: "mull has stopped recording \(permission.whatStops). Turn \(permission.displayName) back on for mull in System Settings → Privacy & Security to pick it back up.")
+        postNotice(String(localized: "\(permission.displayName) was turned off"), detail: detail, isProblem: true)
+        sendNotification(title: String(localized: "mull stopped recording"), body: detail)
         AppDelegate.shared?.presentPermissionRecovery(permission)
     }
 
@@ -768,8 +767,8 @@ final class AppState: ObservableObject {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(contextText, forType: .string)
                 postNotice(
-                    "Couldn't paste it for you",
-                    detail: "Pasting into another app needs Accessibility, which mull doesn't have. Your context is on the clipboard — press ⌘V. Settings › Data can turn the permission on.",
+                    String(localized: "Couldn't paste it for you"),
+                    detail: String(localized: "Pasting into another app needs Accessibility, which mull doesn't have. Your context is on the clipboard — press ⌘V. Settings › Data can turn the permission on."),
                     isProblem: true)
                 return
             }
@@ -802,14 +801,15 @@ final class AppState: ObservableObject {
             // is the thing macOS reserves for what happens without you. The auto-copy
             // in ProactiveEngine still announces itself, because nobody asked for it
             // and it puts the clipboard back 30 seconds later.
-            postNotice("Context copied", detail: "\(wordCount) words about your day — paste into any AI.")
+            postNotice(String(localized: "Context copied"),
+                       detail: String(localized: "\(wordCount) words about your day — paste into any AI."))
         }
     }
 
-    private static let nothingToLendTitle = "Nothing to lend yet"
-    private static let nothingToLendDetail =
-        "mull hasn't recorded enough today to describe what you're working on. "
-        + "Leave it running a little longer, or check that recording is on in Live."
+    private static var nothingToLendTitle: String { String(localized: "Nothing to lend yet") }
+    private static var nothingToLendDetail: String {
+        String(localized: "mull hasn't recorded enough today to describe what you're working on. Leave it running a little longer, or check that recording is on in Live.")
+    }
 
     /// Open the main mull window from anywhere via ⌘+Shift+D
     ///

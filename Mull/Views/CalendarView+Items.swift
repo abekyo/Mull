@@ -112,11 +112,15 @@ extension CalendarWeekView {
                 // Nothing on an all-day event can be dragged, and its clock times are
                 // both midnight — "12:00 AM – 12:00 AM · drag to move" was three
                 // wrong things in one line.
+                // Opening moved from one click to two, so the tooltip is where that is
+                // said. Its own fragment rather than a longer version of the drag hint,
+                // which is already translated and true of timed events only.
+                let opens = event.isEditable ? String(localized: " · double-click to edit") : ""
                 let hint = (event.isEditable && !event.isAllDay)
                     ? String(localized: " · drag to move, drag the lower edge to stretch") : ""
                 let repeats = event.isRecurring ? " · \(Self.recurrenceNote.lowercased())" : ""
                 let when = event.isAllDay ? "all-day" : event.timeFormatted
-                return "\(title) · \(when)\(place)\(repeats)\(hint)"
+                return "\(title) · \(when)\(place)\(repeats)\(opens)\(hint)"
             }
             guard let block else { return title }
             let label = (block.label.isEmpty || block.label == block.app) ? "" : " · \(block.label)"
@@ -238,10 +242,31 @@ extension CalendarWeekView {
                     .padding(.bottom, 1)
             }
         }
+        // Hover and selection used to snap between two states with nothing in
+        // between, on the surface the pointer spends all its time over.
+        .animation(motion(.easeOut(duration: 0.12)), value: isHovered)
+        .animation(motion(.easeOut(duration: 0.12)), value: isKeyed)
         .contentShape(Rectangle())
-        .onTapGesture {
+        // One click selects; two open it. That is what every calendar on this Mac
+        // does, and it is also the whole of why ⌫ could not reach an event.
+        //
+        // A single click used to do both, and opening the editor is what stopped the
+        // delete: `onDeleteCommand` stands down while `selectedItem` is set — it has
+        // to, or ⌫ inside the editor's title field would delete the event instead of a
+        // character — and the popover takes key focus besides. So clicking an event,
+        // the one gesture anybody would call selecting it, was the one gesture that
+        // guaranteed Delete would do nothing. The only path that worked was ↑ / ↓ and
+        // then ⌫, which nobody finds.
+        //
+        // Double before single is the order Apple documents for stacking the two.
+        .onTapGesture(count: 2) {
             keyboardSelection = item.id
             selectedItem = item
+        }
+        .onTapGesture(count: 1) {
+            keyboardSelection = item.id
+            // ⌫ and Return are handled on the grid, so the key has to land there.
+            gridFocused = true
         }
         .gesture(dragGesture(for: item, span: span, on: date, columnWidth: columnWidth))
         .help(item.tooltip + Self.continuationNote(span))

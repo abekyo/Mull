@@ -51,7 +51,7 @@ extension CalendarWeekView {
                 .onChange(of: scrollRequest) { _, request in
                     guard let request else { return }
                     DispatchQueue.main.async {
-                        withAnimation(.easeOut(duration: 0.18)) {
+                        withAnimation(motion(.easeOut(duration: 0.18))) {
                             proxy.scrollTo(request.hour, anchor: .top)
                         }
                     }
