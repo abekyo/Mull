@@ -181,20 +181,25 @@ final class VaultLocalizationTests: XCTestCase {
 
     // MARK: - The shipped strings
 
-    /// Every English string in the bundle has a Japanese one.
+    /// Every English string mull asks for has a Japanese one.
     ///
-    /// Read from the built `.lproj` rather than from `Localizable.xcstrings`,
-    /// because a catalog entry that never compiles into the app is the same
-    /// English screen as one that was never written. What is exempt is what reads
-    /// the same in both languages: format-only keys, key-equivalent glyphs, and
-    /// words of four characters or less (`mull`, `AI`, `OK`).
+    /// The two sides are read from different places on purpose. Japanese comes from
+    /// the built `.lproj`, because a catalog entry that never compiles into the app
+    /// is the same English screen as one that was never written. English comes from
+    /// the catalog, because it is the key: `en.lproj` would map every key to itself,
+    /// and whether the toolchain bothers to write that table down is a toolchain
+    /// detail (Xcode 16 skips it, Xcode 26 writes it) rather than anything about
+    /// mull. Asking the bundle for it passed here and failed on CI.
+    ///
+    /// What is exempt is what reads the same in both languages: format-only keys,
+    /// key-equivalent glyphs, and words of four characters or less (`mull`, `AI`, `OK`).
     func testEveryEnglishStringHasAJapaneseOne() throws {
-        let english = try stringsTable("en")
+        let english = try catalogKeys()
         let japanese = try stringsTable("ja")
-        XCTAssertGreaterThan(english.count, 100, "the en table did not load")
+        XCTAssertGreaterThan(english.count, 100, "the catalog did not load")
 
         let untranslatable = try NSRegularExpression(pattern: "%(?:\\d+\\$)?(?:@|lld|%)")
-        let missing = english.keys.filter { key in
+        let missing = english.filter { key in
             if japanese[key] != nil { return false }
             if key.count <= 4 { return false }
             if key.contains(where: { "⌘⇧⌥⌃".contains($0) }) { return false }
@@ -219,11 +224,27 @@ final class VaultLocalizationTests: XCTestCase {
     /// another order says so there, and `%2$lld件中 %1$lld件` works.
     func testNoKeyUsesAPositionalSpecifier() throws {
         let positional = try NSRegularExpression(pattern: "%\\d+\\$")
-        let offenders = try stringsTable("en").keys.filter { key in
+        let offenders = try catalogKeys().filter { key in
             positional.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)) != nil
         }
         XCTAssertEqual(offenders.sorted(), [],
                        "Swift never asks for these keys, so their translations are unreachable")
+    }
+
+    /// The keys the app asks for, straight out of `Localizable.xcstrings`.
+    ///
+    /// #filePath is baked in when this file compiles, so it points at the checkout
+    /// that produced the binary under test — the same catalog the build compiled.
+    private func catalogKeys() throws -> [String] {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()    // Tests/
+            .deletingLastPathComponent()    // repo root
+            .appendingPathComponent("Mull/Resources/Localizable.xcstrings")
+        let catalog = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        let strings = try XCTUnwrap(
+            (catalog as? [String: Any])?["strings"] as? [String: Any],
+            "Localizable.xcstrings carries no strings table")
+        return Array(strings.keys)
     }
 
     private func stringsTable(_ language: String) throws -> [String: String] {
