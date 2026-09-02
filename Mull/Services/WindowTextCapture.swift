@@ -27,16 +27,22 @@ enum WindowTextCapture {
         "AXTextArea", "AXTextField", "AXStaticText", "AXComboBox",
     ]
 
-    /// The collected body text of the frontmost app's focused window, or nil.
+    /// The collected body text of the frontmost app's front window, or nil.
+    ///
+    /// `kAXFocusedWindow` was the whole of how that window was found, and it is the
+    /// attribute an app is likeliest not to answer — so this returned nil for apps
+    /// whose text was sitting in `AXWindows[0]` the entire time. The title path was
+    /// taught to fall back before this one was, which had it backwards: this is the
+    /// larger half of the record, around 80% of the characters mull keeps.
+    ///
+    /// The cascade picks the window, not the text. A window that is found and holds
+    /// nothing readable is an answer, and re-walking the next candidate to argue with
+    /// it would cost a second 1,500-node crawl of somebody's frontmost app for a
+    /// result that is usually the same window twice.
     static func focusedWindowText() -> String? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
-
-        var windowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-              let window = windowRef,
-              CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
-        let windowEl = unsafeDowncast(window as AnyObject, to: AXUIElement.self)
+        guard let windowEl = FrontWindow.element(of: appEl) else { return nil }
 
         var pieces: [String] = []
         var chars = 0

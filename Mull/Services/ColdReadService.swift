@@ -230,18 +230,14 @@ struct ColdReadService {
         // onboarding freezing right after they granted a permission.
         AXUIElementSetMessagingTimeout(appElement, Float(Self.callTimeout))
 
-        var windowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-              let ref = windowRef,
-              CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        // Checked above rather than force-cast blind: a non-conforming app can return
-        // something that isn't an AXUIElement, and the old `as!` crashed on it.
-        let window = ref as! AXUIElement
-
-        var titleRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
-              let title = titleRef as? String, !title.isEmpty else { return nil }
-        return title
+        // Focused, then main, then the app's first window (`FrontWindow`). This is the
+        // first thing mull says about the Mac it has just been let onto, and asking
+        // only for the focused window made it say nothing at all for an app that does
+        // not answer that — on the one screen where "mull cannot see anything" reads
+        // as the permission not having worked.
+        //
+        // The timeout above is set on the app element and so covers the cascade.
+        return FrontWindow.title(ofAppAt: appElement)
     }
 
     /// The same title, said to be the front window's title.

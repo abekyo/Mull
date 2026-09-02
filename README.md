@@ -504,8 +504,8 @@ Mull/
 │   ├── SensitiveText.swift      the privacy gate before anything leaves the device
 │   └── …                        AnalyticsEngine, TimeBlockEngine, FactExtractor, EditDistance
 ├── Services/       RecordingService (CGEvent tap + clipboard + windows + URLs;
-│                   @MainActor, with SystemCaptureEnvironment holding every AppKit
-│                   and Accessibility call),
+│                   @MainActor, with SystemCaptureEnvironment holding the AppKit and
+│                   Accessibility calls and FrontWindow finding the window they read),
 │                   LiveContextGenerator (regenerates me/now/full every 60s through the
 │                   Curator), MullEngine (nightly consolidation), LLMClient, ReportWriter, …
 └── Views/          SwiftUI app — see "The GUI" below

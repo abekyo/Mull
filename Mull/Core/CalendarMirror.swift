@@ -203,6 +203,15 @@ enum CalendarMirror {
         let title: String
         let start: Date
         let end: Date
+        /// Whether this row still says the person was occupied.
+        ///
+        /// `.busy` is what EventKit gives an event nobody sets, so every row mull wrote
+        /// before it learned to say `.free` carries it — and carries it outward, to
+        /// whoever asks that calendar whether its owner is available. Only literal
+        /// `.busy` counts: a calendar that cannot express availability answers
+        /// `.notSupported` and has nothing to repair, and a row somebody deliberately
+        /// marked tentative is theirs.
+        var isBusy: Bool = false
     }
 
     struct Change: Equatable {
@@ -269,9 +278,19 @@ enum CalendarMirror {
         /// event again *and* records that the user had removed it, because those are
         /// separate facts and only the second one teaches anything.
         var rejected: [Entry] = []
+        /// Rows mull wrote before it wrote them free, and is keeping.
+        ///
+        /// Separate from `update`, which carries a changed title or a changed time and
+        /// goes through `updateEvent` — a path that takes `EventFields`, and
+        /// `EventFields` has no availability in it. Nothing in mull could have moved
+        /// these; the flag is the only thing about them that is wrong, and repairing it
+        /// must not touch the notes, the URL or the alarms sitting beside it.
+        var repair: [CalendarEventHandle] = []
         var quality = Quality()
 
-        var isEmpty: Bool { create.isEmpty && update.isEmpty && delete.isEmpty && tombstone.isEmpty }
+        var isEmpty: Bool {
+            create.isEmpty && update.isEmpty && delete.isEmpty && tombstone.isEmpty && repair.isEmpty
+        }
     }
 
     /// What a run is: a timer reconciling, or somebody pressing the button.
@@ -369,6 +388,14 @@ enum CalendarMirror {
             if row.title != entry.title || row.start != entry.start || row.end != entry.end {
                 plan.update.append(Change(handle: row.handle, entry: entry))
             }
+        }
+
+        // Written by an older build, still wanted, and still telling everyone who reads
+        // this calendar that the person was busy. A run that is already here fixes it;
+        // nothing goes looking on its own, because a write to somebody's calendar that
+        // no gesture asked for is the thing this mirror is most careful about.
+        for row in existing where row.isBusy && byKey[row.key] != nil {
+            plan.repair.append(row.handle)
         }
 
         // Mirrored, but no longer a block mull would write — the segmentation changed

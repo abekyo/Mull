@@ -331,8 +331,28 @@ final class CalendarService {
                 handle: EventHandle(identifier: identifier, occurrenceDate: nil),
                 title: event.title ?? "",
                 start: event.startDate,
-                end: event.endDate)
+                end: event.endDate,
+                isBusy: event.availability == .busy)
         }
+    }
+
+    /// Say one of mull's own rows does not occupy the person's time.
+    ///
+    /// Narrow on purpose, and separate from `updateEvent`. That one takes `EventFields`,
+    /// which carries the title and the times and no availability at all, and the only
+    /// thing that does carry availability — `apply(_ extras:)` — also writes notes, url
+    /// and alarms, so reaching for it here would let a repair quietly overwrite whatever
+    /// else is on the event.
+    ///
+    /// Nothing happens unless the row really says busy and the calendar can express
+    /// free: an unnecessary save is a modification date, a sync, and a notification to
+    /// every device the user owns, for no change.
+    func markFree(_ handle: EventHandle) throws {
+        let event = try editable(handle)
+        guard event.availability == .busy,
+              event.calendar.supportedEventAvailabilities.contains(.free) else { return }
+        event.availability = .free
+        try save(event)
     }
 
     /// Whether a new event could be written at all. The difference between "saving

@@ -302,6 +302,13 @@ final class CalendarMirrorRunner {
             }
         }
 
+        // Rows written before the mirror learned to write them free. Last, because a
+        // repair is worth nothing if the run failed to write the day it was reconciling,
+        // and it costs a save per row on a calendar that may sync.
+        for handle in plan.repair {
+            _ = attempt { try calendar.markFree(handle) }
+        }
+
         // A key mull will never write again does not need to be remembered as written.
         tombstoned.formUnion(plan.tombstone)
         written.subtract(plan.tombstone)

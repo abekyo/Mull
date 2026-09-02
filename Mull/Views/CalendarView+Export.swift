@@ -146,6 +146,14 @@ extension CalendarWeekView {
             deleted.append(removal.key)
         }
 
+        // Rows an older build wrote as busy, on a calendar that has been answering
+        // "occupied" for them ever since. Through the service rather than `writer`, so
+        // it registers no undo action: ⌘Z takes back what this press wrote, and putting
+        // a row back to busy is not something anybody would be asking for.
+        for handle in proposal.plan.repair {
+            try? appState.calendar.markFree(handle)
+        }
+
         appState.calendarMirror.recordManualResult(proposal.plan, created: created,
                                                    updated: updated, deleted: deleted)
     }
@@ -180,6 +188,15 @@ extension CalendarWeekView {
                         Label(counted(n, one: "1 event removed — no longer how the day reads",
                                       other: "\(n) events removed — no longer how the day reads"),
                               systemImage: "trash")
+                    }
+                    // Said out loud, though it writes no new text and sends nothing new
+                    // anywhere: it is still mull changing rows on a calendar that may be
+                    // shared, and the sheet is where this press says everything it does.
+                    if !proposal.plan.repair.isEmpty {
+                        let n = proposal.plan.repair.count
+                        Label(counted(n, one: "1 earlier event stops saying you were busy",
+                                      other: "\(n) earlier events stop saying you were busy"),
+                              systemImage: "calendar.badge.clock")
                     }
                 }
                 .font(DS.captionFont)

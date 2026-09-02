@@ -416,6 +416,17 @@
         }
       }
     },
+    "%lld earlier events stop saying you were busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以前に書いた%lld件が「予定あり」を言わなくなります"
+          }
+        }
+      }
+    },
     "%lld earlier sessions not shown": {
       "extractionState": "manual",
       "localizations": {
@@ -768,6 +779,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "1件は読めなかったので、そのまま残しました。"
+          }
+        }
+      }
+    },
+    "1 earlier event stops saying you were busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以前に書いた1件が「予定あり」を言わなくなります"
           }
         }
       }
