@@ -476,7 +476,8 @@ grant, and that includes this one. Read `Mull/Services/RecordingService.swift` a
 
 ```
 Mull/
-├── App/            MullApp.swift, AppState.swift
+├── App/            MullApp.swift (scenes + the menu bar), AppState.swift,
+│                   MenuCommands.swift — the menu's line to the view on screen
 ├── Core/           the parts an agent touches — no SwiftUI, fully testable
 │   ├── MCPServer.swift          13 tools over JSON-RPC / stdio
 │   ├── Selection.swift          ranked, now-anchored retrieval

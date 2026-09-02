@@ -1,4 +1,5 @@
 import SwiftUI
+import EventKit
 
 // The toolbar button that writes what you did into Calendar.app, and the sheet that
 // says what it is about to do before it does it.
@@ -120,7 +121,11 @@ extension CalendarWeekView {
         for entry in proposal.plan.create {
             let fields = CalendarService.EventFields(title: entry.title, start: entry.start,
                                                      end: entry.end, calendarID: proposal.calendar.id)
-            let extras = CalendarService.EventExtras(url: CalendarMirror.marker(entry.key))
+            // Free, not busy — the same reason as the timed mirror in
+            // `CalendarMirrorRunner.apply`: a record of what happened must not answer
+            // "are you available then?" on the person's behalf.
+            let extras = CalendarService.EventExtras(url: CalendarMirror.marker(entry.key),
+                                                     availability: .free)
             if writer.create(fields, extras: extras, undo: undoManager,
                              name: String(localized: "Write to Calendar")) != nil {
                 created.append(entry.key)

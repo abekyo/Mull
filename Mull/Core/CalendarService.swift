@@ -538,8 +538,12 @@ final class CalendarService {
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
 
         let predicate = store.predicateForEvents(withStart: startOfDay, end: endOfDay, calendars: nil)
+        // Not the mirror's own rows. `fetch` already drops them; this path read the
+        // store directly and so printed a day's observed activity under "Today's
+        // schedule" — a record of what happened, offered to every reader as what was
+        // planned.
         let rawEvents = store.events(matching: predicate)
-            .filter { !$0.isAllDay }
+            .filter { !$0.isAllDay && !isMirrorEcho($0) }
             .sorted { $0.startDate < $1.startDate }
 
         // Deduplicate across calendar sources

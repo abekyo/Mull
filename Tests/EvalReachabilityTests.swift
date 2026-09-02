@@ -33,6 +33,7 @@ final class EvalReachabilityTests: XCTestCase {
         "Mull/Core/ContextBlock.swift",
         "Mull/Core/CorrectionCard.swift",
         "Mull/Core/CalendarEventHandle.swift",
+        "Mull/Core/BlockAttribution.swift",
         "Mull/Core/BlockSegmentation.swift",
         "Mull/Core/CalendarMirror.swift",
     ]

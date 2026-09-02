@@ -924,7 +924,14 @@ final class MCPServer {
                     let label = b.label.isEmpty ? b.app : b.label
                     // `TimeFormat.machine`, not `b.startFormatted`: the latter follows
                     // the user's 12/24-hour setting, and this text is read by an AI.
-                    out.append("- \(TimeFormat.machine(b.start))–\(TimeFormat.machine(b.end)) \(label) (\(b.durationFormatted))")
+                    var line = "- \(TimeFormat.machine(b.start))–\(TimeFormat.machine(b.end)) \(label) (\(b.durationFormatted))"
+                    // What a stretch about nothing was for, with the basis in the
+                    // brackets — a reader that sums minutes per artifact keys on the
+                    // token to tell a claim from a cue (see `BlockAttribution.Basis`).
+                    if let served = b.servedBy {
+                        line += " → for: \(served.artifact) [\(served.basis.token)]"
+                    }
+                    out.append(line)
                 }
             }
             out.append("")

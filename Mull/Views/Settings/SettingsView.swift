@@ -67,7 +67,9 @@ struct GeneralTab: View {
     @AppStorage("outputMaxChars") private var outputMaxChars = 50000
     @AppStorage("proactiveBriefs") private var proactiveBriefs = false
     @AppStorage("meetingReminders") private var meetingReminders = true
-    @AppStorage("aiAutoCopy") private var aiAutoCopy = true
+    /// Default must match `Preferences.aiAutoCopyEnabled`, which reads the same key
+    /// and answers `false` when it is unset. That type holds the reasoning.
+    @AppStorage(Preferences.aiAutoCopyKey) private var aiAutoCopy = false
     @AppStorage("summaryNotifications") private var summaryNotifications = true
     @AppStorage(Preferences.resumeGapKey) private var resumeGap = Int(BlockSegmenter.defaultResumeGap)
     @AppStorage(Preferences.mirrorEnabledKey) private var mirrorEnabled = false
@@ -308,7 +310,7 @@ struct GeneralTab: View {
                 // is how the user learns their clipboard was replaced, so a
                 // banner-less copy would be a silent overwrite.
                 Toggle("Auto-copy context for AI sites", isOn: $aiAutoCopy)
-                Text("Opening claude.ai or chatgpt.com puts your context on the clipboard and notifies you. Turning this off stops the copying itself, not just the banner.")
+                Text("Off unless you turn it on. With it on, opening claude.ai or chatgpt.com replaces whatever is on your clipboard with your context and notifies you; mull puts your clipboard back 30 seconds later. ⇧⌘C does the same thing at the moment you ask for it.")
                     .font(DS.captionFont)
                     .foregroundStyle(DS.inkFaint)
 
@@ -1535,6 +1537,11 @@ struct DataTab: View {
     @State private var memoryCount = 0
     @State private var dbSize = "—"
 
+    /// Copies of the history that have been drained back into the live database and
+    /// are now only taking up room. Counted here so the row can say how much.
+    @State private var drainedCopies: [String] = []
+    @State private var drainedBytes: Int64 = 0
+
     @State private var showClearToday = false
     @State private var showClearEvents = false
     @State private var showClearAll = false
@@ -1896,6 +1903,44 @@ struct DataTab: View {
                     .foregroundStyle(DS.error)
                 }
 
+                // Copies of the whole history, sitting beside the live file.
+                //
+                // mull moves the database aside when it fails an integrity check or a
+                // migration, starts an empty one, and puts the rows back on the next
+                // launch (`QuarantineRecovery`). What it never did was mention the
+                // drained file afterwards. On the machine this was written on there
+                // were twelve of them — 37MB of complete, readable copies of
+                // everything mull had ever recorded — reachable only by pressing
+                // "Delete everything", which is not a tidy-up.
+                //
+                // Only the drained ones. A pending quarantine may hold months the live
+                // database has never seen, and offering to bin that would be the
+                // original data-loss bug with a button on it.
+                if !drainedCopies.isEmpty {
+                    VStack(alignment: .leading, spacing: DS.xs) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(counted(drainedCopies.count,
+                                         one: "1 old copy of your history",
+                                         other: "\(drainedCopies.count) old copies of your history"))
+                                .font(DS.bodyFont)
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: drainedBytes, countStyle: .file))
+                                .font(DS.captionFont)
+                                .foregroundStyle(DS.inkFaint)
+                                .monospacedDigit()
+                        }
+                        Text("mull set these aside when the database failed a check, then put every row back. Nothing reads them now. They go to the Trash, so you can still get them back.")
+                            .font(DS.captionFont)
+                            .foregroundStyle(DS.inkFaint)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Spacer()
+                            Button("Move to Trash") { trashDrainedCopies() }
+                                .font(DS.captionFont)
+                        }
+                    }
+                }
+
                 HStack {
                     Spacer()
                     Button("Open in Finder") {
@@ -2193,15 +2238,21 @@ struct DataTab: View {
     /// this window makes on appearance goes off the main thread now.
     private func refresh() async {
         let database = appState.database
+        let dbPath = database.databaseFilePath
         let counts = await Task.detached(priority: .userInitiated) {
-            (today: database.eventCountToday(),
-             total: database.countEvents(from: .distantPast, to: .distantFuture),
-             summaries: database.summaryCount(),
-             memories: database.fetchAllMemories().count,
-             bytes: database.totalStorageBytes())
+            let drained = QuarantineRecovery.drainedFiles(besidePrimary: dbPath)
+            return (today: database.eventCountToday(),
+                    total: database.countEvents(from: .distantPast, to: .distantFuture),
+                    summaries: database.summaryCount(),
+                    memories: database.fetchAllMemories().count,
+                    bytes: database.totalStorageBytes(),
+                    drained: drained,
+                    drainedBytes: QuarantineRecovery.bytes(of: drained))
         }.value
 
         guard !Task.isCancelled else { return }
+        drainedCopies = counts.drained
+        drainedBytes = counts.drainedBytes
         eventCount = counts.today
         totalEventCount = counts.total
         summaryCount = counts.summaries
@@ -2220,6 +2271,18 @@ struct DataTab: View {
         // Asks the system rather than prompting, so opening this tab never
         // produces a dialog the user didn't ask for.
         Notifier.shared.refreshDeliveryState { notificationsBlocked = $0 }
+    }
+
+    /// Bin the drained copies. Reported where the button is, like every other
+    /// destructive action on this tab — the main window's notice bar is a different
+    /// window the user may never open.
+    private func trashDrainedCopies() {
+        let failed = QuarantineRecovery.trashDrained(besidePrimary: appState.database.databaseFilePath)
+        if !failed.isEmpty {
+            let names = failed.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
+            cleanupProblem = String(localized: "Some copies could not be moved to the Trash: \(names)")
+        }
+        Task { await refresh() }
     }
 
     /// How many events a retention change would destroy. Shown in the confirmation

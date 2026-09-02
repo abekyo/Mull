@@ -148,7 +148,17 @@ struct FullWindowView: View {
         // copied. A system notification is invisible under Do Not Disturb; this is not.
         .overlay(alignment: .bottom) { noticeBar }
         .animation(.easeOut(duration: 0.18), value: appState.actionNotice)
-        .onAppear { restoreSelection() }
+        .onAppear {
+            restoreSelection()
+            // Edit › Find is the window's, not any one page's, so this is where it
+            // is answered. It is the same door as ⌘K and as the magnifier.
+            MenuCommands.shared.windowAppeared()
+        }
+        .onDisappear { MenuCommands.shared.windowDisappeared() }
+        .onReceive(MenuCommands.shared.stream) { command in
+            guard command == .search else { return }
+            beginSearch()
+        }
     }
 
     // MARK: - Search — a place you can get to, and get back from
@@ -218,6 +228,15 @@ struct FullWindowView: View {
                 if let url = notice.revealURL {
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([url])
+                    }
+                    .buttonStyle(.plain)
+                    .font(DS.captionMedium)
+                    .foregroundStyle(DS.moon)
+                }
+                if let action = notice.action {
+                    Button(action.label) {
+                        action.run()
+                        appState.dismissNotice()
                     }
                     .buttonStyle(.plain)
                     .font(DS.captionMedium)

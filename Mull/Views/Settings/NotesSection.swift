@@ -212,6 +212,7 @@ struct NotesSection: View {
         if !HeldMemoryStore.save(updated, database: appState.database) {
             forgetProblem = String(localized: "“\(updated.name)” was corrected in mull's memory, but its file in ~/mull/memory could not be written — that copy still has the old wording.")
         }
+        HeldMemoryStore.recordCorrection(of: memory, keeping: updated.description)
         memories[index] = updated
         editingID = nil
     }
@@ -223,6 +224,7 @@ struct NotesSection: View {
             forgetProblem = String(localized: "“\(memory.name)” could not be removed — its file in ~/mull/memory is still in place.")
             return
         }
+        HeldMemoryStore.recordCorrection(of: memory, keeping: "")
         memories.removeAll { $0.id == memory.id }
         if editingID == memory.id { editingID = nil }
         onChanged()
@@ -239,7 +241,12 @@ struct NotesSection: View {
 /// does for its "update" and "delete" actions, so a correction made by hand and
 /// one made by the nightly pass leave identical state on disk and in the
 /// database.
-private enum HeldMemoryStore {
+/// Internal rather than file-private so `MemoryCorrectionTests` can reach
+/// `recordCorrection`. What that function does is not a display concern — it is the
+/// learning signal §7.3 calls the highest-quality label mull can get — and a signal
+/// nothing can test is how the calendar's version of this wire went eight days
+/// without anyone noticing it was attached to the trigger that never fired.
+enum HeldMemoryStore {
 
     /// Returns whether the file half landed too. `forget` in this same type is
     /// careful to report a half-done deletion; this used to discard the write error
@@ -259,6 +266,38 @@ private enum HeldMemoryStore {
         } catch {
             return false
         }
+    }
+
+    /// Record what the person just did to this note, as a correction.
+    ///
+    /// mull wrote the line; a human rewrote it or threw it away. §7.3 calls that the
+    /// highest-quality relevance label there is, and until 2026-08-18 these two
+    /// buttons — the only per-line correction controls in the whole app — dropped it.
+    /// The database row changed, the markdown file changed, and nothing downstream
+    /// heard: no card for `get_corrections` to hand an agent, no verdict in the ledger
+    /// `Selection` reads. It is the same wire that was missing on the calendar, in the
+    /// one surface whose caption already says "they are about you, and you can correct
+    /// or delete any of them".
+    ///
+    /// `keeping` is the human's wording, or empty for a forget — and empty is the
+    /// strongest verdict the card can carry, because `CorrectionCard.dropped` then
+    /// holds mull's whole line and folding it puts a negative delta on that text.
+    ///
+    /// The block id is the memory's file path so a note corrected twice updates one
+    /// card instead of accumulating them, which is what `blockID` does for every other
+    /// caller.
+    static func recordCorrection(of entry: MemoryEntry, keeping kept: String) {
+        // A description mull never wrote cannot have been corrected. This guards the
+        // case where the editor was opened and the text left alone.
+        guard kept.trimmingCharacters(in: .whitespacesAndNewlines)
+                != entry.description.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        Curator.record(cards: [CorrectionCard(
+            path: "memory",
+            blockID: entry.filePath,
+            date: Date(),
+            kept: kept,
+            wouldWrite: entry.description,
+            context: Curator.contextSnapshotProvider?())])
     }
 
     /// File first, row second, and the row only if the file went: a row without

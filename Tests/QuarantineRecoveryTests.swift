@@ -269,6 +269,57 @@ final class QuarantineRecoveryTests: XCTestCase {
                        "but erasure has to see both — they hold the same history")
     }
 
+    // MARK: - Tidying up the drained copies
+    //
+    // Until 2026-08-18 the drained copies had one exit and it was "Delete everything".
+    // On the author's machine that left twelve of them — thirty-six files with their
+    // sidecars, 37MB of complete readable history — with nothing in the app that so
+    // much as mentioned they were there. "Never destroy" is the right rule for the
+    // recovery path and is not a reason to make a person's own history unreachable.
+
+    /// The distinction the whole feature rests on: a pending quarantine may hold
+    /// months the live database has never seen, and offering to bin it would be the
+    /// original data-loss bug with a button on it.
+    func testDrainedFilesExcludesAnythingNotYetPutBack() throws {
+        try makeQuarantine(events: 2)
+        try makeReattached(events: 2)
+
+        let drained = QuarantineRecovery.drainedFiles(besidePrimary: livePath)
+        XCTAssertEqual(drained.count, 1)
+        XCTAssertTrue(drained[0].contains(".reattached-"))
+        XCTAssertFalse(drained.contains { $0.contains(".corrupt-") },
+                       "an undrained quarantine is not tidy-up, it is the data")
+    }
+
+    func testTheReportedSizeCountsTheSidecarsToo() throws {
+        try makeReattached(events: 4)
+        let drained = QuarantineRecovery.drainedFiles(besidePrimary: livePath)
+
+        let bytes = QuarantineRecovery.bytes(of: drained)
+        XCTAssertGreaterThan(bytes, 0, "a row that says 0 bytes is a row nobody presses")
+
+        let main = (try? FileManager.default.attributesOfItem(atPath: drained[0])[.size] as? NSNumber)??.int64Value ?? 0
+        XCTAssertGreaterThanOrEqual(bytes, main)
+    }
+
+    /// To the Trash, not unlinked. `deleteArchives` is the erasure path and promises
+    /// nothing goes to the Trash; this one is a tidy-up and promises no such thing, so
+    /// somebody who bins a copy and wants it back has somewhere to look.
+    func testTrashingTheDrainedCopiesLeavesThePendingOnesAlone() throws {
+        try makeQuarantine(events: 3)
+        try makeReattached(events: 3)
+
+        let failed = QuarantineRecovery.trashDrained(besidePrimary: livePath)
+
+        XCTAssertTrue(failed.isEmpty, "could not trash: \(failed)")
+        XCTAssertTrue(QuarantineRecovery.drainedFiles(besidePrimary: livePath).isEmpty)
+        XCTAssertEqual(QuarantineRecovery.pendingFiles(besidePrimary: livePath).count, 1,
+                       "the undrained copy is still the only home of its rows")
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.contains(".reattached-") }
+        XCTAssertTrue(leftovers.isEmpty, "sidecars left behind: \(leftovers)")
+    }
+
     func testDeleteArchivesRemovesEveryCopyAndItsSidecars() throws {
         try makeQuarantine(events: 3)
         try makeReattached(events: 3)

@@ -1,4 +1,5 @@
 import Foundation
+import EventKit
 
 /// Runs the calendar mirror on a timer and applies what `CalendarMirror` decides.
 ///
@@ -274,7 +275,14 @@ final class CalendarMirrorRunner {
             guard !written.contains(entry.key) else { continue }
             let fields = CalendarService.EventFields(title: entry.title, start: entry.start,
                                                      end: entry.end, calendarID: calendarID)
-            let extras = CalendarService.EventExtras(url: CalendarMirror.marker(entry.key))
+            // Free, never busy. A mirrored row is a record of what happened, and an
+            // EKEvent defaults to busy, so a day of them told every free/busy reader —
+            // Google, a booking link, anyone proposing a meeting — that the person was
+            // occupied from the first row to the last. The mirror is supposed to sit
+            // beside the schedule, not overwrite the one question a calendar exists to
+            // answer.
+            let extras = CalendarService.EventExtras(url: CalendarMirror.marker(entry.key),
+                                                     availability: .free)
             if attempt({ _ = try calendar.createEvent(fields, extras: extras) }) {
                 written.insert(entry.key)
                 created += 1
@@ -321,15 +329,8 @@ final class CalendarMirrorRunner {
     /// Additive, like `Curator.recordCorrections`: a ledger the user has hand-edited is
     /// parsed and merged, never replaced.
     private func recordRejections(_ plan: CalendarMirror.Plan, now: Date) {
-        let cards = CalendarMirror.correctionCards(for: plan, now: now,
-                                                   context: Curator.contextSnapshotProvider?())
-        guard !cards.isEmpty else { return }
-        for card in cards {
-            _ = MullDirectory.write(card.render(), to: "\(CorrectionIndex.directory)/\(card.id).md")
-        }
-        let onDisk = CorrectionIndex.parseLedger(MullDirectory.read(CorrectionIndex.ledgerPath) ?? "")
-        let merged = CorrectionIndex.merge(onDisk, CorrectionIndex.fold(cards))
-        _ = MullDirectory.write(merged.renderLedger(), to: CorrectionIndex.ledgerPath)
+        Curator.record(cards: CalendarMirror.correctionCards(
+            for: plan, now: now, context: Curator.contextSnapshotProvider?()))
     }
 
     /// Both ledgers are sets of block-start epochs, so old entries fall out by age.

@@ -559,6 +559,17 @@
         }
       }
     },
+    "%lld old copies of your history": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "履歴の古いコピーが%lld件"
+          }
+        }
+      }
+    },
     "%lld records kept today.": {
       "extractionState": "manual",
       "localizations": {
@@ -621,6 +632,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "今日についての %lld 語。どの AI にでも貼り付けられます。"
+          }
+        }
+      }
+    },
+    "%lld words, all of it observed. Nothing here is anything you told mull, so what it can't watch you do — how you want work done, what a project is for — isn't in what you just pasted.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld語、すべて観測から作ったものです。あなたが mull に伝えた内容は1行も入っていません。見ていても分からないこと（仕事の進め方、そのプロジェクトが何のためのものか）は、いま貼り付けたものに含まれていません。"
           }
         }
       }
@@ -812,6 +834,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "新規1件"
+          }
+        }
+      }
+    },
+    "1 old copy of your history": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "履歴の古いコピーが1件"
           }
         }
       }
@@ -2034,6 +2067,17 @@
         }
       }
     },
+    "Close": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "閉じる"
+          }
+        }
+      }
+    },
     "Collapse": {
       "extractionState": "manual",
       "localizations": {
@@ -2254,6 +2298,17 @@
         }
       }
     },
+    "Copied — but mull is guessing about you": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピーしました。ただし、あなたのことは推測です"
+          }
+        }
+      }
+    },
     "Copied — paste it (⌘V) at the start of any AI conversation.": {
       "extractionState": "manual",
       "localizations": {
@@ -2283,6 +2338,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "コピー"
+          }
+        }
+      }
+    },
+    "Copy Context": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンテキストをコピー"
           }
         }
       }
@@ -3354,6 +3420,17 @@
         }
       }
     },
+    "Find…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "検索…"
+          }
+        }
+      }
+    },
     "Finish Setting Up mull…": {
       "extractionState": "manual",
       "localizations": {
@@ -3663,6 +3740,17 @@
         }
       }
     },
+    "Go to Date…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日付へ移動…"
+          }
+        }
+      }
+    },
     "Grant": {
       "extractionState": "manual",
       "localizations": {
@@ -3714,6 +3802,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ を隠す"
+          }
+        }
+      }
+    },
+    "Hide Sidebar": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サイドバーを隠す"
           }
         }
       }
@@ -4026,13 +4125,13 @@
         }
       }
     },
-    "Jump to a date (← → to step)": {
+    "Jump to a date (⇧⌘T) · ← → to step": {
       "extractionState": "manual",
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "日付へ移動（← → で1つずつ）"
+            "value": "日付へ移動（⇧⌘T）· ← → で1つずつ"
           }
         }
       }
@@ -4950,6 +5049,17 @@
         }
       }
     },
+    "Next": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次へ"
+          }
+        }
+      }
+    },
     "Next month": {
       "extractionState": "manual",
       "localizations": {
@@ -5614,6 +5724,17 @@
       "extractionState": "manual",
       "shouldTranslate": false
     },
+    "Off unless you turn it on. With it on, opening claude.ai or chatgpt.com replaces whatever is on your clipboard with your context and notifies you; mull puts your clipboard back 30 seconds later. ⇧⌘C does the same thing at the moment you ask for it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オンにするまでは動きません。オンにすると、claude.ai か chatgpt.com を開いたときに、クリップボードの中身をあなたの文脈で置き換えて通知します。30秒後に元に戻します。⇧⌘C は、あなたが求めた時に同じことをします。"
+          }
+        }
+      }
+    },
     "Off — every break starts a new block": {
       "extractionState": "manual",
       "localizations": {
@@ -6204,6 +6325,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "もう存在しないファイルを指しています。"
+          }
+        }
+      }
+    },
+    "Previous": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前へ"
           }
         }
       }
@@ -7418,6 +7550,17 @@
         }
       }
     },
+    "Settings…": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定…"
+          }
+        }
+      }
+    },
     "Setup isn't finished": {
       "extractionState": "manual",
       "localizations": {
@@ -7469,6 +7612,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "さらに%lld件"
+          }
+        }
+      }
+    },
+    "Show Sidebar": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サイドバーを表示"
           }
         }
       }
@@ -7645,6 +7799,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "貼り付ける手間を無くすためです。mull は、この Mac にある AI ツールへ自分を登録できます。書き込む前に、変更内容をそのまま確認できます。"
+          }
+        }
+      }
+    },
+    "Some copies could not be moved to the Trash: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゴミ箱に移せなかったコピーがあります: %@"
           }
         }
       }
@@ -7986,6 +8151,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "ディスク上の版を採用"
+          }
+        }
+      }
+    },
+    "Tell mull": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mull に伝える"
           }
         }
       }
@@ -9519,6 +9695,28 @@
         }
       }
     },
+    "Zoom In": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡大"
+          }
+        }
+      }
+    },
+    "Zoom Out": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "縮小"
+          }
+        }
+      }
+    },
     "Zoom in": {
       "extractionState": "manual",
       "localizations": {
@@ -10091,6 +10289,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "mull はテレメトリも解析も一切送りません。mull のサーバーは存在しません。"
+          }
+        }
+      }
+    },
+    "mull set these aside when the database failed a check, then put every row back. Nothing reads them now. They go to the Trash, so you can still get them back.": {
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データベースが検査に落ちたときに mull が退避し、その後すべての行を戻したものです。いまはどこからも読まれていません。ゴミ箱に移すので、あとから取り戻せます。"
           }
         }
       }

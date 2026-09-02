@@ -96,11 +96,19 @@ enum BlockSegmenter {
             blocks[i].labelFromClipboard = named.fromClipboard
         }
 
-        // Step 5: rejoin what a break split. Runs last because it needs the labels
-        // and the settled apps to know whether two blocks are the same work — and
-        // after the <30s filter, so a break is never bridged by a fragment that was
-        // too small to be worth drawing on its own.
-        return coalesceResumed(blocks, chrome: chrome, resumeGap: resumeGap)
+        // Step 5: rejoin what a break split. Needs the labels and the settled apps to
+        // know whether two blocks are the same work — and runs after the <30s filter,
+        // so a break is never bridged by a fragment that was too small to be worth
+        // drawing on its own.
+        var joined = coalesceResumed(blocks, chrome: chrome, resumeGap: resumeGap)
+
+        // Step 6: say what the blocks about nothing were for. After rejoining, because
+        // a stretch that turns out to be one session should be read as one; and with
+        // the resume window as the reach, so "next to" means the same thing here as
+        // it does one step up. A window of zero turns rejoining off, not this.
+        BlockAttributor.attribute(&joined, chrome: chrome,
+                                  gap: resumeGap > 0 ? resumeGap : defaultResumeGap)
+        return joined
     }
 
     /// Put the two halves of an interrupted session back together.
@@ -443,6 +451,13 @@ struct TimeBlock: Identifiable {
 
     var isMultiApp = false
 
+    /// What this block was for, when its own titles do not say — the document a
+    /// browser stretch served, read from what stood around it. Nil for a block that
+    /// is about something on its own account, and for one the record cannot place.
+    /// Settled once by `BlockAttributor` after segmentation; see there for what each
+    /// basis does and does not claim.
+    var servedBy: BlockAttribution?
+
     /// Engaged time, in seconds — the sum of inter-event gaps with each gap
     /// capped (see `BlockSegmenter.activeGapCap`). Unlike `duration` (raw
     /// wall-clock `end − start`, used for the calendar geometry), this excludes
@@ -597,6 +612,13 @@ struct TimeBlock: Identifiable {
     /// behind it, and the evidence half of `ProjectNames` cannot work without it.
     var observedTitles: [(app: String, title: String)] {
         windowTitles.keys.map { (app: windowTitleApps[$0] ?? app, title: $0) }
+    }
+
+    /// The same corpus with how often each title was seen, for a reader that has to
+    /// pick one — `BlockAttributor.artifact(within:)` wants the document that was
+    /// open the longest inside a stretch whose face is a browser.
+    var observedTitleCounts: [(app: String, title: String, count: Int)] {
+        windowTitles.map { (app: windowTitleApps[$0.key] ?? app, title: $0.key, count: $0.value) }
     }
 
     private func mostSeen(in counts: [String: Int]) -> String? {

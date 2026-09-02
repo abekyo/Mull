@@ -21,24 +21,60 @@ final class SystemCaptureEnvironment: CaptureEnvironment {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
+    /// The focused window's title, or the nearest thing to it the app will answer.
+    ///
+    /// `kAXFocusedWindow` alone was the whole implementation, and it is the attribute
+    /// most likely to be missing: an app answers it only once its window has taken
+    /// focus, and several answer it never. Preview is the cheap proof — it returns
+    /// nothing for focused *or* main, and its title is sitting in `AXWindows[0]` the
+    /// whole time. A nil here is not a cosmetic loss: `RecordingService.recordEvent`
+    /// stamps every row with this title and derives the row's *entity* from it, so an
+    /// app that never answers becomes hours of activity attributed to nothing, and
+    /// junk projects named after the fallback text ("Firefox: unknown (20m9s)").
+    ///
+    /// Three attributes, cheapest first, first non-empty answer wins.
     var activeWindowTitle: String? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
+        for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+            if let title = Self.title(ofElementAt: attribute as CFString, in: appElement) {
+                return title
+            }
+        }
+        return Self.titleOfFirstWindow(in: appElement)
+    }
+
+    /// The title of the window an app names under `attribute`, if it names one.
+    private static func title(ofElementAt attribute: CFString, in appElement: AXUIElement) -> String? {
         var windowRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(
-            appElement, kAXFocusedWindowAttribute as CFString, &windowRef
-        )
+        let result = AXUIElementCopyAttributeValue(appElement, attribute, &windowRef)
         // Some apps answer kAXFocusedWindow with something that isn't an AXUIElement.
         // A force-cast crashes the whole recorder there, so verify the CF type first
         // (same guard as WindowTextCapture.focusedWindowText).
         guard result == .success, let window = windowRef,
               CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
-        let windowElement = unsafeDowncast(window as AnyObject, to: AXUIElement.self)
+        return title(of: unsafeDowncast(window as AnyObject, to: AXUIElement.self))
+    }
 
+    /// Last resort: the app's first window. An app with windows but no focused or
+    /// main one still has a name for what is on screen.
+    private static func titleOfFirstWindow(in appElement: AXUIElement) -> String? {
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+                appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement],
+              let first = windows.first else { return nil }
+        return title(of: first)
+    }
+
+    /// An empty title is the same as no title to every caller here, so it is folded
+    /// into nil once rather than checked at each of the three call sites.
+    private static func title(of window: AXUIElement) -> String? {
         var titleRef: CFTypeRef?
-        AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &titleRef)
-        return titleRef as? String
+        AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef)
+        guard let title = titleRef as? String, !title.isEmpty else { return nil }
+        return title
     }
 
     var clipboardChangeCount: Int { NSPasteboard.general.changeCount }

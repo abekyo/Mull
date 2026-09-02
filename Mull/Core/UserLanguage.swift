@@ -118,6 +118,80 @@ enum UserLanguage {
         resolve(preference: preference, systemIsJapanese: systemIsJapanese)
     }
 
+    // MARK: - Which language a stored line was written in
+    //
+    // Everything above decides what mull writes *next*. This decides what it already
+    // wrote, which is a different question and needed answering on 2026-08-18: the
+    // vault localization made every heading follow the reader, and the lines under
+    // those headings stayed in the language of the build that generated them. On the
+    // author's machine that was Japanese headings over English bullets — for
+    // memories first written in June, and never touched since, because the nightly
+    // pass only rewrites an entry it has a reason to update.
+    //
+    // Nothing here rewrites anything. It is the *test* that lets the consolidation
+    // prompt name the entries that are in the wrong language, so the model rewrites
+    // them on its next pass (`MullEngine.buildConsolidationPrompt`). Deciding what to
+    // write and reading what was written are not the same question — the same split
+    // `ReportWriter.dominantLanguage` makes.
+
+    /// What a line is written in, or that there is no way to tell.
+    ///
+    /// Three cases and not two, because "no way to tell" is the common one here: a
+    /// description can be a bare date, a version string, or a project name, and none
+    /// of those has a language. Folded into a Bool they all come out as "not
+    /// Japanese", which for a Japanese reader means every one of them gets handed to
+    /// the model to be restated — and a model asked to restate `2026-08-17` in
+    /// Japanese will do something to it.
+    enum Script {
+        case japanese
+        case latin
+        /// Too little writing in it to judge.
+        case undecidable
+    }
+
+    /// Below this many letters, a line is a label rather than a sentence. `Mull` and
+    /// `Formiq` sit under it; the shortest real description on the author's machine
+    /// ("Gold verification cannot be tested…") is four times over it.
+    private static let judgeableLetters = 10
+
+    /// One CJK character in seven. Set by the two cases either side of it: Japanese
+    /// prose about software is full of Latin identifiers ("クリーンcloneでビルドが通らない
+    /// 原因は project.yml の configFiles" is 40% CJK), and an English sentence that
+    /// quotes one Japanese title is not Japanese (a hundred-character line with
+    /// エクスパンション in it is 6%). Anything between those is genuinely mixed, and
+    /// naming it costs a restatement rather than a corruption.
+    private static let japaneseShare = 0.15
+
+    static func script(of text: String) -> Script {
+        var cjk = 0
+        var letters = 0
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            // Hiragana, katakana, CJK ideographs, and the halfwidth katakana forms.
+            case 0x3040...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xFF66...0xFF9F:
+                cjk += 1
+                letters += 1
+            default:
+                if CharacterSet.letters.contains(scalar) { letters += 1 }
+            }
+        }
+        guard letters >= judgeableLetters else { return .undecidable }
+        return Double(cjk) / Double(letters) >= japaneseShare ? .japanese : .latin
+    }
+
+    /// Whether a stored line reads as Japanese. An undecidable one is not.
+    static func looksJapanese(_ text: String) -> Bool { script(of: text) == .japanese }
+
+    /// Whether this line is in the language the reader has asked for — or carries too
+    /// little writing to be in any language, which counts as leaving it alone.
+    static func matchesReader(_ text: String, japanese: Bool = isJapanese) -> Bool {
+        switch script(of: text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+        case .undecidable: return true
+        case .japanese:    return japanese
+        case .latin:       return !japanese
+        }
+    }
+
     /// Pure, so the precedence is testable without UserDefaults or a locale.
     static func resolve(preference: Preference, systemIsJapanese: Bool) -> Bool {
         switch preference {

@@ -107,6 +107,60 @@ enum QuarantineRecovery {
         files(besidePrimary: primaryPath, matching: archiveMarkers)
     }
 
+    /// The copies that have already been drained into the live database.
+    ///
+    /// Separate from `archivedFiles` because these are the only ones safe to offer as
+    /// a routine tidy-up: every row in them is in the live database, so removing one
+    /// loses nothing. A `.corrupt-*` or `.pre-migration-*` file has not been drained
+    /// yet and may hold months the live file has never seen — that is the whole
+    /// reason this type exists — so it is never in this list.
+    ///
+    /// This exists because until 2026-08-18 the drained copies had exactly one exit,
+    /// and it was "Delete everything". On the author's machine that was twelve of
+    /// them, thirty-six files with their sidecars, 37MB, dated across a month, with
+    /// nothing in the app that so much as mentioned they were there. "Never destroy"
+    /// is the right rule for the recovery path and it is not a reason to leave a
+    /// person's whole history lying in copies they cannot see or reach.
+    static func drainedFiles(besidePrimary primaryPath: String) -> [String] {
+        files(besidePrimary: primaryPath, matching: [reattachedMarker])
+    }
+
+    /// Bytes on disk for a set of copies, sidecars included — what the user gets back.
+    static func bytes(of files: [String]) -> Int64 {
+        let fm = FileManager.default
+        var total: Int64 = 0
+        for file in files {
+            for ext in ["", "-wal", "-shm"] {
+                let attrs = try? fm.attributesOfItem(atPath: file + ext)
+                total += (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+            }
+        }
+        return total
+    }
+
+    /// Remove the drained copies, sidecars included. Returns what could not be removed.
+    ///
+    /// To the Trash rather than unlinked. `deleteArchives` below is the erasure path
+    /// and unlinks on purpose — it is answering "delete everything", which promises
+    /// that nothing goes to the Trash. This one is answering "tidy up", which promises
+    /// nothing of the kind, and a person who empties a folder of database copies and
+    /// then wants one back should have somewhere to get it.
+    @discardableResult
+    static func trashDrained(besidePrimary primaryPath: String) -> [String] {
+        let fm = FileManager.default
+        var failed: [String] = []
+        for file in drainedFiles(besidePrimary: primaryPath) {
+            for ext in ["", "-wal", "-shm"] where fm.fileExists(atPath: file + ext) {
+                do { try fm.trashItem(at: URL(fileURLWithPath: file + ext), resultingItemURL: nil) }
+                catch {
+                    logger.error("Could not trash drained copy \(file + ext): \(error.localizedDescription)")
+                    failed.append(file + ext)
+                }
+            }
+        }
+        return failed
+    }
+
     private static func files(besidePrimary primaryPath: String, matching markers: [String]) -> [String] {
         let url = URL(fileURLWithPath: primaryPath)
         let dir = url.deletingLastPathComponent()

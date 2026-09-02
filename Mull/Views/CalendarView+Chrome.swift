@@ -324,7 +324,7 @@ extension CalendarWeekView {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Jump to a date (← → to step)")
+        .help("Jump to a date (⇧⌘T) · ← → to step")
         .accessibilityLabel(rangeTitle)
         .accessibilityAddTraits(.isHeader)
         .accessibilityHint("Opens a date picker. Left and right arrows step by one period.")

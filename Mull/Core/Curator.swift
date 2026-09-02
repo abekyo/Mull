@@ -231,6 +231,11 @@ enum Curator {
         let day = observationDayFormatter
         return memories.compactMap { mem -> ContextBlock? in
             guard mem.memoryType == .user, mem.isIdentity(asOf: now) else { return nil }
+            // …and the line has to be about the person rather than about their screen.
+            // `isIdentity` is an age test and passes anything that was seen twice, which
+            // on 2026-08-18 was two lines reading "Used Claude on 17 August 2026." See
+            // `MemoryEntry.isDerivableObservation`.
+            if mem.isDerivableObservation { return nil }
             // Skip stale/invalid project references. Same shape gate as everywhere
             // else — this was a fourth, shorter, differently-worded blocklist.
             if mem.description.hasPrefix("Working on:") {
@@ -355,9 +360,13 @@ enum Curator {
     /// Write the cards and fold their verdicts into the ledger the selection layer
     /// reads. Additive: an existing ledger the user has hand-edited is parsed and
     /// merged, never replaced (Invariant Contract 契約2).
-    private static func recordCorrections(existing: String, agentBlocks: [ContextBlock], path: String) {
-        let cards = detectCorrections(existing: existing, agentBlocks: agentBlocks,
-                                      path: path, context: contextSnapshotProvider?())
+    ///
+    /// Every correction in mull arrives here, whichever gesture produced it: a block
+    /// edited in the vault (`recordCorrections` below), a mirrored event deleted from
+    /// the calendar (`CalendarMirrorRunner.recordRejections`), a note forgotten in
+    /// Settings (`NotesSection.forget`). It is one function because it was three
+    /// copies of eleven lines, and a fourth caller was about to make it four.
+    static func record(cards: [CorrectionCard]) {
         guard !cards.isEmpty else { return }
         for card in cards {
             _ = MullDirectory.write(card.render(), to: "\(CorrectionIndex.directory)/\(card.id).md")
@@ -365,6 +374,11 @@ enum Curator {
         let onDisk = CorrectionIndex.parseLedger(MullDirectory.read(CorrectionIndex.ledgerPath) ?? "")
         let merged = CorrectionIndex.merge(onDisk, CorrectionIndex.fold(cards))
         _ = MullDirectory.write(merged.renderLedger(), to: CorrectionIndex.ledgerPath)
+    }
+
+    private static func recordCorrections(existing: String, agentBlocks: [ContextBlock], path: String) {
+        record(cards: detectCorrections(existing: existing, agentBlocks: agentBlocks,
+                                        path: path, context: contextSnapshotProvider?()))
     }
 
     /// Pure merge (no I/O) so it can be unit-tested.

@@ -330,7 +330,13 @@ struct CalendarWeekView: View {
         .onAppear {
             prepareWriter()
             gridFocused = true
+            // Tell the View and File menus there is a calendar to talk to. Leaving
+            // the page takes those items dim again, so ⌘3 on the Chat page cannot
+            // quietly reshape a calendar nobody is looking at.
+            MenuCommands.shared.calendarAppeared()
         }
+        .onDisappear { MenuCommands.shared.calendarDisappeared() }
+        .onReceive(MenuCommands.shared.stream) { perform($0) }
         .onMoveCommand { direction in
             switch direction {
             case .left:  step(-1)
@@ -350,6 +356,21 @@ struct CalendarWeekView: View {
             guard draft == nil, selectedItem == nil,
                   let item = keyboardItem() else { return .ignored }
             selectedItem = item
+            return .handled
+        }
+        // Esc puts the highlight down. ↑ / ↓ leave a card standing selected, and
+        // ⌫ is aimed at whatever that is — so there has to be a way to stop aiming
+        // that is not "click somewhere harmless".
+        //
+        // `.ignored` when there is nothing to drop, deliberately: Esc is also how
+        // search hands you back to the page you came from (`FullWindowView`), and a
+        // handler that swallowed every Esc would take that away from the one page
+        // you are most likely to have searched your way onto.
+        .onKeyPress(.escape) {
+            guard draft == nil, selectedItem == nil, keyboardSelection != nil else {
+                return .ignored
+            }
+            keyboardSelection = nil
             return .handled
         }
         .background { keyEquivalents }
@@ -434,24 +455,50 @@ struct CalendarWeekView: View {
         writer = made
     }
 
-    /// The shortcuts Calendar.app answers to, laid out off-screen because they
+    /// What the menu bar sends, done here.
+    ///
+    /// The switch is exhaustive on purpose: `MenuCommands.Command` is the list of
+    /// what the menu offers, and a case added there without an answer here should
+    /// not compile.
+    func perform(_ command: MenuCommands.Command) {
+        switch command {
+        case .today:    goToToday()
+        case .previous: step(-1)
+        case .next:     step(1)
+        case .goToDate:
+            pickerDate = anchorDate
+            showingDatePicker = true
+        case .day:      mode = .day
+        case .week:     mode = .week
+        case .month:    mode = .month
+        case .year:     mode = .year
+        case .newEvent: newEvent()
+        case .zoomIn:   zoom(by: 1.25)
+        case .zoomOut:  zoom(by: 0.8)
+        // The window's, answered by FullWindowView.
+        case .search:   break
+        }
+    }
+
+    /// The two shortcuts that cannot be menu items, laid out off-screen because they
     /// belong to the view rather than to any one control on it.
+    ///
+    /// Everything else that used to be in here — ⌘T, ⌘1–⌘4, ⌘N, the zoom — is in the
+    /// View and File menus now, where somebody who does not already know it exists
+    /// can find it. What is left is what a menu cannot say:
+    ///
+    ///   - **⌘=**. The Zoom In item is ⌘+, which is ⌘⇧= on a US layout and ⌘⇧; on a
+    ///     JIS one. Plain ⌘= is the third thing fingers do, and a menu item can carry
+    ///     one key equivalent.
+    ///   - **⌘Z / ⇧⌘Z**, and only while nothing here is taking text. A menu item is
+    ///     enabled or it is not; it cannot stand down for the duration of a title
+    ///     being typed, which is what these have to do — inside a draft's field ⌘Z
+    ///     means "undo my typing", not "put the meeting I just deleted back". The
+    ///     condition is the reason these are views.
     var keyEquivalents: some View {
         ZStack {
-            Button("Today") { goToToday() }.keyboardShortcut("t", modifiers: .command)
-            Button("Day") { mode = .day }.keyboardShortcut("1", modifiers: .command)
-            Button("Week") { mode = .week }.keyboardShortcut("2", modifiers: .command)
-            Button("Month") { mode = .month }.keyboardShortcut("3", modifiers: .command)
-            Button("Year") { mode = .year }.keyboardShortcut("4", modifiers: .command)
-            Button("New Event") { newEvent() }.keyboardShortcut("n", modifiers: .command)
-            // ⌘+ is ⌘⇧= on most layouts and plain ⌘= on some; both are bound so the
-            // shortcut works wherever the reader's fingers expect it.
-            Button("Zoom in") { zoom(by: 1.25) }.keyboardShortcut("+", modifiers: .command)
-            Button("Zoom in") { zoom(by: 1.25) }.keyboardShortcut("=", modifiers: .command)
-            Button("Zoom out") { zoom(by: 0.8) }.keyboardShortcut("-", modifiers: .command)
+            Button("Zoom In") { zoom(by: 1.25) }.keyboardShortcut("=", modifiers: .command)
 
-            // Undo belongs to the responder chain, but only while nothing here is
-            // taking text: inside a title field ⌘Z has to mean "undo my typing".
             if draft == nil, selectedItem == nil {
                 Button("Undo") { undoManager?.undo() }
                     .keyboardShortcut("z", modifiers: .command)

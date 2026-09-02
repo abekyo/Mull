@@ -184,6 +184,76 @@ struct MemoryEntry: Codable, FetchableRecord, PersistableRecord, Identifiable {
         return now.timeIntervalSince(updatedAt) < Self.unconfirmedLifetime
     }
 
+    // MARK: - What the line has to be ABOUT
+    //
+    // `isIdentity` above answers "is this still true of them". It is an age rule, and
+    // on 2026-08-18 me.md consisted of two lines that passed it and said nothing:
+    //
+    //   - Used Claude on 17 August 2026.
+    //   - Used LINE on 17 August 2026.
+    //
+    // Both were created on 10 June and confirmed on 17 August, so re-observation —
+    // the whole of the 2026-08-15 rule — held. What the 08-15 rule stopped was the
+    // *generalisation* ("Regularly uses LINE"); the model complied by writing the
+    // observation instead, and an observation of which app was open is the one thing
+    // `buildConsolidationPrompt` names as not worth a line:
+    //
+    //   "Which app they had open, which assistant they were talking to, and anything
+    //    readable off the screen or the repository are not that."
+    //
+    // The rule was in the prompt, dated 2026-08-15, and the model confirmed both lines
+    // on 08-17 anyway. A rule mull can check itself does not belong only in a prompt.
+    //
+    // Deliberately narrow. It catches "<verb> <one or two words> <date>" and nothing
+    // else, because the cost of the two errors is not symmetric: a day-log that slips
+    // through is a wasted line, and a real trait that is dropped is mull forgetting
+    // something about somebody. When in doubt this keeps the line.
+
+    /// Openers that introduce an act rather than a trait, in either language.
+    private static let observationOpeners = [
+        "used ", "using ", "opened ", "open ", "ran ", "launched ", "browsed ",
+        "viewed ", "looked at ", "worked in ", "switched to ", "checked ",
+    ]
+
+    /// Japanese has the verb at the end, so the test is a suffix one.
+    private static let observationClosers = [
+        "を使った", "を使用した", "を開いた", "を見た", "を確認した", "を起動した",
+        "を使っていた", "を利用した",
+    ]
+
+    /// True when the description is a log of what was on screen, not a fact about the
+    /// person — the thing an agent can read off the record for itself.
+    ///
+    /// Measured on the description because that is the string me.md prints.
+    var isDerivableObservation: Bool {
+        // The date is what makes it a log entry, so it is stripped before the shape
+        // is measured rather than counted as words.
+        var text = description
+            .replacingOccurrences(of: #"\(?[^()（）]*\b20\d\d\b[^()（）]*\)?"#,
+                                  with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"[（(][^）)]*[）)]"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " 　.。、,;:"))
+        text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        guard !text.isEmpty else { return true }
+
+        let lower = text.lowercased()
+        if let opener = Self.observationOpeners.first(where: { lower.hasPrefix($0) }) {
+            // What is left after the verb: an app or tool name, and nothing more.
+            // Three words leaves room for "Visual Studio Code" and stops well short
+            // of a sentence that says why.
+            let rest = String(text.dropFirst(opener.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: " 　.。"))
+            return rest.split(separator: " ").count <= 3
+        }
+        if let closer = Self.observationClosers.first(where: { text.hasSuffix($0) }) {
+            let rest = String(text.dropLast(closer.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: " 　にでは"))
+            // Japanese is not space-delimited, so length stands in for word count.
+            return rest.count <= 20
+        }
+        return false
+    }
+
     /// The line as it goes into me.md: the claim, and the day it was last seen.
     ///
     /// The date is appended only when the description does not already carry a year.

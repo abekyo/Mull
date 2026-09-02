@@ -203,10 +203,11 @@ final class ProactiveEngine: NSObject {
     // MARK: - 1. AI Auto-Copy
 
     private func checkAISiteAndCopy(url: String) {
-        // Settings › General › Notifications. Absent key means on; the toggle
-        // kills the whole feature, not just the banner — copying without the
-        // banner would replace the clipboard with nothing anywhere saying so.
-        guard UserDefaults.standard.object(forKey: "aiAutoCopy") as? Bool ?? true else { return }
+        // Settings › General › Notifications. The toggle kills the whole feature, not
+        // just the banner — copying without the banner would replace the clipboard
+        // with nothing anywhere saying so. Off unless turned on, and `Preferences`
+        // holds the reasoning and the default.
+        guard Preferences.aiAutoCopyEnabled else { return }
 
         let urlLower = url.lowercased()
 

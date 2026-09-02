@@ -69,6 +69,25 @@ enum Preferences {
     /// It is mull not putting that question in the install decision.
     static var keystrokeCaptureEnabled: Bool { store.bool(forKey: keystrokeCaptureKey) }
 
+    // MARK: - Auto-copy on AI sites
+
+    static let aiAutoCopyKey = "aiAutoCopy"
+
+    /// Off unless the user turns it on.
+    ///
+    /// Absent used to mean *on*, which made a fresh install replace the clipboard the
+    /// first time its owner opened claude.ai — before they had agreed to anything, and
+    /// with whatever they had put there themselves gone for the next thirty seconds.
+    /// mull's own ⇧⌘C does the same work at the moment somebody asks for it; this is
+    /// that deed done unasked, and unasked writes to something the user owns are the
+    /// kind that has to be opted into.
+    ///
+    /// Read through here so the toggle in Settings and the check in `ProactiveEngine`
+    /// cannot disagree about what an unset key means. They did once, for keystrokes,
+    /// and a toggle that comes up showing the opposite of what the recorder is doing
+    /// is worse than no toggle.
+    static var aiAutoCopyEnabled: Bool { store.bool(forKey: aiAutoCopyKey) }
+
     // MARK: - Calendar mirror
 
     static let mirrorEnabledKey = "calendarMirrorEnabled"

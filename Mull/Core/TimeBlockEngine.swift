@@ -122,7 +122,11 @@ extension TimeBlockEngine {
         let chrome = BlockSegmenter.chromeSegments(in: blocks)
         var taskGroups: [String: [TimeBlock]] = [:]
         for block in blocks {
-            let key = BlockSegmenter.normalizeTaskKey(block, chrome: chrome)
+            // A block about nothing of its own goes under what it was for, when the
+            // record can show that. A claim moves minutes between groups; a cue does
+            // not — see `BlockAttribution.Basis.isClaim`.
+            let served = block.servedBy.flatMap { $0.basis.isClaim ? $0.key : nil }
+            let key = served ?? BlockSegmenter.normalizeTaskKey(block, chrome: chrome)
             taskGroups[key, default: []].append(block)
         }
 
@@ -131,7 +135,11 @@ extension TimeBlockEngine {
             let totalDuration = blocks.reduce(0.0) { $0 + $1.activeDuration }
             let totalEvents = blocks.reduce(0) { $0 + $1.eventCount }
             let primaryApp = mostCommonApp(in: blocks)
-            let label = BlockSegmenter.bestLabel(for: blocks, key: key, chrome: chrome)
+            // Named by the blocks that are about the artifact themselves, never by a
+            // browser stretch folded in beside them: the longest block in a group can
+            // be the page, and the page must not caption the work.
+            let named = blocks.filter { $0.servedBy == nil }
+            let label = BlockSegmenter.bestLabel(for: named.isEmpty ? blocks : named, key: key, chrome: chrome)
 
             return ActivitySummary(
                 label: label,

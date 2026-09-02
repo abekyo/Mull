@@ -345,6 +345,33 @@ final class MullEngine {
         let language = writer.dominantLanguage(of: samples)
         let voiceBlock = samples.isEmpty ? ReportWriter.noSamplesFallback : samples
 
+        // Entries written in the other language, named so they get rewritten.
+        //
+        // Switching the language setting changes every heading mull writes on the next
+        // pass and not one line underneath them, because an entry is only rewritten
+        // when the model has a reason to update it — and "the reader changed their
+        // mind about language" is not a reason it can see. On 2026-08-18 that was a
+        // vault of Japanese headings over June's English bullets, with no action
+        // anywhere in the app that would fix it. This is the action: the model is told
+        // which entries are in the wrong language and asked to restate them.
+        //
+        // Restate, not translate the description alone: `name` is what mull matches an
+        // update against, so it has to stay put, and the pass has the day's activity in
+        // front of it anyway.
+        let strays = memories.filter { !UserLanguage.matchesReader($0.description) }
+        let strayBlock = strays.isEmpty ? "" : """
+
+
+            ### Entries written in the wrong language
+
+            The reader has since asked for \(language). These entries are not in it.
+            Output an `update` for each one, keeping `name` exactly as written here
+            (that is how mull matches it) and restating `description` and `content` in
+            \(language). Do not change what they say — only the language they say it in.
+
+            \(strays.map { "- **\($0.name)**: \($0.description)" }.joined(separator: "\n"))
+            """
+
         let existingMemoriesBlock: String
         if memories.isEmpty {
             existingMemoriesBlock = "(No existing memories yet.)"
@@ -397,7 +424,7 @@ final class MullEngine {
 
         Here are the existing memories. Skim them to avoid duplicates and spot what might be outdated:
 
-        \(existingMemoriesBlock)
+        \(existingMemoriesBlock)\(strayBlock)
 
         ## Phase 2 — Gather recent signal (today's raw activity)
 
@@ -864,7 +891,7 @@ final class MullEngine {
 
         // ── Layer B: now.md (~500 tokens) ──
         // Current context. Changes weekly. Include when task-relevant.
-        try generateLayerB(memories: memories, summaries: recentSummaries, timestamp: timestamp)
+        try generateLayerB(timestamp: timestamp)
 
         // ── Layer C: full.md (~1500 tokens) ──
         // Complete picture. Include when onboarding AI to a new task.
@@ -902,54 +929,36 @@ final class MullEngine {
                        managedPrefixes: ["mem:", "pref:"])
     }
 
-    /// now.md — "What are you working on?" Current projects + this week.
+    /// now.md — nothing. This pass has nothing to add to that file.
     ///
-    /// Curated under the `nightly:` prefix, NOT written wholesale. LiveContextGenerator
-    /// owns `now:` and rewrites its own block every 60 seconds; the raw
-    /// `String.write(to:)` this used to do was clobbered within a minute, so the
-    /// nightly LLM output never survived long enough for anyone to read it.
-    private func generateLayerB(memories: [MemoryEntry], summaries: [DailySummary], timestamp: String) throws {
-        // Everything this pass writes belongs UNDER "From last night's
-        // consolidation", so it is `###`. It used to be `##` — the same level as
-        // the heading it was supposedly inside — which made the whole nightly
-        // block read as nested while being flat, and put a second "Projects"
-        // section beside the 60s pass's own.
-        let projects = memories.filter { $0.memoryType == .project }
-        let refs = memories.filter { $0.memoryType == .reference }
-
-        // "This week" means this week. A summary from two months ago listed here
-        // is the same misreport `splitByRecency` exists to prevent, and this pass
-        // is the one that would produce it: it runs, finds the newest rows in the
-        // table, and has no reason of its own to notice they are old.
-        let thisWeek = summaries.splitByRecency().recent
-
-        // The keyword/app/peak-hour digest is deliberately absent.
-        //
-        // The 60s pass cut it from now.md as vague, analytics-grade pre-digestion
-        // that does not change an AI's next answer (DIRECTION §4) — and then this
-        // pass put it back into the same file, which is how now.md ended up
-        // announcing `Focus topics: deknanngaete(1), karahodotooi(1)`: romaji IME
-        // buffers presented to every assistant as what the user was thinking
-        // about. It belongs in the Insights UI, where a human reads it as a
-        // measurement and can see how it was counted.
-        let body = MarkdownDoc.join([
-            MarkdownDoc.section("Projects", level: 3, items: projects.map {
-                "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))"
-            }),
-            MarkdownDoc.section("This week", level: 3, items: thisWeek.prefix(7).map {
-                "- **\($0.dateShort)** — \(MarkdownDoc.inline($0.preview))"
-            }),
-            MarkdownDoc.section("References", level: 3, items: refs.prefix(5).map {
-                "- **\(MarkdownDoc.inline($0.name, limit: 60))** — \(MarkdownDoc.inline($0.description))"
-            }),
-        ])
-
+    /// It used to write a `nightly:now` block holding Projects, This week and
+    /// References, and the 60s pass in `LiveContextGenerator` writes プロジェクト,
+    /// ここ数日 and 主な参照先 — **from the same two tables, through the same
+    /// formatter**. So now.md carried every line twice. On 2026-08-18, on the
+    /// author's machine, that was ten projects, four days and three references
+    /// printed once under Japanese headings and again under English ones, in a file
+    /// of 5,332 bytes that `get_user_context` and `mull://now` hand over whole.
+    ///
+    /// The `##` → `###` change that came before this treated the symptom: it made
+    /// the second copy read as nested instead of as a sibling. It was still a second
+    /// copy.
+    ///
+    /// The division is the one `generateLayerC` already states for full.md, applied
+    /// here: **by ownership, not by topic.** What regenerates deterministically every
+    /// 60 seconds belongs to the pass that does that — it is always current, it is
+    /// localized, and it says so when a day is missing. What only this pass can
+    /// produce (the LLM day summaries, the patterns, the knowledge base) goes to
+    /// full.md, where it is not duplicated by anything.
+    ///
+    /// Nothing is lost by the removal. The one thing this pass showed more of was a
+    /// seventh day of summaries, and the 60s pass now shows seven too.
+    ///
+    /// The call is kept, rather than deleted at the call site, so it can prune: a
+    /// vault written by any earlier build still has the block in it.
+    private func generateLayerB(timestamp: String) throws {
         Curator.curate(relativePath: "now.md", header: Curator.nowHeader(timestamp: timestamp),
                        pinnedContent: nil,
-                       agentBlocks: [ContextBlock(
-                           id: "nightly:now", source: .agent,
-                           content: MarkdownDoc.section("From last night's consolidation", body) ?? "",
-                           agentHash: nil)],
+                       agentBlocks: [],
                        managedPrefixes: ["nightly:"])
     }
 
@@ -1002,24 +1011,35 @@ final class MullEngine {
                                        level: 4, body.joined(separator: "\n"))
         }
 
+        // Through `VaultText.t`, like every other heading mull writes for a person to
+        // read. These were the last five raw English strings in the vault: the
+        // 2026-08-18 localization pass reached the 60s generator (14 call sites) and
+        // not this one (5), so full.md printed 私について over "Daily details (last 7
+        // days)". A heading is prose, and prose follows the reader (WRITING.md §5.2).
         let body = MarkdownDoc.join([
-            MarkdownDoc.section("Daily details (last 7 days)", level: 3, MarkdownDoc.join(daily)),
-            MarkdownDoc.section("Working style & feedback", level: 3, items:
+            MarkdownDoc.section(VaultText.t("Daily details (last 7 days)", "この7日の詳細"),
+                                level: 3, MarkdownDoc.join(daily)),
+            MarkdownDoc.section(VaultText.t("Working style & feedback", "仕事の進め方と指摘"), level: 3, items:
                 feedback.map { "- \(MarkdownDoc.inline($0.content, limit: 240))" }),
-            MarkdownDoc.section("Behavioral patterns (auto-detected)", level: 3,
+            MarkdownDoc.section(VaultText.t("Behavioral patterns (auto-detected)", "自動検出した傾向"), level: 3,
                                 patternBlocks.isEmpty ? nil :
-                                "These are patterns the user cannot see about themselves. Use them to give better advice.\n\n"
-                                + MarkdownDoc.join(patternBlocks)),
-            MarkdownDoc.section("Knowledge base", level: 3,
+                                VaultText.t(
+                                    "These are patterns the user cannot see about themselves. Use them to give better advice.",
+                                    "本人からは見えない傾向です。助言の材料に使ってください。")
+                                + "\n\n" + MarkdownDoc.join(patternBlocks)),
+            MarkdownDoc.section(VaultText.t("Knowledge base", "決定と解法"), level: 3,
                                 knowledgeBlocks.isEmpty ? nil :
-                                "Decisions and solutions I've accumulated.\n\n" + MarkdownDoc.join(knowledgeBlocks)),
+                                VaultText.t("Decisions and solutions I've accumulated.",
+                                            "これまでに溜まった決定と解法です。")
+                                + "\n\n" + MarkdownDoc.join(knowledgeBlocks)),
         ])
 
         Curator.curate(relativePath: "full.md", header: Curator.fullHeader(timestamp: timestamp),
                        pinnedContent: nil,
                        agentBlocks: [ContextBlock(
                            id: "nightly:full", source: .agent,
-                           content: MarkdownDoc.section("From last night's consolidation", body) ?? "",
+                           content: MarkdownDoc.section(
+                            VaultText.t("From last night's consolidation", "昨夜の集約から"), body) ?? "",
                            agentHash: nil)],
                        managedPrefixes: ["nightly:"])
     }

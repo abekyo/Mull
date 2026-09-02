@@ -70,12 +70,37 @@ final class AppState: ObservableObject {
     // it says what mull just did, or why it did nothing, in the window the user is
     // already looking at.
 
+    /// A place a notice can send you.
+    ///
+    /// A case rather than a closure so `ActionNotice` stays `Equatable` — the notice
+    /// bar animates on value changes, and a stored closure would make every one of
+    /// them different from the last.
+    enum NoticeAction: Equatable {
+        /// Settings › General › Your answers — the seven questions, and the file the
+        /// answers are projected into.
+        case stateYourPremises
+
+        var label: String {
+            switch self {
+            case .stateYourPremises: String(localized: "Tell mull")
+            }
+        }
+
+        @MainActor func run() {
+            switch self {
+            case .stateYourPremises: AppDelegate.shared?.showSettings(tab: .general)
+            }
+        }
+    }
+
     struct ActionNotice: Identifiable, Equatable {
         let id = UUID()
         let text: String
         var detail: String? = nil
         /// A file the notice is about — the user can go look at it.
         var revealURL: URL? = nil
+        /// Somewhere to go about it.
+        var action: NoticeAction? = nil
         /// Something didn't happen. Stays until dismissed.
         var isProblem: Bool = false
     }
@@ -85,11 +110,13 @@ final class AppState: ObservableObject {
 
     /// Show an in-app notice. Plain confirmations fade on their own; anything the
     /// user may need to act on (a problem, or a file to go find) waits to be dismissed.
-    func postNotice(_ text: String, detail: String? = nil, revealURL: URL? = nil, isProblem: Bool = false) {
-        let notice = ActionNotice(text: text, detail: detail, revealURL: revealURL, isProblem: isProblem)
+    func postNotice(_ text: String, detail: String? = nil, revealURL: URL? = nil,
+                    action: NoticeAction? = nil, isProblem: Bool = false) {
+        let notice = ActionNotice(text: text, detail: detail, revealURL: revealURL,
+                                  action: action, isProblem: isProblem)
         actionNotice = notice
         noticeDismissTask?.cancel()
-        guard !isProblem, revealURL == nil else { return }
+        guard !isProblem, revealURL == nil, action == nil else { return }
         noticeDismissTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
@@ -798,6 +825,36 @@ final class AppState: ObservableObject {
             NSPasteboard.general.setString(finalText, forType: .string)
 
             let wordCount = finalText.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
+
+            // The one moment worth asking in.
+            //
+            // mull has three places a person can state something rather than be
+            // observed — the seven setup questions, me.pinned.md, and a correction —
+            // and on 2026-08-18, on the machine of the person who built it, all three
+            // were empty after two and a half months. `onboardingProfileAnswers` did
+            // not exist as a key, though onboarding had been completed; me.pinned.md
+            // held nothing but its own scaffold. That is the same shape as the
+            // calendar mirror, which spent its whole life switched off while 56 events
+            // were written by hand: a thing you only meet by going to look for it.
+            //
+            // So it is asked here instead, the way `keepUpdatedBox` asks — at the
+            // moment somebody is handing their context to an agent, which is the
+            // moment the gap costs them something and the moment they have the answer
+            // in mind. Once per launch: a second one in the same sitting is nagging.
+            if !Self.askedForPremises {
+                // Set before the test, not inside it: "asked" means "looked, this
+                // launch". Left until after, a vault with a pinned line but no answers
+                // re-read me.pinned.md off the main actor's back on every ⇧⌘C.
+                Self.askedForPremises = true
+                if !OnboardingProfile.hasAnswers,
+                   Curator.readPinned().text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    postNotice(String(localized: "Copied — but mull is guessing about you"),
+                               detail: String(localized: "\(wordCount) words, all of it observed. Nothing here is anything you told mull, so what it can't watch you do — how you want work done, what a project is for — isn't in what you just pasted."),
+                               action: .stateYourPremises)
+                    return
+                }
+            }
+
             // In-app notice only. This used to also fire a system banner, on the
             // reasoning that ⌘⇧C is a global shortcut so the window is usually not
             // on screen to show the notice — but the person pressed the shortcut,
@@ -809,6 +866,10 @@ final class AppState: ObservableObject {
                        detail: String(localized: "\(wordCount) words about your day — paste into any AI."))
         }
     }
+
+    /// Whether the "mull is guessing about you" offer has been made this launch.
+    /// Static so it survives an AppState rebuild and is asked once per sitting.
+    private static var askedForPremises = false
 
     private static var nothingToLendTitle: String { String(localized: "Nothing to lend yet") }
     private static var nothingToLendDetail: String {

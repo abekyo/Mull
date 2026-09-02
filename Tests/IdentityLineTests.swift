@@ -168,6 +168,54 @@ final class IdentityLineTests: XCTestCase {
                        ["mem:ai-assistant-preference"])
     }
 
+    // MARK: - What the line has to be about
+    //
+    // The 2026-08-15 rule stopped the generalisation and left the log entry. These are
+    // the two lines me.md actually held on 2026-08-18, verbatim from the author's
+    // machine: created 10 June, confirmed 17 August, so every age rule above passes
+    // them.
+
+    func testALogOfWhichAppWasOpenIsNotIdentity() {
+        let claude = memory("AI assistant preference", "Used Claude on 17 August 2026.",
+                            "…", created: june10, updated: day(8, 17))
+        let line = memory("Messaging preference", "Used LINE on 17 August 2026.",
+                          "…", created: june10, updated: day(8, 17))
+
+        XCTAssertTrue(claude.isIdentity(asOf: now), "re-observed, so the age rule keeps it")
+        XCTAssertTrue(claude.isDerivableObservation)
+        XCTAssertTrue(line.isDerivableObservation)
+        XCTAssertTrue(Curator.identityBlocks(from: [claude, line], now: day(8, 18)).isEmpty)
+    }
+
+    /// Same shape, written the other way round.
+    func testTheJapaneseFormOfTheSameLine() {
+        let line = memory("メッセージ", "2026年8月17日に LINE を使った", "…",
+                          created: june10, updated: day(8, 17))
+        XCTAssertTrue(line.isDerivableObservation)
+    }
+
+    /// The expensive error is the other one. A line that says *why* is a fact about
+    /// the person even when it names a tool, and none of these may be dropped.
+    func testALineThatSaysSomethingSurvives() {
+        let kept = [
+            "Prefers Claude for AI assistance; used frequently (updated 11 Aug 2026)",
+            "Works in Japanese and wants AI replies in Japanese.",
+            "Used Xcode because the project has no SwiftPM manifest and cannot build headless.",
+            "Solo founder shipping a macOS app and two web products.",
+            "通知が多すぎて操作の邪魔になると感じた（2026-08-09）",
+        ]
+        for description in kept {
+            let line = memory("x", description, "…", created: june10, updated: aug11)
+            XCTAssertFalse(line.isDerivableObservation, "dropped a real line: \(description)")
+        }
+    }
+
+    /// A description that is nothing but a date carries no claim at all.
+    func testAnEmptyClaimIsNotIdentity() {
+        let line = memory("x", "(17 August 2026)", "…", created: june10, updated: aug11)
+        XCTAssertTrue(line.isDerivableObservation)
+    }
+
     /// One rule, not two copies of one. Both passes that write me.md call this, and
     /// they prune each other's stale `mem:` blocks — so a rule held privately by
     /// either one shows up as a block that appears and vanishes every minute. The

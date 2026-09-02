@@ -82,10 +82,20 @@ enum LiveContextGenerator {
     /// How long a nightly block may keep claiming to be last night's.
     static let nightlyMaxAge: TimeInterval = 7 * 86_400
 
+    /// now.md has no nightly block any more, at any age.
+    ///
+    /// `MullEngine.generateLayerB` stopped writing one on 2026-08-18 — it was a second
+    /// copy of the three sections this pass already writes. Its own prune would clear
+    /// the block left in existing vaults, except that it runs only when the nightly
+    /// consolidation runs, and that needs an LLM provider. With none configured the
+    /// duplicate would sit in now.md forever, which is the failure this file's own
+    /// staleness sweep exists to catch. Expiring it here heals every vault on the next
+    /// 60-second pass instead.
+    private static let nowNightlyMaxAge: TimeInterval = 0
+
     private static func expireStaleNightlyBlocks() {
-        for file in ["now.md", "full.md"] {
-            Curator.expire(relativePath: file, idPrefixes: ["nightly:"], maxAge: nightlyMaxAge)
-        }
+        Curator.expire(relativePath: "now.md", idPrefixes: ["nightly:"], maxAge: nowNightlyMaxAge)
+        Curator.expire(relativePath: "full.md", idPrefixes: ["nightly:"], maxAge: nightlyMaxAge)
     }
 
     // MARK: - mull.md — the front door (read me first)
@@ -283,7 +293,10 @@ enum LiveContextGenerator {
                         "- **\(day.dateShort)** 以降、集約された日がありません。"
                             + "夜間の集約には LLM プロバイダが要ります。それ以降の日はイベントとしては"
                             + "記録に残っていますが、要約はされていません。")] } ?? [])
-                : recentDays.prefix(5).map { "- **\($0.dateShort)** — \(MarkdownDoc.inline($0.preview))" }))
+                // Seven, not five. The nightly pass used to print seven here in a
+                // block of its own; that block is gone (MullEngine.generateLayerB)
+                // and this is the line that would otherwise have lost two days.
+                : recentDays.prefix(7).map { "- **\($0.dateShort)** — \(MarkdownDoc.inline($0.preview))" }))
 
         // NOTE: the day "narrative" ("A focused day…"), the keyword/topic cloud,
         // and behavior-pattern insights were removed from now.md. They are vague

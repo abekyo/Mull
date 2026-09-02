@@ -34,6 +34,7 @@ swiftc -o "$BIN" \
   Mull/Core/ContextBlock.swift \
   Mull/Core/CorrectionCard.swift \
   Mull/Core/CalendarEventHandle.swift \
+  Mull/Core/BlockAttribution.swift \
   Mull/Core/BlockSegmentation.swift \
   Mull/Core/CalendarMirror.swift \
   eval/calendar/calendar_eval.swift

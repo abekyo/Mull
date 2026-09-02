@@ -4,6 +4,8 @@ import SwiftUI
 struct MullApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
+    /// What the menu bar is allowed to enable, and where its presses go.
+    @ObservedObject private var menu = MenuCommands.shared
 
     init() {}
 
@@ -38,34 +40,163 @@ struct MullApp: App {
             }
         }
         .menuBarExtraStyle(.window)
+        .commands { menuBar }
+    }
 
-        // Settings
-        Settings {
-            SettingsView()
-                .environmentObject(appState)
-                .mullChrome()
+    // MARK: - The menu bar
+    //
+    // mull has no `WindowGroup`: the main window is a plain `NSWindow` built in
+    // `AppDelegate`. That is a supported thing to do and it costs one thing nobody
+    // had checked — SwiftUI builds the standard menus around the *scenes* it is
+    // given, and an app with only a `MenuBarExtra` gets no File menu at all. So the
+    // shipping app had no ⌘W. Not a Close item that did nothing: no item, no menu.
+    // ⌘M and ⌘Q were there (Window and the app menu are built unconditionally),
+    // which is exactly why this went unnoticed for as long as it did.
+    //
+    // The other half is the calendar's own commands. Those existed — ⌘T, ⌘1–⌘4, ⌘N
+    // — but they lived in an off-screen stack of zero-opacity buttons inside
+    // `CalendarWeekView`, which works and tells nobody. A shortcut a reader cannot
+    // find by pulling a menu down is a shortcut only its author has. They are menu
+    // items now, in the places Calendar.app keeps them, and the off-screen stack is
+    // down to the two things a menu cannot express (see `keyEquivalents`).
+
+    @CommandsBuilder
+    private var menuBar: some Commands {
+        // ⌘, has to open the Settings window mull actually has.
+        //
+        // There used to be a `Settings` scene here purely to put this item in the
+        // app menu, and `AppDelegate.showSettings()` — the one the sidebar's gear
+        // opens — is a different window showing the same `SettingsView`. Two windows
+        // over one set of preferences is a way to change something in the one that
+        // is not on screen. The scene is gone; this item is the same door as the
+        // gear.
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { AppDelegate.shared?.showSettings() }
+                .keyboardShortcut(",", modifiers: .command)
         }
-        .commands {
-            // SwiftUI puts a Help menu in the menu bar whether or not the app has
-            // anything to put in it. mull registers no help book (no
-            // CFBundleHelpBookName in the bundle), so "mull Help" sat there
-            // enabled and clickable and did nothing at all: no Help Viewer, no
-            // alert, no window.
-            //
-            // §7.4 is the standing rule for what that costs. A promise that fails
-            // one check makes every other promise suspect, which is why the
-            // never-overwrite wording was weakened until it matched the code. A
-            // menu item that says Help and answers nothing is the same failure,
-            // sitting above everything the app does keep — in the first place
-            // somebody deciding whether to hand over Input Monitoring will look.
-            //
-            // Removed rather than repointed: the repository is private, so a link
-            // to the README would 404, and a second broken promise is not an
-            // improvement on the first. What explanation the app has is
-            // onboarding, still reachable from "Finish Setting Up mull…" for as
-            // long as there is setup left to finish.
-            CommandGroup(replacing: .help) { }
+
+        // File. Both items build the menu that was not there.
+        CommandGroup(replacing: .newItem) {
+            Button("New Event") { menu.send(.newEvent) }
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled(!menu.calendarIsShowing)
         }
+        CommandGroup(replacing: .saveItem) {
+            // `performClose` rather than `close`, so the window's delegate gets its
+            // say — onboarding's does, and closing it half way through has teardown
+            // to run.
+            Button("Close") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: .command)
+        }
+
+        // Edit. The copy the sidebar has been advertising in print.
+        //
+        // "⇧⌘C" is drawn on the Copy context row and repeated in its tooltip and in
+        // the menu bar panel, and the only thing bound to it was `GlobalShortcuts` —
+        // an `addGlobalMonitorForEvents` observer, which by definition does not see
+        // events delivered to mull. So the shortcut worked from every app on the Mac
+        // except the one printing it on a button. The monitor stays — it is what
+        // makes this work from wherever you are typing — and this is the case it
+        // structurally cannot cover.
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            Button("Copy Context") { appState.copyContextToClipboard() }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+        }
+
+        // Edit › Find. ⌘K reaches the same field and is what the magnifier's tooltip
+        // says; ⌘F is what a Mac user's hands do first.
+        CommandGroup(after: .textEditing) {
+            Button("Find…") { menu.send(.search) }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(!menu.windowIsShowing)
+        }
+
+        CommandGroup(replacing: .sidebar) { viewMenu }
+
+        // SwiftUI puts a Help menu in the menu bar whether or not the app has
+        // anything to put in it. mull registers no help book (no
+        // CFBundleHelpBookName in the bundle), so "mull Help" sat there
+        // enabled and clickable and did nothing at all: no Help Viewer, no
+        // alert, no window.
+        //
+        // §7.4 is the standing rule for what that costs. A promise that fails
+        // one check makes every other promise suspect, which is why the
+        // never-overwrite wording was weakened until it matched the code. A
+        // menu item that says Help and answers nothing is the same failure,
+        // sitting above everything the app does keep — in the first place
+        // somebody deciding whether to hand over Input Monitoring will look.
+        //
+        // Removed rather than repointed: the repository is private, so a link
+        // to the README would 404, and a second broken promise is not an
+        // improvement on the first. What explanation the app has is
+        // onboarding, still reachable from "Finish Setting Up mull…" for as
+        // long as there is setup left to finish.
+        CommandGroup(replacing: .help) { }
+    }
+
+    /// View: the sidebar, then the calendar's four ranges, then moving through them,
+    /// then the zoom — which is the order and the grouping Calendar.app uses, because
+    /// the whole grid is built to that shape (see `CalendarWeekView`).
+    ///
+    /// Everything below the sidebar dims when the calendar is not the page on screen.
+    /// A live ⌘3 on the Chat page would silently reshape a calendar nobody is looking
+    /// at.
+    @ViewBuilder
+    private var viewMenu: some View {
+        Button(appState.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
+            appState.sidebarVisible.toggle()
+        }
+        .keyboardShortcut("s", modifiers: [.control, .command])
+
+        Divider()
+
+        // The same four words the range picker uses, so one screen cannot name its
+        // ranges two ways.
+        //
+        // `.disabled` is written out per item rather than once around a `Group`:
+        // a menu builder is not a layout, and what a container does to the
+        // environment inside one is not something to find out from a shipped build.
+        Button("Day") { menu.send(.day) }
+            .keyboardShortcut("1", modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+        Button("Week") { menu.send(.week) }
+            .keyboardShortcut("2", modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+        Button("Month") { menu.send(.month) }
+            .keyboardShortcut("3", modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+        Button("Year") { menu.send(.year) }
+            .keyboardShortcut("4", modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+
+        Divider()
+
+        Button("Today") { menu.send(.today) }
+            .keyboardShortcut("t", modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+        Button("Go to Date…") { menu.send(.goToDate) }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .disabled(!menu.calendarIsShowing)
+        // The bare arrows already step the grid (`onMoveCommand`), and they only do
+        // it while the grid holds focus. ⌘← and ⌘→ are Calendar.app's, they work
+        // from anywhere in the window, and they are the pair somebody who has just
+        // clicked the sidebar will reach for.
+        Button("Previous") { menu.send(.previous) }
+            .keyboardShortcut(.leftArrow, modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+        Button("Next") { menu.send(.next) }
+            .keyboardShortcut(.rightArrow, modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+
+        Divider()
+
+        Button("Zoom In") { menu.send(.zoomIn) }
+            .keyboardShortcut("+", modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
+        Button("Zoom Out") { menu.send(.zoomOut) }
+            .keyboardShortcut("-", modifiers: .command)
+            .disabled(!menu.calendarIsShowing)
     }
 
     /// The words for what `menuBarIconName` and the badge say in shape and colour.
@@ -502,10 +633,11 @@ private struct SidebarToggle: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(DS.inkDim)
-        // ⌃⌘S is macOS's own sidebar shortcut, and it rides on the visible button
-        // rather than on a hidden one in the window's background — the same reason
-        // ⌘K rides on the search field's magnifier.
-        .keyboardShortcut("s", modifiers: [.control, .command])
+        // ⌃⌘S — macOS's own sidebar shortcut — is bound in View, not here. It used
+        // to ride on this button so that the command would have an affordance
+        // somewhere; the menu item is a better one, because it says what the keys
+        // are as well as offering the action. Binding it in both places would leave
+        // two things to keep in step for no second behaviour.
         .help(appState.sidebarVisible ? "Hide sidebar (⌃⌘S)" : "Show sidebar (⌃⌘S)")
         .accessibilityLabel(appState.sidebarVisible ? "Hide sidebar" : "Show sidebar")
         .padding(.leading, DS.sm)
