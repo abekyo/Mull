@@ -1,0 +1,14 @@
+project switch under 3m
+app=Code label=Alpha — a.swift key=alpha seconds=1200.0 served=nil clip=nil
+unrelated clipboard
+app=Code label=Alpha — a.swift key=alpha seconds=1200.0 served=nil clip=Unrelated banking details
+browser project
+app=Google Chrome label=Googleの検索ページ key=googleの検索ページ seconds=600.0 served=nil clip=nil
+sandwich 8h hole
+app=Notion label=Roadmap Draft key=roadmap draft seconds=600.0 served=nil clip=nil
+app=Google Chrome label=Some video key=some video seconds=360.0 served=Optional(main.BlockAttribution(artifact: "Roadmap Draft", key: "roadmap draft", basis: main.BlockAttribution.Basis.sandwiched)) clip=nil
+app=Firefox label=Some video key=some video seconds=360.0 served=Optional(main.BlockAttribution(artifact: "Roadmap Draft", key: "roadmap draft", basis: main.BlockAttribution.Basis.sandwiched)) clip=nil
+app=Notion label=Roadmap Draft key=roadmap draft seconds=600.0 served=nil clip=nil
+copy without paste
+app=Google Chrome label=Some video key=some video seconds=660.0 served=Optional(main.BlockAttribution(artifact: "Roadmap Draft", key: "roadmap draft", basis: main.BlockAttribution.Basis.clipboardFlow)) clip=Unrelated personal message
+app=Notion label=Roadmap Draft key=roadmap draft seconds=600.0 served=nil clip=nil

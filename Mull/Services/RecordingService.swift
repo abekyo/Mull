@@ -952,7 +952,7 @@ final class RecordingService {
             appName: currentAppName,
             windowTitle: currentWindowTitle,
             textContent: cleaned,
-            entity: Entity.from(currentWindowTitle ?? cleaned),
+            entity: Entity.from(currentWindowTitle ?? cleaned, app: currentAppName),
             contentType: signal.type,
             salience: signal.salience,
             mode: mode.rawValue

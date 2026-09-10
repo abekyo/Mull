@@ -47,9 +47,10 @@ struct TimeBlockEngine {
             segments.append(EventSegment(
                 timestamp: event.timestamp,
                 app: event.appName ?? "Unknown",
-                windowTitle: event.windowTitle ?? event.textContent ?? "",
+                windowTitle: event.windowTitle ?? ((event.eventType == .screenText || event.eventType == .appSwitch) ? event.textContent : nil) ?? "",
                 eventType: event.eventType,
-                text: event.textContent ?? ""
+                text: event.textContent ?? "",
+                eventID: event.id
             ))
         }
 
@@ -210,7 +211,6 @@ struct ProjectSnapshot: Identifiable {
     let name: String
     let lastActiveDate: Date
     let lastFile: String?
-    let lastClipboard: String?
     let totalDuration: TimeInterval
     let primaryApp: String
     let eventCount: Int
@@ -360,8 +360,7 @@ extension TimeBlockEngine {
         struct ProjectAccum {
             var displayName: String
             var lastDate: Date
-            var files: [String] = []
-            var clipboards: [String] = []
+            var lastFile: (timestamp: Date, name: String)?
             var duration: TimeInterval = 0
             var apps: [String: TimeInterval] = [:]
             var events: Int = 0
@@ -378,6 +377,9 @@ extension TimeBlockEngine {
             let chrome = BlockSegmenter.chromeSegments(in: blocks)
 
             for block in blocks {
+                // A page/folder may remain in the activity timeline, but its
+                // title cannot create a project card or a project insight.
+                guard !block.labelFromClipboard, !ProjectNames.contentDrivenApps.contains(block.app.lowercased()) else { continue }
                 let key = BlockSegmenter.normalizeTaskKey(block, chrome: chrome)
 
                 var data = accum[key] ?? ProjectAccum(
@@ -390,12 +392,15 @@ extension TimeBlockEngine {
                     if !block.label.isEmpty { data.displayName = block.label }
                 }
 
-                if let title = block.topWindowTitle {
-                    let parsed = BlockSegmenter.parseWindowTitle(title, app: block.app)
-                    if let file = parsed.file { data.files.append(file) }
-                }
-                if let clip = block.topClipboard {
-                    data.clipboards.append(clip)
+                // Select by observation time, not today's-to-oldest traversal order
+                // or the most frequent title of a block that may contain several files.
+                for window in block.observedWindows {
+                    guard !ProjectNames.contentDrivenApps.contains(window.app.lowercased()) else { continue }
+                    let parsed = BlockSegmenter.parseWindowTitle(window.title, app: window.app)
+                    guard parsed.project?.lowercased() == key, let file = parsed.file else { continue }
+                    if data.lastFile == nil || window.timestamp > data.lastFile!.timestamp {
+                        data.lastFile = (window.timestamp, file)
+                    }
                 }
 
                 // Engaged time, not wall clock. These totals are shown as how long
@@ -437,8 +442,7 @@ extension TimeBlockEngine {
             return ProjectSnapshot(
                 name: displayName,
                 lastActiveDate: data.lastDate,
-                lastFile: data.files.last,
-                lastClipboard: data.clipboards.last.map { Redactor.mask(String($0.prefix(80))) },
+                lastFile: data.lastFile?.name,
                 totalDuration: data.duration,
                 primaryApp: primaryApp,
                 eventCount: data.events,

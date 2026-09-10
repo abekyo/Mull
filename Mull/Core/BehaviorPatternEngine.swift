@@ -10,6 +10,12 @@ struct BehaviorPatternEngine {
 
     let database: EventReading
 
+    /// Home and generated context are both automatic publication. A detector's
+    /// inference must not become a fact merely by taking a different output path.
+    func patternsForAutomaticOutput() -> [BehaviorPattern] {
+        BehaviorPattern.forAutomaticOutput(detectPatterns())
+    }
+
     /// Run all pattern detectors and return actionable insights.
     func detectPatterns() -> [BehaviorPattern] {
         var patterns: [BehaviorPattern] = []
@@ -297,7 +303,13 @@ struct BehaviorPattern: Identifiable {
     let evidence: String    // The raw data behind this insight
     let severity: Double    // 0.0 to 1.0 — how urgently this needs attention
     let project: String?    // Related project, if any
-    var epistemicClass: EpistemicClass = .observation
+    // Fail closed: all current detectors infer meaning or recommendations from
+    // activity. A future measured-only detector must opt into observation.
+    var epistemicClass: EpistemicClass = .interpretation
+
+    static func forAutomaticOutput(_ patterns: [BehaviorPattern]) -> [BehaviorPattern] {
+        patterns.filter(\.autoSurfaceable)
+    }
 
     enum PatternType {
         case abandonment       // Project about to be abandoned
@@ -307,18 +319,16 @@ struct BehaviorPattern: Identifiable {
         case correlation       // Behavioral correlation discovered
     }
 
-    /// How grounded the pattern is — drives whether mull may *push* it.
+    /// How grounded the pattern is — applies to all automatic outputs.
     ///
     /// DIRECTION.md 付録A "Epistemics": observations are facts in the log and are safe
-    /// to surface directly. Interpretations are judgments with no ground truth
-    /// (§3.6: users don't want to be judged) — they may appear in-app for the
-    /// user to consider, but mull must NOT auto-notify them.
+    /// to surface directly. Interpretations need an explicit review surface;
+    /// they must not enter Home, notifications or generated agent context.
     enum EpistemicClass {
         case observation     // a verifiable fact about what happened
         case interpretation  // a judgment/inference about what it means
     }
 
-    /// Only observations may be pushed as proactive notifications. Reversible by
-    /// construction (a notification the user can ignore), and never a judgment.
+    /// Only observations may be automatically published, regardless of audience.
     var autoSurfaceable: Bool { epistemicClass == .observation }
 }

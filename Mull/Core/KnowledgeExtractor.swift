@@ -216,6 +216,7 @@ struct KnowledgeExtractor {
     private func detectProject(from titleEvents: [RecordingEvent]) -> String {
         var projectCounts: [String: Int] = [:]
         for event in titleEvents {
+            if let app = event.appName, ProjectNames.contentDrivenApps.contains(app.lowercased()) { continue }
             guard let text = event.textContent else { continue }
             // VS Code pattern: "file — ProjectName"
             let parts = text.components(separatedBy: " — ")

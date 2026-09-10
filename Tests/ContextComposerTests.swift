@@ -143,11 +143,11 @@ final class ContextComposerTests: XCTestCase {
     /// product. Both ask `isWorthReporting` now.
     func testAOneMinuteStrayIsNotAProjectOnEitherSurface() {
         let stray = ProjectSnapshot(name: "Obsidian Vault", lastActiveDate: Date(),
-                                    lastFile: nil, lastClipboard: nil,
+                                    lastFile: nil,
                                     totalDuration: 120, primaryApp: "Code",
                                     eventCount: 3, daysSinceActive: 0, sessions: [])
         let real = ProjectSnapshot(name: "Mull", lastActiveDate: Date(),
-                                   lastFile: nil, lastClipboard: nil,
+                                   lastFile: nil,
                                    totalDuration: 6 * 3600, primaryApp: "Code",
                                    eventCount: 900, daysSinceActive: 0, sessions: [])
         XCTAssertFalse(stray.isWorthReporting)
@@ -157,7 +157,7 @@ final class ContextComposerTests: XCTestCase {
     /// A sentence that reached the project table is still not a project name.
     func testASentenceIsNotAProjectOnEitherSurface() {
         let sentence = ProjectSnapshot(name: "基本は日本円だけど米ドルとかペソで貰うこともある",
-                                       lastActiveDate: Date(), lastFile: nil, lastClipboard: nil,
+                                       lastActiveDate: Date(), lastFile: nil,
                                        totalDuration: 3 * 3600, primaryApp: "Code",
                                        eventCount: 40, daysSinceActive: 0, sessions: [])
         XCTAssertFalse(sentence.isWorthReporting, "long enough, but not a name")
@@ -274,5 +274,35 @@ final class ContextComposerTests: XCTestCase {
         ])
         XCTAssertFalse(text.contains("Working on: プロダクトの事業価値"))
         XCTAssertFalse(text.contains("取り組み中: プロダクトの事業価値"))
+    }
+}
+
+
+extension ContextComposerTests {
+    func testStoredBrowserProjectCannotMakePageRelevantToCurrentWork() async {
+        var page = event(2, .windowBody, "Unrelated browser reference material",
+                         app: "Firefox", title: "Unrelated reference — Mull")
+        page.entity = "Mull"
+        page.mode = "consume"
+        let text = await compose([
+            event(1, .screenText, "ContentView.swift — Mull", title: "ContentView.swift — Mull"),
+            page
+        ])
+        XCTAssertFalse(text.contains("Unrelated browser reference"))
+    }
+}
+
+
+extension ContextComposerTests {
+    func testCopiedLanguageIsNotExportedAsPersonalIdentity() async {
+        let prose = String(repeating: "This reference explains cooperative cancellation and structured concurrency. ", count: 8)
+        let events = [event(1, .clipboard, prose, app: "Code")]
+        // Prove the input triggers the old inferred identity; don't pass vacuously.
+        let db = FakeEvents(events)
+        let facts = FactExtractor(analytics: AnalyticsEngine(database: db), database: db).extractFacts(days: 14)
+        let identity = facts.filter { $0.category == .identity }.map(\.text)
+        XCTAssertFalse(identity.isEmpty)
+        let text = await compose(events)
+        for inferred in identity { XCTAssertFalse(text.contains(inferred), inferred) }
     }
 }

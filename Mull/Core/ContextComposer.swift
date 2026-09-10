@@ -142,7 +142,7 @@ struct ContextComposer {
                     // words. With no anchor there is nothing to test that against,
                     // so nothing is included.
                     guard let anchor = state.activeEntity,
-                          let entity = e.entity ?? Entity.from(e.windowTitle ?? raw),
+                          let entity = Entity.resolve(stored: e.entity, title: e.windowTitle ?? raw, app: e.appName),
                           entity.caseInsensitiveCompare(anchor) == .orderedSame else { continue }
                     if researching.count < 4 { researching.append(String(snippet.prefix(50))) }
                 }
@@ -204,11 +204,8 @@ struct ContextComposer {
             }
             if !opening.isEmpty { sections.append(opening.joined(separator: " ")) }
 
-            // Language and tools, as observations rather than as instructions. The
-            // useful form would be "reply in Japanese", and that is a claim about
-            // what the user wants rather than a record of what they did (§7.1).
-            let about = (factTexts(.identity) + factTexts(.skills)).joined(separator: VaultText.t(". ", "。"))
-            if !about.isEmpty { sections.append(about + VaultText.t(".", "。")) }
+            // As in me.md, clipboard language/code statistics are not claims
+            // about the person's language or skills. Do not export those facts.
 
             if !doing.isEmpty {
                 // "Today" was the claim; thirty minutes was the query

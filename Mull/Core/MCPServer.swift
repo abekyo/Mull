@@ -920,16 +920,29 @@ final class MCPServer {
                 out.append("Activity: (none recorded)")
             } else {
                 out.append("Activity (what you actually did):")
-                for b in blocks.prefix(20) {
+                // Sixty, not twenty: a working day routinely segments into more than
+                // twenty blocks, and a cap that low returned "what you actually did"
+                // with the afternoon missing — every reader summing minutes per
+                // artifact undercounted without knowing it.
+                let chrome = BlockSegmenter.chromeSegments(in: blocks)
+                for b in blocks.prefix(60) {
                     let label = b.label.isEmpty ? b.app : b.label
                     // `TimeFormat.machine`, not `b.startFormatted`: the latter follows
                     // the user's 12/24-hour setting, and this text is read by an AI.
                     var line = "- \(TimeFormat.machine(b.start))–\(TimeFormat.machine(b.end)) \(label) (\(b.durationFormatted))"
-                    // What a stretch about nothing was for, with the basis in the
-                    // brackets — a reader that sums minutes per artifact keys on the
-                    // token to tell a claim from a cue (see `BlockAttribution.Basis`).
-                    if let served = b.servedBy {
-                        line += " → for: \(served.artifact) [\(served.basis.token)]"
+                    // What the row is about, in a form a script can key on. A block
+                    // about something of its own carries ⟨about: …⟩ — the artifact,
+                    // not the caption, so an editor's "Project — file" and its
+                    // neighbour "Project — other file" sum under one name. A block
+                    // about nothing carries → for: for a claim, or → context: for
+                    // adjacency alone, with the observed basis in brackets.
+                    // A row with neither is a page, a glance, or an app with no title:
+                    // time the record cannot place, and it should be summed as such.
+                    if b.activeDuration >= BlockAttributor.anchorFloor,
+                       let own = BlockAttributor.artifact(of: b, chrome: chrome) {
+                        line += " ⟨about: \(own.name)⟩"
+                    } else if let served = b.servedBy {
+                        line += " → \(served.annotation)"
                     }
                     out.append(line)
                 }
@@ -1047,9 +1060,6 @@ final class MCPServer {
             if let file = project.lastFile {
                 lines.append("Last file: \(file)")
             }
-            if let clip = project.lastClipboard {
-                lines.append("Last copied: \(clip)")
-            }
             if !project.sessions.isEmpty {
                 lines.append("Sessions:")
                 for session in project.sessions.prefix(5) {
@@ -1132,7 +1142,6 @@ final class MCPServer {
             for project in matching {
                 lines.append("- \(project.name): \(project.lastActiveFormatted), \(project.totalDurationFormatted)")
                 if let file = project.lastFile { lines.append("  Last file: \(file)") }
-                if let clip = project.lastClipboard { lines.append("  Last copied: \(clip)") }
             }
             lines.append("")
         }

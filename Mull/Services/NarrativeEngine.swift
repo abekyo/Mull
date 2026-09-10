@@ -279,10 +279,10 @@ struct NarrativeEngine {
         // An absence is only meaningful against a week that was actually recorded.
         let recordedDays = Set(weekEvents.map { Calendar.current.startOfDay(for: $0.timestamp) })
         if recordedDays.count >= 3 {
-            let weekEntities = Set(weekEvents.compactMap { Entity.from($0.textContent)?.lowercased() })
+            let weekEntities = Set(weekEvents.compactMap { Entity.from($0.textContent, app: $0.appName)?.lowercased() })
             let fresh = analysis.mainActivities.filter { activity in
                 guard activity.totalDuration > 300 else { return false }
-                guard let entity = Entity.from(activity.label)?.lowercased() else { return false }
+                guard let entity = Entity.from(activity.label, app: activity.app)?.lowercased() else { return false }
                 return !weekEntities.contains(entity)
             }
             // Two at most, because a list of five stops being informative — not

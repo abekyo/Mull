@@ -747,3 +747,78 @@ final class MCPServerTests: XCTestCase {
         XCTAssertTrue(text.hasPrefix("Files in ~/mull/:"), text)
     }
 }
+
+
+extension MCPServerTests {
+    func testLegacyPatternSafetyAppliesToEveryFullContextReadPath() throws {
+        let original = MullDirectory.read("full.md")
+        defer {
+            if let original { MullDirectory.write(original, to: "full.md") }
+            else { try? FileManager.default.removeItem(at: MullDirectory.url(for: "full.md")) }
+        }
+        let body = "## Consolidation\n### Daily details\nRetained daily record\n### Behavioral patterns (auto-detected)\nUnsupported behavioral verdict\n### Knowledge base\nRetained knowledge"
+        let block = ContextBlock(id: "nightly:full", source: .agent, content: body, agentHash: ContextBlock.hash(body))
+        let raw = ContextBlockFile.serialize(header: "# Full context", blocks: [block])
+        XCTAssertTrue(MullDirectory.write(raw, to: "full.md"))
+        let file = callTool("read_file", ["path": "full.md"])
+        let context = callTool("get_user_context", ["detail_level": "full"])
+        let response = server.handleForTesting([
+            "jsonrpc": "2.0", "id": 1, "method": "resources/read",
+            "params": ["uri": "mull://full"]
+        ])
+        let result = response?["result"] as? [String: Any]
+        let contents = result?["contents"] as? [[String: Any]]
+        let resource = try XCTUnwrap(contents?.first?["text"] as? String)
+        XCTAssertFalse(file.isError)
+        XCTAssertFalse(context.isError)
+        for text in [file.text, context.text, resource] {
+            XCTAssertFalse(text.contains("Unsupported behavioral verdict"), text)
+            XCTAssertTrue(text.contains("Retained daily record"), text)
+            XCTAssertTrue(text.contains("Retained knowledge"), text)
+        }
+        // Reading must not silently mutate even the old machine-authored file.
+        XCTAssertEqual(MullDirectory.read("full.md"), raw)
+    }
+}
+
+
+extension MCPServerTests {
+    func testCalendarDescribesCopyThenViewWithoutClaimingPasteOrPurpose() {
+        let calendar = Calendar.current
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: Date()))!
+        let start = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: yesterday)!
+        for minute in 0...30 where minute <= 11 || minute >= 15 {
+            let browsing = minute <= 11
+            let title = browsing ? "Some video - YouTube" : "Roadmap Draft"
+            db.insertEvent(RecordingEvent(timestamp: start.addingTimeInterval(Double(minute * 60)),
+                                          eventType: minute == 11 ? .clipboard : .screenText,
+                                          appName: browsing ? "Google Chrome" : "Notion", windowTitle: title,
+                                          textContent: minute == 11 ? "A personal note unrelated to the document" : title))
+        }
+        let result = callTool("calendar", ["days": 2])
+        XCTAssertFalse(result.isError)
+        XCTAssertTrue(result.text.contains("context: Roadmap Draft"), result.text)
+        XCTAssertTrue(result.text.contains("paste not observed"), result.text)
+        XCTAssertFalse(result.text.contains("copied into it"), result.text)
+        XCTAssertFalse(result.text.contains("→ for: Roadmap Draft"), result.text)
+    }
+}
+
+
+extension MCPServerTests {
+    func testProjectToolsDoNotQuoteNearbyClipboard() {
+        let start = Calendar.current.startOfDay(for: Date()).addingTimeInterval(-12 * 3600)
+        for minute in 0...20 {
+            db.insertEvent(RecordingEvent(timestamp: start.addingTimeInterval(Double(minute * 60)), eventType: .screenText,
+                                          appName: "Code", windowTitle: "Main.swift — Halyard", textContent: "Main.swift — Halyard"))
+        }
+        db.insertEvent(RecordingEvent(timestamp: start.addingTimeInterval(5 * 60 + 10), eventType: .clipboard,
+                                      appName: "Firefox", windowTitle: "Unrelated page", textContent: "Distinct unrelated copied passage"))
+        for output in [callTool("get_projects", ["days": 3]), callTool("get_relevant", ["context": "Halyard"])] {
+            XCTAssertFalse(output.isError)
+            XCTAssertTrue(output.text.contains("Halyard"), output.text)
+            XCTAssertFalse(output.text.contains("Distinct unrelated copied passage"), output.text)
+            XCTAssertFalse(output.text.contains("Last copied:"), output.text)
+        }
+    }
+}

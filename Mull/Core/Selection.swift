@@ -117,7 +117,7 @@ struct Selection {
             let evType = event.contentType ?? Signal.kind(text: raw, eventType: event.eventType, windowTitle: event.windowTitle)
             if let want = type, want.lowercased() != evType { return nil }
 
-            let evEntity = event.entity ?? Entity.from(event.windowTitle ?? raw)
+            let evEntity = Entity.resolve(stored: event.entity, title: event.windowTitle ?? raw, app: event.appName)
             // The ONLY hard entity filter: the caller named this project.
             if let scope = scopeEntity, evEntity?.lowercased() != scope { return nil }
 

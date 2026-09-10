@@ -48,7 +48,7 @@ final class BlockAttributionTests: XCTestCase {
 
     // MARK: - Readings that are claims
 
-    func testBrowserBetweenTwoStretchesOfTheSameDocumentIsForThatDocument() {
+    func testBrowserBetweenTwoStretchesOfTheSameDocumentIsOnlyContext() {
         let day = stretch("Notion", doc, from: (10, 0), to: (10, 20))
             + stretch("Google Chrome", page, from: (10, 24), to: (10, 40))
             + stretch("Notion", doc, from: (10, 44), to: (11, 0))
@@ -59,7 +59,7 @@ final class BlockAttributionTests: XCTestCase {
         XCTAssertEqual(browser.app, "Google Chrome")
         XCTAssertEqual(browser.servedBy?.artifact, doc)
         XCTAssertEqual(browser.servedBy?.basis, .sandwiched)
-        XCTAssertTrue(browser.servedBy!.basis.isClaim)
+        XCTAssertFalse(browser.servedBy!.basis.isClaim)
         XCTAssertNil(result[0].servedBy, "a block about something is not read")
         XCTAssertNil(result[2].servedBy)
     }
@@ -82,14 +82,12 @@ final class BlockAttributionTests: XCTestCase {
     }
 
     func testDocumentOpenInsideABrowserStretchIsReadFromWithin() {
-        // One block: the switches are under three minutes apart. Chrome holds the
-        // face by engaged time; Notion is open in the same stretch.
-        let day = [
-            seg(10, 0, "Google Chrome", page), seg(10, 2, "Google Chrome", page),
-            seg(10, 4, "Notion", doc),
-            seg(10, 6, "Google Chrome", page), seg(10, 8, "Google Chrome", page),
-            seg(10, 10, "Google Chrome", page), seg(10, 12, "Google Chrome", page),
-        ]
+        // One block: every switch is under three minutes apart. Chrome holds the face
+        // by engaged time; Notion is open for six minutes in the middle — over the
+        // five-minute floor, so it is work the browser served, not a glance.
+        let day = stretch("Google Chrome", page, from: (10, 0), to: (10, 10))
+            + stretch("Notion", doc, from: (10, 12), to: (10, 17))
+            + stretch("Google Chrome", page, from: (10, 19), to: (10, 40))
         let result = blocks(day)
 
         XCTAssertEqual(result.count, 1)
@@ -98,7 +96,33 @@ final class BlockAttributionTests: XCTestCase {
         XCTAssertEqual(result[0].servedBy?.basis, .withinBlock)
     }
 
-    func testCopyingInTheBrowserThenGoingToTheDocumentIsAClaim() {
+    func testAGlanceAtAFileInsideABrowserStretchIsNotWhatItWasFor() {
+        // The shape that produced "IMG_2006.jpeg — 1h02m" on a real week: a screenshot
+        // opened in Preview for one event, inside an hour of Chrome. A filename is a
+        // fine artifact when it was worked on; thirty seconds of it is a glance.
+        let day = stretch("Google Chrome", page, from: (10, 0), to: (10, 30))
+            + [seg(10, 31, "Preview", "IMG_2006.jpeg")]
+            + stretch("Google Chrome", page, from: (10, 32), to: (11, 0))
+        let result = blocks(day)
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertNil(result[0].servedBy)
+    }
+
+    func testAShortDocumentBlockDoesNotAnchorItsNeighbours() {
+        // Two minutes on a document between two browser stretches: the document block
+        // is under the floor, so the browser on either side is not read as being for it.
+        let day = stretch("Google Chrome", page, from: (10, 0), to: (10, 20))
+            + stretch("Notion", doc, from: (10, 24), to: (10, 26))
+            + stretch("Firefox", "Another page — Mozilla Firefox", from: (10, 30), to: (10, 50))
+        let result = blocks(day)
+
+        XCTAssertEqual(result.count, 3)
+        XCTAssertNil(result[0].servedBy)
+        XCTAssertNil(result[2].servedBy)
+    }
+
+    func testCopyingThenViewingDoesNotClaimAPaste() {
         // Nothing before the browser: without the copy this would be a one-sided cue.
         let day = stretch("Google Chrome", page, from: (10, 0), to: (10, 10))
             + [seg(10, 11, "Google Chrome", page, type: .clipboard, text: "a paragraph worth keeping")]
@@ -107,7 +131,10 @@ final class BlockAttributionTests: XCTestCase {
 
         XCTAssertEqual(result.count, 2)
         XCTAssertEqual(result[0].servedBy?.artifact, doc)
-        XCTAssertEqual(result[0].servedBy?.basis, .clipboardFlow)
+        XCTAssertEqual(result[0].servedBy?.basis, .copyThenOpen)
+        XCTAssertFalse(result[0].servedBy!.basis.isClaim)
+        XCTAssertTrue(result[0].servedBy!.annotation.hasPrefix("context:"))
+        XCTAssertTrue(result[0].servedBy!.annotation.contains("paste not observed"))
     }
 
     // MARK: - Readings that are only cues
@@ -221,5 +248,35 @@ final class BlockAttributionTests: XCTestCase {
         XCTAssertEqual(read?.name, title)
         let one = blocks(stretch("Notion", title, from: (10, 0), to: (10, 5)))
         XCTAssertEqual(read?.key, BlockSegmenter.normalizeTaskKey(one[0], chrome: []))
+    }
+}
+
+
+extension BlockAttributionTests {
+    func testLongGapInsideBrowserRunDoesNotConnectSurroundingDocuments() {
+        let day = stretch("Notion", doc, from: (8, 0), to: (8, 10))
+            + stretch("Google Chrome", page, from: (8, 14), to: (8, 20))
+            + stretch("Firefox", page, from: (16, 20), to: (16, 26))
+            + stretch("Notion", doc, from: (16, 30), to: (16, 40))
+        let result = blocks(day)
+        XCTAssertEqual(result.count, 4)
+        XCTAssertEqual(result[1].servedBy?.basis, .before)
+        XCTAssertEqual(result[2].servedBy?.basis, .after)
+        XCTAssertFalse(result[1].servedBy!.basis.isClaim)
+        XCTAssertFalse(result[2].servedBy!.basis.isClaim)
+    }
+
+    func testCopyCueDoesNotBecomeAnAnchorOrSurviveRecomputation() {
+        let day = stretch("Firefox", page, from: (10, 0), to: (10, 10))
+            + stretch("Google Chrome", page, from: (10, 14), to: (10, 24))
+            + [seg(10, 25, "Google Chrome", page, type: .clipboard, text: "a personal note unrelated to the document")]
+            + stretch("Notion", doc, from: (10, 29), to: (10, 40))
+        var result = blocks(day)
+        XCTAssertEqual(result.count, 3)
+        XCTAssertEqual(result[1].servedBy?.basis, .copyThenOpen)
+        XCTAssertFalse(result.contains { $0.servedBy?.basis.isClaim == true })
+        let chrome = BlockSegmenter.chromeSegments(in: result)
+        BlockAttributor.attribute(&result, chrome: chrome, gap: 0)
+        XCTAssertTrue(result.allSatisfy { $0.servedBy == nil }, "previous cues must not become facts on recomputation")
     }
 }

@@ -199,3 +199,28 @@ final class EntityAppAwarenessTests: XCTestCase {
         XCTAssertEqual(Entity.from("PantryApp", app: "SomeNewEditor"), "PantryApp")
     }
 }
+
+
+extension ProactiveBriefTests {
+    func testAllPatternKindsDefaultToWithheldInterpretation() {
+        let kinds: [BehaviorPattern.PatternType] = [.abandonment, .peakWaste, .focusDecline, .avoidance, .correlation]
+        let patterns = kinds.map { BehaviorPattern(type: $0, title: "Inferred pattern", insight: "Unverified inference",
+                                                   action: "Suggested action", evidence: "Rule summary", severity: 1, project: nil) }
+        XCTAssertTrue(patterns.allSatisfy { !$0.autoSurfaceable })
+        XCTAssertTrue(BehaviorPattern.forAutomaticOutput(patterns).isEmpty)
+        var observation = patterns[0]
+        observation.epistemicClass = .observation
+        let kept = BehaviorPattern.forAutomaticOutput(patterns + [observation])
+        XCTAssertEqual(kept.count, 1)
+        XCTAssertTrue(kept.allSatisfy(\.autoSurfaceable))
+    }
+
+    func testHomeAndNightlyUseSharedAutomaticPatternPolicy() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for path in ["Mull/Views/HomeTab.swift", "Mull/Services/MullEngine.swift"] {
+            let source = try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+            XCTAssertTrue(source.contains(".patternsForAutomaticOutput()"), path)
+            XCTAssertFalse(source.contains(".detectPatterns()"), "automatic consumer bypasses the policy: \(path)")
+        }
+    }
+}

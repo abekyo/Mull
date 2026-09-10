@@ -384,7 +384,7 @@ enum Curator {
     /// Pure merge (no I/O) so it can be unit-tested.
     static func merge(existing: String, header: String, pinnedContent: String?, agentBlocks: [ContextBlock], managedPrefixes: [String] = [], now: Date = Date()) -> String {
         let pinnedID = "pinned-facts"
-        var (_, existingBlocks) = ContextBlockFile.parse(existing)
+        var (_, existingBlocks) = ContextBlockFile.parse(ContextBlockFile.removingLegacyInterpretations(existing))
 
         // 1. Detect human edits: an agent block whose content no longer matches the
         //    hash mull last wrote → the human touched it → promote to .human (protected).

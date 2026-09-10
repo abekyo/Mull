@@ -579,3 +579,23 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(results.first?.timestamp, source.timestamp)
     }
 }
+
+
+extension SelectionTests {
+    func testLegacyBrowserEntityCannotScopeOrLabelSearchResults() throws {
+        for app in ProjectNames.contentDrivenApps.sorted() {
+            for stored in [Optional("元のプロファイル"), nil] {
+                let page = event("Swift concurrency cancellation reference", eventType: .windowBody,
+                                 app: app, title: "Swift concurrency — 元のプロファイル",
+                                 id: 601, entity: stored)
+                let results = rank([page], query: "concurrency")
+                XCTAssertEqual(results.count, 1, "browsing must remain searchable: \(app)")
+                XCTAssertNil(try XCTUnwrap(results.first).entity)
+                XCTAssertTrue(rank([page], query: "concurrency", entity: "元のプロファイル").isEmpty)
+            }
+        }
+        let code = event("Swift concurrency cancellation implementation", app: "Xcode",
+                         title: "Task.swift — Halyard", entity: "Halyard")
+        XCTAssertEqual(rank([code], entity: "Halyard").first?.entity, "Halyard")
+    }
+}

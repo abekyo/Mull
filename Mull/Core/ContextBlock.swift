@@ -131,10 +131,52 @@ enum ContextBlockFile {
     /// artifact (full.md, daily snapshot, AI clipboard) — the markers are internal
     /// metadata and must not leak into what the user or an AI reads.
     static func stripMarkers(_ text: String) -> String {
-        text
+        removingLegacyInterpretations(text)
             .components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix(markerPrefix) }
             .joined(separator: "\n")
+    }
+
+    /// Earlier nightly output published unreviewed behavior interpretations as
+    /// Insight/Action/Evidence. Retract only that section of untouched agent
+    /// blocks, both when reading (including read-only MCP) and when regenerating.
+    /// Hash mismatches, human/pinned blocks and unmarked documents are preserved.
+    static func removingLegacyInterpretations(_ text: String) -> String {
+        var (header, blocks) = parse(text)
+        var changed = false
+        for i in blocks.indices {
+            let block = blocks[i]
+            guard ["nightly:full", "full:live"].contains(block.id), block.source == .agent,
+                  block.agentHash == ContextBlock.hash(block.content) else { continue }
+            // The old live writer assigned copies to the closest project by time.
+            // Its grouped quotations must not survive through an older full.md.
+            let headings: Set<String> = block.id == "nightly:full"
+                ? ["### Behavioral patterns (auto-detected)", "### 自動検出した傾向"]
+                : ["## What you were dealing with today", "## 今日あつかっていたこと"]
+            let sectionLevel = block.id == "nightly:full" ? 3 : 2
+            var skipping = false
+            var kept: [String] = []
+            for line in block.content.components(separatedBy: "\n") {
+                if headings.contains(line.trimmingCharacters(in: .whitespaces)) {
+                    skipping = true
+                    changed = true
+                    continue
+                }
+                if skipping {
+                    let level = line.prefix(while: { $0 == "#" }).count
+                    if (1...sectionLevel).contains(level), line.dropFirst(level).hasPrefix(" ") {
+                        skipping = false
+                    }
+                }
+                if !skipping { kept.append(line) }
+            }
+            let content = ContextBlock.normalized(kept.joined(separator: "\n"))
+            if content != block.content {
+                blocks[i].content = content
+                blocks[i].agentHash = ContextBlock.hash(content)
+            }
+        }
+        return changed ? serialize(header: header, blocks: blocks) : text
     }
 
     /// Blocks are separated by a BLANK line, not just a newline.

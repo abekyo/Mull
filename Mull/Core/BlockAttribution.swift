@@ -1,13 +1,11 @@
 import Foundation
 
-/// What a block was *for*, when its own titles do not say.
+/// Context around a block whose own titles do not name an artifact.
 ///
 /// A browser block is captioned with a page title, and a page title answers "what
-/// was on screen" without answering "why". The why is usually sitting next to it in
-/// the record: the document the person had open in the same stretch, the document
-/// they went back to, the thing they copied out of the page. None of that is a
-/// question to put to the person — it is a reading of what is already there, and it
-/// is labelled as a reading, never as a fact they stated.
+/// was on screen" without answering "why". Copying before viewing a document,
+/// or viewing the same document before and after, does not establish that the
+/// browsing served that document. Those observations remain context only.
 ///
 /// The gate is deliberately open. Attribution names whatever document, project or
 /// file the record shows, so a piece of work nobody planned still gets a name; a
@@ -21,9 +19,9 @@ struct BlockAttribution: Equatable {
         /// The artifact was open inside this very block — a browser-faced stretch that
         /// also held the document.
         case withinBlock
-        /// Something was copied here, and the next thing worked on was the artifact.
-        case clipboardFlow
-        /// The same artifact was being worked on immediately before and after.
+        /// Something was copied here, then the artifact was viewed. No paste was observed.
+        case copyThenOpen
+        /// The same artifact was viewed before and after; browsing may have been a break.
         case sandwiched
         /// Worked on just before. Context, not a claim: one side alone cannot tell
         /// research from a break.
@@ -32,12 +30,12 @@ struct BlockAttribution: Equatable {
         case after
 
         /// Whether this basis is strong enough to count the block's time toward the
-        /// artifact. One-sided adjacency is shown as a cue and never summed — the
-        /// line between an observation and a claim (CLAUDE.md §7.1) runs here.
+        /// artifact. Temporal adjacency, even on both sides or after a copy,
+        /// provides no evidence of purpose or of a paste and is never summed.
         var isClaim: Bool {
             switch self {
-            case .withinBlock, .clipboardFlow, .sandwiched: return true
-            case .before, .after: return false
+            case .withinBlock: return true
+            case .copyThenOpen, .sandwiched, .before, .after: return false
             }
         }
 
@@ -46,7 +44,7 @@ struct BlockAttribution: Equatable {
         var token: String {
             switch self {
             case .withinBlock: return "open in the same stretch"
-            case .clipboardFlow: return "copied into it"
+            case .copyThenOpen: return "copied here; viewed next; paste not observed"
             case .sandwiched: return "worked on before and after"
             case .before: return "worked on just before"
             case .after: return "worked on just after"
@@ -61,9 +59,23 @@ struct BlockAttribution: Equatable {
     /// the key from a string.
     let key: String
     let basis: Basis
+
+    /// Do not call a contextual cue "for" an artifact in agent-facing output.
+    var annotation: String {
+        "\(basis.isClaim ? "for" : "context"): \(artifact) [\(basis.token)]"
+    }
 }
 
 enum BlockAttributor {
+
+    /// The least engaged time something must have had to be what another stretch was
+    /// *for*. Five minutes — the same floor `CalendarMirror.minimumDuration` and
+    /// `ContextComposer` settled on, for the same reason: a two-minute stay is a glance,
+    /// not a piece of work. Without it a screenshot opened in Preview for thirty seconds
+    /// inside an hour of browsing became the document that hour served, and a week's
+    /// rollup read "IMG_2006.jpeg — 1h02m" as if it were a project. A glance can be
+    /// read by its neighbours like anything else; it just cannot anchor them.
+    static let anchorFloor: TimeInterval = 300
 
     /// Settle `servedBy` on every block that is about nothing of its own.
     ///
@@ -75,9 +87,15 @@ enum BlockAttributor {
     /// here as it does when a break is rejoined.
     static func attribute(_ blocks: inout [TimeBlock], chrome: Set<String>, gap: TimeInterval) {
         guard !blocks.isEmpty else { return }
+        // Recomputing must not reuse an earlier inference as an anchor.
+        for i in blocks.indices { blocks[i].servedBy = nil }
 
-        // What each block is about on its own account, or nil.
-        let own: [(name: String, key: String)?] = blocks.map { artifact(of: $0, chrome: chrome) }
+        // What each block is about on its own account, or nil. A block too short to be
+        // work is about nothing here whatever its title says — it can still be read
+        // by what stands around it, and if that is the same document, it folds in.
+        let own: [(name: String, key: String)?] = blocks.map { block in
+            block.activeDuration >= anchorFloor ? artifact(of: block, chrome: chrome) : nil
+        }
 
         // 1. Open in the same stretch.
         for i in blocks.indices where own[i] == nil {
@@ -95,14 +113,15 @@ enum BlockAttributor {
             return nil
         }
         func adjacent(_ earlier: Int, _ later: Int) -> Bool {
-            blocks[later].start.timeIntervalSince(blocks[earlier].end) <= gap
+            let interval = blocks[later].start.timeIntervalSince(blocks[earlier].end)
+            return interval >= 0 && interval <= gap
         }
 
         // 2. Copied here, then went to the artifact.
         for i in blocks.indices where anchor(i) == nil && blocks[i].topClipboard != nil {
             let next = i + 1
             guard next < blocks.count, adjacent(i, next), let target = anchor(next) else { continue }
-            blocks[i].servedBy = BlockAttribution(artifact: target.name, key: target.key, basis: .clipboardFlow)
+            blocks[i].servedBy = BlockAttribution(artifact: target.name, key: target.key, basis: .copyThenOpen)
         }
 
         // 3. Runs of blocks about nothing, read by what stands on either side. A run,
@@ -113,7 +132,7 @@ enum BlockAttributor {
         while i < blocks.count {
             guard anchor(i) == nil else { i += 1; continue }
             var j = i
-            while j + 1 < blocks.count, anchor(j + 1) == nil { j += 1 }
+            while j + 1 < blocks.count, adjacent(j, j + 1), anchor(j + 1) == nil { j += 1 }
 
             let before = (i > 0 && adjacent(i - 1, i)) ? anchor(i - 1) : nil
             let after = (j + 1 < blocks.count && adjacent(j, j + 1)) ? anchor(j + 1) : nil
@@ -129,7 +148,9 @@ enum BlockAttributor {
                 reading = nil
             }
             if let reading {
-                for k in i...j { blocks[k].servedBy = reading }
+                // A direct copy-then-view observation is more specific than the
+                // surrounding run, but neither may become a claim or an anchor.
+                for k in i...j where blocks[k].servedBy == nil { blocks[k].servedBy = reading }
             }
             i = j + 1
         }
@@ -193,8 +214,13 @@ enum BlockAttributor {
     /// page that was open through a Chrome-dominated stretch. Most-seen title first;
     /// ties broken on the title so the reading does not change between launches.
     static func artifact(within block: TimeBlock, chrome: Set<String>) -> (name: String, key: String)? {
+        // Only apps the person actually spent time in here. The titles a block saw
+        // include every window that was front for a moment; an app whose engaged time
+        // is under the floor was glanced at, and a glance does not say what the
+        // stretch was for.
         let seen = block.observedTitleCounts
             .filter { !ProjectNames.contentDrivenApps.contains($0.app.lowercased()) }
+            .filter { block.engagedSeconds(in: $0.app) >= anchorFloor }
             .sorted { $0.count == $1.count ? $0.title < $1.title : $0.count > $1.count }
         for candidate in seen {
             if let found = artifact(inTitle: candidate.title, app: candidate.app, chrome: chrome) {

@@ -200,7 +200,7 @@ enum BlockSegmenter {
     /// Generate a human-readable label for a time block, and say whether it came from
     /// text the user copied rather than from a window.
     ///
-    /// Priority: project name > file name > window title > clipboard > app name.
+    /// Priority: project name > file name > window title > clipboard activity > app name.
     ///
     /// The flag is here because the last two sources stop being interchangeable the
     /// moment a label leaves this Mac. A window title is a name the user's own machine
@@ -231,7 +231,7 @@ enum BlockSegmenter {
         }
 
         if let clip = block.topClipboard, clip.count > 5 {
-            return (String(clip.prefix(60)), true)
+            return (VaultText.t("Clipboard activity", "コピーの記録"), true)
         }
 
         return (block.app, false)
@@ -348,6 +348,11 @@ enum BlockSegmenter {
     /// Normalize block into a task key for grouping.
     /// Same project across Xcode + Code + Terminal = same task.
     static func normalizeTaskKey(_ block: TimeBlock, chrome: Set<String>) -> String {
+        // Browsing remains activity, grouped by app, not a project named after
+        // the page or browser profile. projectSnapshots separately excludes it.
+        if ProjectNames.contentDrivenApps.contains(block.app.lowercased()) {
+            return "app:\(block.app.lowercased())"
+        }
         // If we have a parsed title with a project, use that
         if let topTitle = block.topWindowTitle {
             let parsed = parseWindowTitle(topTitle, app: block.app)
@@ -429,6 +434,16 @@ struct EventSegment {
     let windowTitle: String
     let eventType: RecordingEvent.EventType
     let text: String
+    var eventID: Int64? = nil
+}
+
+/// The foreground context when a clipboard change was sampled, not proof of its source.
+struct ClipboardObservation {
+    let timestamp: Date
+    let app: String
+    let windowTitle: String
+    let text: String
+    let eventID: Int64?
 }
 
 struct TimeBlock: Identifiable {
@@ -480,7 +495,8 @@ struct TimeBlock: Identifiable {
     // Context accumulation
     private var windowTitles: [String: Int] = [:]
     private var windowTitleApps: [String: String] = [:]   // title → app it belongs to
-    private var clipboardTexts: [String] = []
+    private(set) var clipboardObservations: [ClipboardObservation] = []
+    private(set) var observedWindows: [(timestamp: Date, app: String, title: String)] = []
     private var keystrokeCount: Int = 0
 
     // Per-app engaged time inside this block. Each inter-event gap is attributed to
@@ -546,7 +562,8 @@ struct TimeBlock: Identifiable {
 
         for (title, count) in other.windowTitles { windowTitles[title, default: 0] += count }
         windowTitleApps.merge(other.windowTitleApps) { _, new in new }
-        clipboardTexts.append(contentsOf: other.clipboardTexts)
+        clipboardObservations.append(contentsOf: other.clipboardObservations)
+        observedWindows.append(contentsOf: other.observedWindows)
         keystrokeCount += other.keystrokeCount
 
         eventCount += other.eventCount
@@ -573,16 +590,24 @@ struct TimeBlock: Identifiable {
             .map(\.key)
     }
 
+    /// Engaged seconds this block credits to one app — the accounting `secondaryApps`
+    /// ranks by, exposed as a number for a reader that has to decide whether an app's
+    /// presence in the block was work or a glance (`BlockAttributor.artifact(within:)`).
+    func engagedSeconds(in name: String) -> TimeInterval { appDurations[name] ?? 0 }
+
     mutating func addContext(_ segment: EventSegment) {
         switch segment.eventType {
         case .screenText, .appSwitch:
             if !segment.windowTitle.isEmpty {
+                observedWindows.append((segment.timestamp, segment.app, segment.windowTitle))
                 windowTitles[segment.windowTitle, default: 0] += 1
                 windowTitleApps[segment.windowTitle] = segment.app
             }
         case .clipboard:
             if segment.text.count > 5 {
-                clipboardTexts.append(segment.text)
+                clipboardObservations.append(ClipboardObservation(timestamp: segment.timestamp, app: segment.app,
+                                                                   windowTitle: segment.windowTitle, text: Redactor.mask(segment.text),
+                                                                   eventID: segment.eventID))
             }
         case .keystroke:
             keystrokeCount += 1
@@ -627,7 +652,9 @@ struct TimeBlock: Identifiable {
         }?.key
     }
 
-    var topClipboard: String? {
-        clipboardTexts.last.map { Redactor.mask($0) }
+    var latestClipboardObservation: ClipboardObservation? {
+        clipboardObservations.max { $0.timestamp < $1.timestamp }
     }
+
+    var topClipboard: String? { latestClipboardObservation?.text }
 }

@@ -32,4 +32,12 @@ enum Entity {
         if let app, ProjectNames.contentDrivenApps.contains(app.lowercased()) { return nil }
         return from(title)
     }
+
+    /// Legacy capture stored browser page/profile titles as entities. Apply the
+    /// source-app rule before trusting those values, including on read-only MCP
+    /// connections which cannot migrate the database themselves.
+    static func resolve(stored: String?, title: String?, app: String?) -> String? {
+        if let app, ProjectNames.contentDrivenApps.contains(app.lowercased()) { return nil }
+        return stored ?? from(title, app: app)
+    }
 }

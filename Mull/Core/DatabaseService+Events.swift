@@ -40,7 +40,12 @@ extension DatabaseService {
     func insertEvent(_ event: RecordingEvent) {
         do {
             try dbPool.write { db in
-                let r = event
+                var r = event
+                // Keep the recording; only its derived project classification
+                // is invalid when the source is a browser or Finder.
+                if let app = r.appName, ProjectNames.contentDrivenApps.contains(app.lowercased()) {
+                    r.entity = nil
+                }
                 try r.insert(db)
             }
         } catch {

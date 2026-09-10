@@ -475,16 +475,21 @@ extension CalendarWeekView {
                 }
             }
 
-            if let clip = block.topClipboard {
-                HStack(spacing: DS.xs) {
-                    Image(systemName: DS.Glyph.quote)
-                        .font(DS.miniFont)
-                        .foregroundStyle(DS.inkFaint)
-                    Text("\"\(String(clip.prefix(100)))\"")
+            if let copied = block.latestClipboardObservation {
+                VStack(alignment: .leading, spacing: DS.xs) {
+                    Text(VaultText.t("Clipboard · source unverified", "コピーの記録・コピー元未確認"))
                         .font(DS.captionFont)
-                        .foregroundStyle(DS.inkFaint)
-                        .italic()
-                        .lineLimit(2)
+                    Text("\(TimeFormat.person(copied.timestamp)) · \(copied.app)")
+                        .font(DS.captionFont)
+                    if !copied.windowTitle.isEmpty { Text(copied.windowTitle).font(DS.captionFont).lineLimit(2) }
+                    HStack(alignment: .top, spacing: DS.xs) {
+                        Image(systemName: DS.Glyph.quote)
+                            .font(DS.miniFont)
+                        Text("\"\(String(copied.text.prefix(100)))\"")
+                            .font(DS.captionFont)
+                            .lineLimit(2)
+                    }
+                    .foregroundStyle(DS.inkFaint)
                 }
             }
         }

@@ -312,10 +312,10 @@ final class TimeBlockEngineTests: XCTestCase {
     }
 
     func testRejoinedBlockSettlesItsFaceOverTheWholeSession() {
-        // Ten minutes of Safari open the day, then — after a break — forty minutes of
+        // Ten minutes of Code open the day, then — after a break — forty minutes of
         // Xcode on the same project. The merged block's face is the app that actually
         // held the session, not the one that happened to open its first fragment.
-        seedMinutes(from: at(9, 0), minutes: 10, app: "Safari", title: "PantryApp — GitHub")
+        seedMinutes(from: at(9, 0), minutes: 10, app: "Code", title: "ChartViewModel.swift — PantryApp")
         seedMinutes(from: at(9, 15), minutes: 40, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
 
         let blocks = engine.generateBlocks(for: fixtureDate)
@@ -324,7 +324,7 @@ final class TimeBlockEngineTests: XCTestCase {
         XCTAssertEqual(blocks[0].app, "Xcode")
         XCTAssertEqual(blocks[0].label, "PantryApp — ChartViewModel.swift")
         XCTAssertTrue(blocks[0].isMultiApp)
-        XCTAssertEqual(blocks[0].secondaryApps, ["Safari"])
+        XCTAssertEqual(blocks[0].secondaryApps, ["Code"])
     }
 
     func testAppSwitchWithinThreeMinutesContinuesTheBlockAsMultiApp() {
@@ -437,7 +437,7 @@ final class TimeBlockEngineTests: XCTestCase {
         XCTAssertEqual(blocks[0].label, "Terminal")
     }
 
-    func testClipboardCaptionsABlockWhenNoTitleIsAvailable() {
+    func testClipboardDoesNotBecomeATaskNameWhenNoTitleIsAvailable() {
         // Priority order is title > clipboard > app name.
         seedRun(start: at(9, 0), count: 5, spacing: 60, app: "Terminal",
                 type: .keystroke, text: "git rebase --onto main")
@@ -448,7 +448,8 @@ final class TimeBlockEngineTests: XCTestCase {
         let blocks = engine.generateBlocks(for: fixtureDate)
 
         XCTAssertEqual(blocks.count, 1)
-        XCTAssertEqual(blocks[0].label, "Refactored the ChartViewModel bindings")
+        XCTAssertEqual(blocks[0].label, "Clipboard activity")
+        XCTAssertEqual(blocks[0].topClipboard, "Refactored the ChartViewModel bindings")
         // The caption stays on the grid, and the block remembers it was copied so the
         // one surface that leaves this Mac can refuse it (`CalendarMirror.title(for:)`).
         XCTAssertTrue(blocks[0].labelFromClipboard)
@@ -655,10 +656,8 @@ final class TimeBlockEngineTests: XCTestCase {
                                       textContent: "let store = RouteStore(context: modelContext)"))
 
         let snapshot = try XCTUnwrap(engine.projectSnapshots(days: 7).first)
-        // The resume point is exactly what was seeded: the file you were in and the
-        // last thing you copied.
+        // The resume point is the observed file, not a nearby clipboard entry.
         XCTAssertEqual(snapshot.lastFile, "RouteStore.swift")
-        XCTAssertEqual(snapshot.lastClipboard, "let store = RouteStore(context: modelContext)")
         XCTAssertEqual(snapshot.primaryApp, "Xcode")
         XCTAssertEqual(snapshot.lastActiveDate.timeIntervalSince(start), 600, accuracy: 1,
                        "last active = the end of the last block, i.e. the final seeded event")
@@ -784,5 +783,107 @@ final class TimeBlockEngineTests: XCTestCase {
         XCTAssertEqual(comparison.thisWeekDeepBlocks, 0)
         XCTAssertEqual(comparison.lastWeekContextSwitches, 4)
         XCTAssertEqual(comparison.thisWeekContextSwitches, 0)
+    }
+}
+
+
+extension TimeBlockEngineTests {
+    func testBrowserPagesRemainActivityWithoutCreatingProjects() {
+        seedMinutes(from: daysAgo(1, hour: 8), minutes: 12, app: "Firefox",
+                    title: "Concurrency reference — 元のプロファイル")
+        seedMinutes(from: daysAgo(1, hour: 11), minutes: 12, app: "Google Chrome",
+                    title: "Migration guide — Google")
+        seedMinutes(from: daysAgo(1, hour: 15), minutes: 12, app: "Xcode",
+                    title: "Halyard — RouteStore.swift")
+        XCTAssertEqual(engine.projectSnapshots(days: 3).map(\.name), ["Halyard"])
+        let blocks = engine.generateBlocks(for: daysAgo(1, hour: 8))
+        let chrome = BlockSegmenter.chromeSegments(in: blocks)
+        let browsing = blocks.filter { ProjectNames.contentDrivenApps.contains($0.app.lowercased()) }
+        XCTAssertEqual(browsing.count, 2)
+        for block in browsing {
+            XCTAssertTrue(BlockSegmenter.normalizeTaskKey(block, chrome: chrome).hasPrefix("app:"))
+            XCTAssertNotNil(block.topWindowTitle, "keep the original page in the timeline")
+        }
+    }
+}
+
+
+extension TimeBlockEngineTests {
+    func testBrowserTitleMatchingEditorDoesNotEstablishSameProject() {
+        seedMinutes(from: at(9, 0), minutes: 10, app: "Safari", title: "PantryApp — GitHub")
+        seedMinutes(from: at(9, 15), minutes: 40, app: "Xcode", title: "PantryApp — ChartViewModel.swift")
+        let blocks = engine.generateBlocks(for: fixtureDate)
+        XCTAssertEqual(blocks.count, 2, "a page title is not evidence of project identity")
+        XCTAssertEqual(blocks.map(\.app), ["Safari", "Xcode"])
+    }
+}
+
+
+extension TimeBlockEngineTests {
+    func testCopyThenOpenDoesNotAddBrowserMinutesToDocument() throws {
+        seedMinutes(from: at(10, 0), minutes: 10, app: "Google Chrome", title: "Some video - YouTube")
+        db.insertEvent(RecordingEvent(timestamp: at(10, 11), eventType: .clipboard,
+                                      appName: "Google Chrome", windowTitle: "Some video - YouTube",
+                                      textContent: "A personal note unrelated to the document"))
+        seedMinutes(from: at(10, 15), minutes: 15, app: "Notion", title: "Roadmap Draft")
+        let day = engine.analyzDay(for: fixtureDate)
+        let activities = day.mainActivities + day.otherActivities
+        let document = try XCTUnwrap(activities.first { $0.app == "Notion" })
+        let browser = try XCTUnwrap(activities.first { $0.app == "Google Chrome" })
+        XCTAssertEqual(document.totalDuration, 15 * 60, accuracy: 0.1)
+        XCTAssertEqual(browser.totalDuration, 11 * 60, accuracy: 0.1)
+        XCTAssertEqual(day.totalDuration, 26 * 60, accuracy: 0.1)
+        XCTAssertFalse(browser.blocks.contains { $0.servedBy?.basis.isClaim == true })
+    }
+
+    func testBrowserBreakBetweenSameDocumentDoesNotInflateItsTime() throws {
+        seedMinutes(from: at(10, 0), minutes: 10, app: "Notion", title: "Roadmap Draft")
+        seedMinutes(from: at(10, 14), minutes: 10, app: "Google Chrome", title: "Some video - YouTube")
+        seedMinutes(from: at(10, 28), minutes: 10, app: "Notion", title: "Roadmap Draft")
+        let day = engine.analyzDay(for: fixtureDate)
+        let activities = day.mainActivities + day.otherActivities
+        let document = try XCTUnwrap(activities.first { $0.app == "Notion" })
+        XCTAssertEqual(document.totalDuration, 20 * 60, accuracy: 0.1)
+        XCTAssertEqual(day.totalDuration, 30 * 60, accuracy: 0.1)
+    }
+}
+
+
+extension TimeBlockEngineTests {
+    func testClipboardContextSurvivesMixedAppsAndRejoinedBlocks() throws {
+        let start = daysAgo(1, hour: 9)
+        seedMinutes(from: start, minutes: 10, app: "Code", title: "Main.swift — Halyard")
+        db.insertEvent(RecordingEvent(timestamp: start.addingTimeInterval(5 * 60 + 10), eventType: .clipboard,
+                                      appName: "Firefox", windowTitle: "Unrelated reference page", textContent: "A separate reference copied in the browser"))
+        seedMinutes(from: start.addingTimeInterval(15 * 60), minutes: 10, app: "Code", title: "Main.swift — Halyard")
+        db.insertEvent(RecordingEvent(timestamp: start.addingTimeInterval(20 * 60 + 10), eventType: .clipboard,
+                                      appName: "Code", textContent: "Newest copied text with unknown source"))
+        let blocks = engine.generateBlocks(for: start)
+        XCTAssertEqual(blocks.count, 1)
+        let block = try XCTUnwrap(blocks.first)
+        XCTAssertEqual(block.clipboardObservations.count, 2)
+        let browser = try XCTUnwrap(block.clipboardObservations.first { $0.app == "Firefox" })
+        XCTAssertEqual(browser.windowTitle, "Unrelated reference page")
+        XCTAssertEqual(browser.timestamp, start.addingTimeInterval(5 * 60 + 10))
+        XCTAssertNotNil(browser.eventID)
+        XCTAssertEqual(block.latestClipboardObservation?.text, "Newest copied text with unknown source")
+        XCTAssertEqual(block.latestClipboardObservation?.windowTitle, "", "missing title must not be filled with copied text")
+        XCTAssertEqual(engine.projectSnapshots(days: 3).map(\.name), ["Halyard"])
+    }
+
+    func testResumeFileUsesLatestMatchingObservationAcrossDaysAndWithinBlock() throws {
+        seedMinutes(from: daysAgo(3, hour: 9), minutes: 10, app: "Code", title: "Old.swift — Halyard")
+        let recent = daysAgo(1, hour: 9)
+        seedMinutes(from: recent, minutes: 10, app: "Code", title: "Frequent.swift — Halyard")
+        db.insertEvent(RecordingEvent(timestamp: recent.addingTimeInterval(11 * 60), eventType: .screenText,
+                                      appName: "Code", windowTitle: "Latest.swift — Halyard", textContent: "Latest.swift — Halyard"))
+        let snapshot = try XCTUnwrap(engine.projectSnapshots(days: 7).first)
+        XCTAssertEqual(snapshot.lastFile, "Latest.swift")
+    }
+
+    func testCopiedTextWithNoWindowCannotCreateProject() {
+        seedRun(start: daysAgo(1, hour: 9), count: 10, spacing: 60, app: "Code",
+                type: .clipboard, text: "Copied Document Name")
+        XCTAssertTrue(engine.projectSnapshots(days: 3).isEmpty)
     }
 }

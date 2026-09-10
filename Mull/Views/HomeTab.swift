@@ -800,7 +800,7 @@ struct HomeTab: View {
             }
 
             // Resume point — the key context for returning to this project
-            if project.lastFile != nil || project.lastClipboard != nil {
+            if project.lastFile != nil {
                 VStack(alignment: .leading, spacing: DS.xs) {
                     if isStale || expanded {
                         Text("RESUME")
@@ -820,20 +820,6 @@ struct HomeTab: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .help(file)
-                        }
-                    }
-
-                    if let clip = project.lastClipboard {
-                        HStack(spacing: DS.xs) {
-                            Image(systemName: DS.Glyph.quote)
-                                .font(DS.miniFont)
-                                .foregroundStyle(DS.inkFaint)
-                            Text("\"\(clip)\"")
-                                .font(DS.captionFont)
-                                .foregroundStyle(DS.inkFaint)
-                                .italic()
-                                .lineLimit(2)
-                                .help(clip)
                         }
                     }
                 }
@@ -1220,7 +1206,7 @@ struct HomeTab: View {
             let loadedProjects = engine.projectSnapshots(days: 14)
             let loadedWeek = engine.weekSnapshots()
             let loadedComp = engine.weekComparison()
-            let loadedPatterns = BehaviorPatternEngine(database: database).detectPatterns()
+            let loadedPatterns = BehaviorPatternEngine(database: database).patternsForAutomaticOutput()
 
             await MainActor.run {
                 self.projects = loadedProjects

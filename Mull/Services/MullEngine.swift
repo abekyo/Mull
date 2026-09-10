@@ -991,8 +991,7 @@ final class MullEngine {
 
         let feedback = memories.filter { $0.memoryType == .feedback }
 
-        // Behavioral patterns — what the user can't see about themselves
-        let patterns = BehaviorPatternEngine(database: database).detectPatterns()
+        let patterns = BehaviorPatternEngine(database: database).patternsForAutomaticOutput()
         let patternBlocks = patterns.prefix(5).compactMap { p in
             MarkdownDoc.section(MarkdownDoc.inline(p.title, limit: 80), level: 4, """
                 - **Insight** — \(MarkdownDoc.inline(p.insight, limit: 240))
@@ -1021,11 +1020,11 @@ final class MullEngine {
                                 level: 3, MarkdownDoc.join(daily)),
             MarkdownDoc.section(VaultText.t("Working style & feedback", "仕事の進め方と指摘"), level: 3, items:
                 feedback.map { "- \(MarkdownDoc.inline($0.content, limit: 240))" }),
-            MarkdownDoc.section(VaultText.t("Behavioral patterns (auto-detected)", "自動検出した傾向"), level: 3,
+            MarkdownDoc.section(VaultText.t("Observed activity patterns", "記録で確認できる傾向"), level: 3,
                                 patternBlocks.isEmpty ? nil :
                                 VaultText.t(
-                                    "These are patterns the user cannot see about themselves. Use them to give better advice.",
-                                    "本人からは見えない傾向です。助言の材料に使ってください。")
+                                    "These describe recorded activity, not the user's intentions or productivity.",
+                                    "記録された活動についての情報です。本人の意図や生産性を示すものではありません。")
                                 + "\n\n" + MarkdownDoc.join(patternBlocks)),
             MarkdownDoc.section(VaultText.t("Knowledge base", "決定と解法"), level: 3,
                                 knowledgeBlocks.isEmpty ? nil :

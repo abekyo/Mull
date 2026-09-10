@@ -106,7 +106,7 @@ final class NowFileDuplicationTests: XCTestCase {
     func testTheNightlyFullHeadingsGoThroughVaultText() throws {
         let engine = try source("Mull/Services/MullEngine.swift")
         for heading in ["Daily details (last 7 days)", "Working style & feedback",
-                        "Behavioral patterns (auto-detected)", "Knowledge base",
+                        "Observed activity patterns", "Knowledge base",
                         "From last night's consolidation"] {
             XCTAssertFalse(engine.contains("MarkdownDoc.section(\"\(heading)\""),
                            "‘\(heading)’ is prose, and prose follows the reader")

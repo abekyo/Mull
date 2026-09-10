@@ -763,6 +763,15 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v9_clear_content_app_entities") { db in
+            // Only derived metadata changes. Titles, text, timestamps and FTS
+            // content stay intact, so browsing is still available to raw search.
+            for app in ProjectNames.contentDrivenApps.sorted() {
+                try db.execute(sql: "UPDATE recording_events SET entity = NULL WHERE lower(appName) = ? AND entity IS NOT NULL",
+                               arguments: [app])
+            }
+        }
+
         // ── Future migrations go here ──
         // Example:
         //

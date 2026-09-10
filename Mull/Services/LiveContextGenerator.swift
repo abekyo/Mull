@@ -348,21 +348,11 @@ enum LiveContextGenerator {
         sections.append(MarkdownDoc.section(VaultText.t("Who I am", "私について"), embed("me.md")))
         sections.append(MarkdownDoc.section(VaultText.t("What I'm working on", "いま取り組んでいること"), embed("now.md")))
 
-        // Clipboard grouped by project/context — the "pagpag dish"
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        let todayEvents = database.fetchEvents(from: startOfDay, to: Date())
-            .filter { event in
-                guard let app = event.appName else { return true }
-                return !AnalyticsEngine.isNoiseApp(app)
-            }
-
-        let clipEvents = todayEvents.filter { $0.eventType == .clipboard }
-        let titleEvents = todayEvents.filter { $0.eventType == .screenText }
-        let grouped = groupClipboardByContext(clips: clipEvents, titles: titleEvents)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        sections.append(MarkdownDoc.section(VaultText.t("What you were dealing with today", "今日あつかっていたこと"),
-                                            grouped.isEmpty ? nil : grouped))
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+        let clips = database.fetchEvents(from: startOfDay, to: Date()).filter { $0.eventType == .clipboard }
+        let copied = clipboardObservations(clips: clips)
+        sections.append(MarkdownDoc.section(VaultText.t("Clipboard observations", "コピーの記録"),
+                                            copied.isEmpty ? nil : copied))
 
         Curator.curate(relativePath: "full.md", header: Curator.fullHeader(timestamp: timestamp),
                        pinnedContent: nil,
@@ -373,100 +363,26 @@ enum LiveContextGenerator {
                        managedPrefixes: ["full:"])
     }
 
-    /// Group clipboard entries by project/context.
-    /// Keeps the user's exact words (the magic). Only removes truly toxic data.
-    private static func groupClipboardByContext(clips: [RecordingEvent], titles: [RecordingEvent]) -> String {
-        struct ClipEntry {
-            let text: String
-            let timestamp: Date
-            let nearestProject: String
+    /// No nearest-project matching: sampling foreground context does not establish
+    /// where a copy came from, who authored it, or which project it concerns.
+    static func clipboardObservations(clips: [RecordingEvent]) -> String {
+        var lines: [String] = []
+        for event in clips.sorted(by: { $0.timestamp > $1.timestamp }) {
+            guard event.eventType == .clipboard else { continue }
+            if let app = event.appName, AnalyticsEngine.isNoiseApp(app) { continue }
+            guard let text = event.textContent, !text.isEmpty,
+                  !isSensitive(text), !isMullOutput(text) else { continue }
+            let app = MarkdownDoc.inline(event.appName ?? "Unknown", limit: 80)
+            let title = event.windowTitle.map { " · " + MarkdownDoc.inline($0, limit: 120) } ?? ""
+            let source = event.id.map { " · event \($0)" } ?? ""
+            lines.append("- \(TimeFormat.machine(event.timestamp)) · \(app)\(title)\(source): \(MarkdownDoc.inline(InstructionText.marked(text), limit: 160))")
+            if lines.count >= 20 { break }
         }
-
-        // Which segments are projects is `ProjectNames`' job, shared with
-        // FactExtractor / TimeBlockEngine / Entity. The list that used to live
-        // here was one of four that disagreed with each other, and it is how a
-        // Finder window called "Downloads" ended up heading a project section in
-        // full.md — no blocklist can enumerate every folder someone opens.
-        let chrome = ProjectNames.chrome(in: titles.compactMap { event in
-            guard let title = event.textContent, let app = event.appName else { return nil }
-            return (app: app, title: title)
-        })
-
-        // Aliases — merge different names for the same project
-        let projectAliases: [String: String] = [
-            "Dream": "Mull", // legacy window-title from before the rename
-        ]
-
-        func normalizeProject(_ name: String) -> String {
-            projectAliases[name] ?? name
-        }
-
-        // Build a timeline of project names from window titles
-        // Prefer the part BEFORE the separator (file/task name comes first, app/project last)
-        // Use the app's Xcode/Code project name pattern: "file — Project"
-        let projectTimeline: [(Date, String)] = titles.compactMap { event in
-            guard let text = event.textContent, !isMullOutput(text) else { return nil }
-            guard let app = event.appName,
-                  !ProjectNames.contentDrivenApps.contains(app.lowercased()) else { return nil }
-            let parts = ProjectNames.segments(of: text)
-                .filter { !chrome.contains($0) && ProjectNames.isPlausible($0) }
-            // Last part is typically the project name in editors.
-            guard let project = parts.last else { return nil }
-            return (event.timestamp, normalizeProject(project))
-        }
-
-        // Associate each clipboard entry with the nearest project
-        var entries: [ClipEntry] = []
-        var seen = Set<String>()
-
-        for event in clips {
-            guard let text = event.textContent, !text.isEmpty else { continue }
-            if isSensitive(text) { continue }
-            if isMullOutput(text) { continue }
-
-            // Dedup on the whole item. Keying on the first 60 characters let two
-            // clipboard entries that shared an opening line through as separate
-            // bullets — visible in the shipped full.md as the same checklist
-            // printed twice.
-            let key = text.lowercased()
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
-
-            // Find nearest project by timestamp (within 5 min window)
-            let nearestProject = projectTimeline
-                .filter { abs($0.0.timeIntervalSince(event.timestamp)) < 300 }
-                .min(by: { abs($0.0.timeIntervalSince(event.timestamp)) < abs($1.0.timeIntervalSince(event.timestamp)) })
-                .map(\.1) ?? "General"
-
-            // Condense: multi-line text → first meaningful line
-            let condensed: String
-            if text.count > 200 {
-                let firstLine = text.components(separatedBy: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first { !$0.isEmpty && $0.count > 3 } ?? String(text.prefix(150))
-                condensed = String(firstLine.prefix(150)) + "..."
-            } else {
-                condensed = text.replacingOccurrences(of: "\n", with: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-
-            entries.append(ClipEntry(text: condensed, timestamp: event.timestamp, nearestProject: nearestProject))
-        }
-
-        // Group by project, skip groups with only 1 entry (noise)
-        let grouped = Dictionary(grouping: entries) { $0.nearestProject }
-            .filter { $0.value.count >= 2 }
-            .sorted { $0.value.count > $1.value.count }
-
-        // `Project:` followed by two-space-indented bullets was neither a heading
-        // nor a list — the label rendered as prose and the items hung off it as a
-        // lazy continuation. `###` sits correctly under full.md's `##`, and each
-        // quoted clip goes through `inline` so a multi-line paste cannot end the
-        // list it is part of.
-        return MarkdownDoc.join(grouped.prefix(5).map { project, items in
-            MarkdownDoc.section(project, level: 3, items:
-                items.prefix(5).map { "- \"\(MarkdownDoc.inline($0.text, limit: 160))\"" })
-        })
+        guard !lines.isEmpty else { return "" }
+        return VaultText.t(
+            "Captured clipboard text. App/window describe the foreground at capture; copy source, authorship and project association are unverified.",
+            "コピーの記録です。アプリ・ウィンドウは記録時の前面の状態で、コピー元・著者・仕事との関連は未確認です。")
+            + "\n\n" + lines.joined(separator: "\n")
     }
 
     // MARK: - Auto-install into Claude Code config

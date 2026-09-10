@@ -323,3 +323,70 @@ final class CuratorTests: XCTestCase {
         XCTAssertFalse(filled.contains("Your answers"))
     }
 }
+
+
+extension CuratorTests {
+    func testLegacyInterpretationsAreRemovedOnReadAndRegeneration() {
+        for heading in ["Behavioral patterns (auto-detected)", "自動検出した傾向"] {
+            let content = "## Last consolidation\n### Daily details\nKeep the record\n### \(heading)\nUnsupported advice\n#### Insight\nYou are avoiding work\n### Knowledge base\nKeep this section"
+            let raw = serialized([("nightly:full", content), ("full:live", "Keep live context")])
+            let read = ContextBlockFile.stripMarkers(raw)
+            XCTAssertFalse(read.contains("Unsupported advice"))
+            XCTAssertFalse(read.contains("avoiding work"))
+            XCTAssertTrue(read.contains("Keep the record"))
+            XCTAssertTrue(read.contains("Keep this section"))
+            XCTAssertTrue(read.contains("Keep live context"))
+            let merged = Curator.merge(existing: raw, header: "H", pinnedContent: nil,
+                                       agentBlocks: [agent("full:live", "Updated live context")], managedPrefixes: ["full:"])
+            XCTAssertFalse(merged.contains("Unsupported advice"))
+            XCTAssertTrue(merged.contains("Keep this section"))
+            let cleaned = ContextBlockFile.removingLegacyInterpretations(raw)
+            XCTAssertEqual(ContextBlockFile.removingLegacyInterpretations(cleaned), cleaned)
+            let nightly = ContextBlockFile.parse(cleaned).blocks.first!
+            XCTAssertEqual(nightly.agentHash, ContextBlock.hash(nightly.content))
+        }
+    }
+
+    func testSafetyRetractionPreservesHumanEditsPinnedAndUnmarkedText() {
+        let text = "### 自動検出した傾向\nMy corrected explanation"
+        for source in [BlockSource.human, .pinned, .agent] {
+            let block = ContextBlock(id: "nightly:full", source: source, content: text,
+                                     agentHash: ContextBlock.hash("old machine wording"))
+            let raw = ContextBlockFile.serialize(header: "H", blocks: [block])
+            XCTAssertEqual(ContextBlockFile.removingLegacyInterpretations(raw), raw)
+            XCTAssertTrue(ContextBlockFile.stripMarkers(raw).contains("My corrected explanation"))
+        }
+        XCTAssertEqual(ContextBlockFile.removingLegacyInterpretations(text), text)
+    }
+}
+
+
+extension CuratorTests {
+    func testOldProjectGroupedCopiesAreRetractedButEditedBlocksSurvive() {
+        for heading in ["What you were dealing with today", "今日あつかっていたこと"] {
+            let body = "## Who I am\nKeep identity\n## \(heading)\n### Halyard\nUnverified project quotation\n## Other section\nKeep other section"
+            let raw = serialized([("full:live", body)])
+            let clean = ContextBlockFile.stripMarkers(raw)
+            XCTAssertFalse(clean.contains("Unverified project quotation"))
+            XCTAssertTrue(clean.contains("Keep identity"))
+            XCTAssertTrue(clean.contains("Keep other section"))
+            let edited = raw.replacingOccurrences(of: "Unverified project quotation", with: "My corrected quotation")
+            XCTAssertTrue(ContextBlockFile.stripMarkers(edited).contains("My corrected quotation"))
+        }
+    }
+
+    func testNewClipboardMarkdownHasObservationContextWithoutProjectGrouping() {
+        let events = [RecordingEvent(id: 81, timestamp: Date(timeIntervalSince1970: 1000), eventType: .clipboard,
+                                     appName: "Firefox", windowTitle: "Reference page", textContent: "Independent quoted reference"),
+                      RecordingEvent(id: 82, timestamp: Date(timeIntervalSince1970: 1100), eventType: .clipboard,
+                                     appName: "Code", windowTitle: "Main.swift — Halyard", textContent: "Another independent quoted reference")]
+        let text = LiveContextGenerator.clipboardObservations(clips: events)
+        XCTAssertTrue(text.contains("Firefox"))
+        XCTAssertTrue(text.contains("Reference page"))
+        XCTAssertTrue(text.contains("event 81"))
+        XCTAssertTrue(text.contains("event 82"))
+        XCTAssertTrue(text.contains(VaultText.t("copy source, authorship and project association are unverified", "コピー元・著者・仕事との関連は未確認")))
+        XCTAssertFalse(text.contains("### Halyard"))
+        XCTAssertLessThan(text.range(of: "event 82")!.lowerBound, text.range(of: "event 81")!.lowerBound)
+    }
+}

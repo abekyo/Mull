@@ -286,3 +286,57 @@ final class DatabaseServiceTests: XCTestCase {
         // for a normal init
     }
 }
+
+
+extension DatabaseServiceTests {
+    func testInsertKeepsBrowserContentWithoutProjectMetadata() throws {
+        let event = RecordingEvent(timestamp: Date(), eventType: .windowBody, appName: "Firefox",
+                                   windowTitle: "Concurrency reference — 元のプロファイル",
+                                   textContent: "Swift cancellation reference", entity: "元のプロファイル")
+        db.insertEvent(event)
+        let saved = try db.dbPool.read { try RecordingEvent.fetchOne($0) }
+        XCTAssertNil(try XCTUnwrap(saved).entity)
+        XCTAssertEqual(saved?.textContent, event.textContent)
+        XCTAssertEqual(saved?.windowTitle, event.windowTitle)
+    }
+
+    func testLegacyBrowserEntityMigrationPreservesRecordsAndEditorProjects() throws {
+        let path = db.databaseFilePath
+        let now = Date()
+        // Bypass today's insert guard to represent rows written by the old app.
+        try db.dbPool.write { conn in
+            for (app, entity) in [("Firefox", "元のプロファイル"), ("GOOGLE CHROME", "Migration guide"), ("Xcode", "Halyard")] {
+                let event = RecordingEvent(timestamp: now, eventType: .windowBody, appName: app,
+                                           windowTitle: "Original window title", textContent: "Swift cancellation reference", entity: entity)
+                try event.insert(conn)
+            }
+            try conn.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v9_clear_content_app_entities'")
+        }
+        try db.dbPool.close()
+        db = try DatabaseService(path: path)
+        let rows = try db.dbPool.read { try RecordingEvent.fetchAll($0, sql: "SELECT * FROM recording_events ORDER BY id") }
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertNil(rows[0].entity)
+        XCTAssertNil(rows[1].entity)
+        XCTAssertEqual(rows[2].entity, "Halyard")
+        XCTAssertTrue(rows.allSatisfy { $0.windowTitle == "Original window title" && $0.textContent == "Swift cancellation reference" })
+        let hits = try db.dbPool.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM recording_events_fts WHERE recording_events_fts MATCH 'cancellation'") }
+        XCTAssertEqual(hits, 3, "metadata repair must not remove searchable history")
+        XCTAssertEqual(db.schemaVersion, DatabaseService.latestMigrationIdentifier)
+    }
+}
+
+
+extension DatabaseServiceTests {
+    func testKnowledgeFallbackDoesNotNameBrowserProfileAsProject() {
+        let browser = RecordingEvent(timestamp: Date(), eventType: .screenText, appName: "Firefox",
+                                     textContent: "Concurrency reference — 元のプロファイル")
+        let clip = RecordingEvent(timestamp: Date(), eventType: .clipboard, appName: "Firefox",
+                                  textContent: "We chose structured concurrency because cancellation must propagate.")
+        let extractor = KnowledgeExtractor(database: db)
+        XCTAssertEqual(extractor.extractRuleBased(events: [browser, clip]).map(\.project), ["Unknown"])
+        let editor = RecordingEvent(timestamp: Date(), eventType: .screenText, appName: "Code",
+                                    textContent: "Task.swift — Halyard")
+        XCTAssertEqual(extractor.extractRuleBased(events: [browser, editor, clip]).map(\.project), ["Halyard"])
+    }
+}
